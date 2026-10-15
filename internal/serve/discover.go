@@ -11,8 +11,16 @@ import (
 // Assets are metadata candidates, never compatibility or resident proof.
 type Asset struct {
 	Path, ID, Revision, Runtime, Reason string
+	Format                              string
 	Complete                            bool
+	headerFound                         bool
 }
+
+// LoadCandidate is metadata admission only; the native server checks compatibility.
+func (a Asset) LoadCandidate() bool {
+	return a.Complete || a.Format == "gguf" && a.headerFound
+}
+
 type ModelRoot struct{ Path, Kind string }
 
 // ModelRoots honors native cache overrides; explicit directories can be appended.
@@ -70,9 +78,27 @@ func Discover(roots []ModelRoot, explicit []string) ([]Asset, []string) {
 		}
 		seen[canonical] = true
 		a := Asset{Path: canonical, ID: id, Revision: rev, Runtime: runtime}
-		if runtime == "ollama" {
+		if strings.EqualFold(filepath.Ext(canonical), ".gguf") {
+			a.Format, a.Runtime = "gguf", ""
+			f, err := os.Open(canonical)
+			if err == nil {
+				var magic [4]byte
+				_, err = io.ReadFull(f, magic[:])
+				f.Close()
+				if err == nil && string(magic[:]) == "GGUF" {
+					a.headerFound = true // Not checkpoint completeness.
+				} else {
+					err = fmt.Errorf("missing GGUF header")
+				}
+			}
+			a.Reason = "GGUF header found; checkpoint completeness and native compatibility unconfirmed"
+			if err != nil {
+				a.Reason = err.Error()
+			}
+		} else if runtime == "ollama" {
 			a.Reason = "native catalog directory; model identities require its server"
 		} else {
+			a.Format, a.Runtime = "safetensors", ""
 			if err := localComplete(canonical); err != nil {
 				a.Reason = err.Error()
 			} else {
@@ -111,6 +137,30 @@ func Discover(roots []ModelRoot, explicit []string) ([]Asset, []string) {
 		remaining -= len(entries)
 		return entries
 	}
+	candidate := func(path, id, rev string) {
+		st, err := os.Stat(path)
+		if err != nil || !st.IsDir() {
+			add(path, id, rev, "")
+			return
+		}
+		found := false
+		for _, entry := range dirs(path) {
+			if !entry.IsDir() && strings.EqualFold(filepath.Ext(entry.Name()), ".gguf") {
+				add(filepath.Join(path, entry.Name()), id+"/"+entry.Name(), rev, "")
+				found = true
+			}
+		}
+		if !found {
+			add(path, id, rev, "")
+			return
+		}
+		for _, weights := range []string{"model.safetensors", "model.safetensors.index.json"} {
+			if _, err := os.Stat(filepath.Join(path, weights)); err == nil {
+				add(path, id, rev, "")
+				break
+			}
+		}
+	}
 	for _, root := range roots {
 		if exhausted {
 			break
@@ -126,11 +176,19 @@ func Discover(roots []ModelRoot, explicit []string) ([]Asset, []string) {
 			}
 			continue
 		}
+		if st, err := os.Stat(root.Path); err == nil && !st.IsDir() && strings.EqualFold(filepath.Ext(root.Path), ".gguf") {
+			candidate(root.Path, filepath.Base(root.Path), "")
+			continue
+		}
 		if _, err := os.Stat(filepath.Join(root.Path, "config.json")); err == nil {
-			add(root.Path, filepath.Base(root.Path), "", "mlx")
+			candidate(root.Path, filepath.Base(root.Path), "")
 			continue
 		}
 		for _, entry := range dirs(root.Path) {
+			if !entry.IsDir() && strings.EqualFold(filepath.Ext(entry.Name()), ".gguf") {
+				add(filepath.Join(root.Path, entry.Name()), entry.Name(), "", "openai")
+				continue
+			}
 			if !entry.IsDir() {
 				continue
 			}
@@ -138,17 +196,17 @@ func Discover(roots []ModelRoot, explicit []string) ([]Asset, []string) {
 			if root.Kind == "hf" && strings.HasPrefix(entry.Name(), "models--") {
 				for _, rev := range dirs(filepath.Join(p, "snapshots")) {
 					if rev.IsDir() {
-						add(filepath.Join(p, "snapshots", rev.Name()), strings.ReplaceAll(strings.TrimPrefix(entry.Name(), "models--"), "--", "/"), rev.Name(), "mlx")
+						candidate(filepath.Join(p, "snapshots", rev.Name()), strings.ReplaceAll(strings.TrimPrefix(entry.Name(), "models--"), "--", "/"), rev.Name())
 					}
 				}
 			} else {
-				add(p, entry.Name(), "", "mlx")
+				candidate(p, entry.Name(), "")
 			}
 		}
 	}
 	for _, p := range explicit {
 		if p != "" {
-			add(p, filepath.Base(p), "", "mlx")
+			candidate(p, filepath.Base(p), "")
 		}
 	}
 	return out, warnings

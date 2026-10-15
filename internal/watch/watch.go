@@ -4,6 +4,7 @@ package watch
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -102,8 +104,8 @@ type Watcher struct {
 	stats   Stats
 }
 
-// New watches root and everything under it. Only a root failure
-// errors; unreadable subtrees count in Skipped.
+// New watches root and everything under it. Root failures and exhausted
+// descriptors return errors; ordinary unreadable subtrees count in Skipped.
 func New(root string, cfg Config) (*Watcher, error) {
 	if cfg.MaxBytes <= 0 || cfg.StartupMaxBytes <= 0 || cfg.StartupMaxFiles <= 0 || cfg.FileLines <= 0 || cfg.DiffLines <= 0 {
 		return nil, fmt.Errorf("watch max_file_bytes/startup_max_bytes/startup_max_files and line caps must be positive")
@@ -126,11 +128,14 @@ func New(root string, cfg Config) (*Watcher, error) {
 		pend:  map[string]*pending{},
 	}
 	if err := fw.Add(abs); err != nil {
-		fw.Close()
-		return nil, err
+		return nil, errors.Join(err, closeWatch(fw, abs))
 	}
-	_ = filepath.WalkDir(abs, func(p string, d os.DirEntry, err error) error {
+	lastAdded := abs
+	err = filepath.WalkDir(abs, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
+			if descriptorExhausted(err) {
+				return err
+			}
 			w.skipped++
 			w.stats.Error = err.Error()
 			return filepath.SkipDir
@@ -158,6 +163,9 @@ func New(root string, cfg Config) (*Watcher, error) {
 			ss, n, err := w.read(p, min(cfg.MaxBytes, cfg.StartupMaxBytes-w.stats.Bytes))
 			w.stats.Bytes += n
 			if err != nil {
+				if descriptorExhausted(err) {
+					return err
+				}
 				w.stats.Omitted++
 				w.stats.Error = err.Error()
 				return nil
@@ -169,15 +177,39 @@ func New(root string, cfg Config) (*Watcher, error) {
 			}
 			return nil
 		}
+		lastAdded = p
 		if err := fw.Add(p); err != nil {
+			if descriptorExhausted(err) {
+				return err
+			}
 			w.skipped++
 			w.stats.Error = err.Error()
 			return filepath.SkipDir
 		}
 		return nil
 	})
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("watch startup: %w", err), closeWatch(fw, lastAdded, abs))
+	}
 	go w.pump()
 	return w, nil
+}
+
+// fsnotify v1.9.0 kqueue Close marks itself closed before Remove, so its
+// removal becomes a no-op. Remove our watches first, including a root whose
+// Add may have partially succeeded before exhausting descriptors.
+func closeWatch(fw *fsnotify.Watcher, attempted ...string) error {
+	var errs []error
+	for _, path := range append(attempted, fw.WatchList()...) {
+		if err := fw.Remove(path); err != nil && !errors.Is(err, fsnotify.ErrNonExistentWatch) {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(append(errs, fw.Close())...)
+}
+
+func descriptorExhausted(err error) bool {
+	return errors.Is(err, syscall.EMFILE) || errors.Is(err, syscall.ENFILE)
 }
 
 // Root is the watched tree.
@@ -205,13 +237,17 @@ func (w *Watcher) Stats() Stats {
 // Close stops the watcher. Sends stop; the channel is abandoned.
 func (w *Watcher) Close() error {
 	w.mu.Lock()
+	if w.closed {
+		w.mu.Unlock()
+		return nil
+	}
 	w.closed = true
 	for _, p := range w.pend {
 		p.timer.Stop()
 	}
 	w.mu.Unlock()
 	close(w.done)
-	return w.fw.Close()
+	return closeWatch(w.fw, w.root)
 }
 
 func (w *Watcher) pump() {
@@ -285,11 +321,18 @@ func (w *Watcher) addTree(path string) {
 			return nil
 		}
 		if d.IsDir() {
-			if err := w.fw.Add(p); err != nil {
-				w.mu.Lock()
+			w.mu.Lock()
+			if w.closed {
+				w.mu.Unlock()
+				return filepath.SkipAll
+			}
+			err := w.fw.Add(p)
+			if err != nil {
 				w.skipped++
 				w.stats.Error = err.Error()
-				w.mu.Unlock()
+			}
+			w.mu.Unlock()
+			if err != nil {
 				return filepath.SkipDir
 			}
 			return nil

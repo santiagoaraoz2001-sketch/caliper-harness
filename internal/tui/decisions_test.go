@@ -359,7 +359,7 @@ func TestDecisionsViewportWrappedValuesAndRetention(t *testing.T) {
 		v := viewportFrame(t, m)
 		visible += v
 		for _, row := range strings.Split(v, "\n") {
-			if strings.HasPrefix(row, "│ ") {
+			if strings.HasPrefix(row, "│ ") && !strings.Contains(row, "pgup/pgdn") && !strings.Contains(row, "retained draft") {
 				reconstructed += strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(row, "│ "), " │"))
 			}
 		}
@@ -374,5 +374,23 @@ func TestDecisionsViewportWrappedValuesAndRetention(t *testing.T) {
 	current, err := os.ReadFile(path)
 	if err != nil || string(current) != string(raw) {
 		t.Fatal("paging rewrote raw judgments")
+	}
+}
+
+func TestDecisionsConfidenceProvenance(t *testing.T) {
+	m := decisionsModel(t)
+	decision.LogJudgment(func(kind, text string) {
+		if err := session.Append(m.SessionsPath, "20260202-000000-bb", session.Event{Kind: kind, Text: text}); err != nil {
+			t.Fatal(err)
+		}
+	}, decision.SourceJudgeTool, decision.Request{Context: "a | b", Options: []string{"allow"}}, decision.Verdict{Option: "allow", Confidence: 0.9, ConfidenceSource: "model-self-report"}, "returned", 0)
+	m = loadDecisions(m)
+	for _, width := range []int{80, 120} {
+		out := ansi.Strip(m.renderDecisions(width, 40))
+		for _, want := range []string{"model-self-report", "unspecified", "not comparable"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("width %d missing %q in %s", width, want, out)
+			}
+		}
 	}
 }

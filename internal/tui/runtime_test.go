@@ -68,7 +68,7 @@ func TestRuntimeServeSelectionDoesNotGuessFromLabel(t *testing.T) {
 		want string
 	}{
 		{"unowned mlx recipe", ServeRow{Ep: serve.Endpoint{URL: "http://external.invalid/v1", Label: "mlx"}, Have: true, Health: serve.Health{Up: true, Kind: "openai"}, Recipe: &serve.Recipe{Name: "mlx", Runtime: "mlx"}}, "openai"},
-		{"owned typed mlx", ServeRow{Ep: serve.Endpoint{URL: "http://owned.invalid/v1", Label: "custom"}, Have: true, Ours: true, Health: serve.Health{Up: true, Kind: "openai"}, Recipe: &serve.Recipe{Name: "unrelated", Runtime: "mlx"}}, "mlx"},
+		{"unproven owned mlx recipe", ServeRow{Ep: serve.Endpoint{URL: "http://owned.invalid/v1", Label: "custom"}, Have: true, Ours: true, Health: serve.Health{Up: true, Kind: "openai"}, Recipe: &serve.Recipe{Name: "unrelated", Runtime: "mlx"}}, "openai"},
 		{"validated native", ServeRow{Ep: serve.Endpoint{URL: "http://native.invalid/v1", Model: "chosen"}, Have: true, IsModel: true, Health: serve.Health{Up: true, Kind: "ollama", Runtime: "ollama"}}, "ollama"},
 	}
 	for _, tc := range cases {
@@ -97,7 +97,7 @@ func TestRuntimeNativeDiscoveredModelRowsRetainDescriptor(t *testing.T) {
 	msg := m.probeServeWith(probeClient())().(serveProbedMsg)
 	found := false
 	for _, r := range msg.rows {
-		if r.IsModel {
+		if r.IsModel && r.Asset == nil {
 			found = true
 			if r.Health.Runtime != "ollama" {
 				t.Fatalf("native model child lost descriptor: %+v", r.Health)

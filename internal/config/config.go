@@ -801,11 +801,11 @@ func (c Config) Validate() error {
 	if c.Workflows.RetryDelaySeconds < 0 {
 		return fmt.Errorf("workflows.retry_delay_seconds cannot be negative, got %d", c.Workflows.RetryDelaySeconds)
 	}
-	if c.Decision.Runtime != "" && c.Decision.Runtime != "laya" && c.Decision.Runtime != "system_one" {
-		return fmt.Errorf("decision.runtime must be laya or system_one, got %q", c.Decision.Runtime)
+	if c.Decision.Runtime != "" && c.Decision.Runtime != "laya" && c.Decision.Runtime != "system_one" && c.Decision.Runtime != "openai" {
+		return fmt.Errorf("decision.runtime must be laya, system_one, or openai, got %q", c.Decision.Runtime)
 	}
-	if c.Decision.Server == "" {
-		return fmt.Errorf("decision.server must name the sidecar URL")
+	if u, err := url.ParseRequestURI(c.Decision.Server); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("decision.server must be an http(s) URL")
 	}
 	if strings.TrimSpace(c.Decision.Model) == "" {
 		return fmt.Errorf("decision.model must name the checkpoint id")
@@ -844,7 +844,12 @@ func (c Config) Validate() error {
 	if c.Tabs.TitleEvery < 0 {
 		return fmt.Errorf("tabs.title_every cannot be negative, got %d", c.Tabs.TitleEvery)
 	}
+	recipeNames := map[string]bool{}
 	for i, r := range c.Serve.Recipes {
+		if recipeNames[r.Name] {
+			return fmt.Errorf("serve.recipes[%d] duplicates name %q", i, r.Name)
+		}
+		recipeNames[r.Name] = true
 		if r.Name == "" {
 			return fmt.Errorf("serve.recipes[%d] needs a name", i)
 		}
@@ -858,11 +863,8 @@ func (c Config) Validate() error {
 		default:
 			return fmt.Errorf("serve.recipes[%d] runtime must be openai, ollama, or mlx, got %q", i, r.Runtime)
 		}
-		if r.URL == "" {
-			return fmt.Errorf("serve.recipes[%d] needs a url", i)
-		}
-		if len(r.Argv) == 0 {
-			return fmt.Errorf("serve.recipes[%d] needs an argv", i)
+		if u, err := url.ParseRequestURI(r.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("serve.recipes[%d] needs an http(s) url", i)
 		}
 	}
 	return nil

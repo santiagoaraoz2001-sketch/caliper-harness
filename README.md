@@ -258,3 +258,7 @@ scripts/                bundle + runtime preparation
 
 MIT — see [LICENSE](LICENSE).
 
+
+### Server and platform development
+
+The current server/model-control candidate and custom recipe examples are described in [SERVER-MODELS.md](SERVER-MODELS.md). Implementation and native qualification status are tracked in [the server/platform plan](SERVER-PLATFORM-PLAN.md). Windows and Linux conversion work is isolated on `codex/windows-conversion` and `codex/linux-conversion`; these are development branches, not qualified releases.

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -204,6 +205,7 @@ func viewportServePages(m Model, w, vh int) string {
 
 func TestViewportStatusActionAdmission(t *testing.T) {
 	m := viewportServeFixture(80, 24)
+	m.CfgPath = filepath.Join(t.TempDir(), "config.yaml")
 	m = viewportKey(m, tea.KeyEnd)
 	m = viewportKey(m, tea.KeyUp)
 	m.Serve.Rows[31].Health.Up = true

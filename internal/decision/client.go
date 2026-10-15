@@ -24,12 +24,13 @@ const (
 
 // Client talks to the decision sidecar's /judge endpoint.
 type Client struct {
-	Prompts  *prompts.Catalog
-	baseURL  string
-	model    string
-	device   string
-	expected *Selection
-	http     *http.Client
+	outputTokens int
+	Prompts      *prompts.Catalog
+	baseURL      string
+	model        string
+	device       string
+	expected     *Selection
+	http         *http.Client
 }
 
 // New returns a client for a sidecar base URL (e.g. http://127.0.0.1:8090),
@@ -53,11 +54,13 @@ type Request struct {
 
 // Verdict is the sidecar's answer. Model/Device echo what actually judged.
 type Verdict struct {
-	Pick       int
-	Option     string
-	Confidence float64
-	Model      string
-	Device     string
+	Pick             int
+	Option           string
+	Confidence       float64
+	Model            string
+	Device           string
+	Protocol         string `json:",omitempty"`
+	ConfidenceSource string `json:",omitempty"`
 }
 
 type judgeRequest struct {
@@ -106,6 +109,9 @@ func (c *Client) Judge(ctx context.Context, r Request) (Verdict, error) {
 			return Verdict{}, fmt.Errorf("judge options must be distinct")
 		}
 		seen[o] = true
+	}
+	if c.expected != nil && c.expected.Runtime == "openai" {
+		return c.judgeChat(ctx, r)
 	}
 	buf, err := json.Marshal(judgeRequest{
 		Model: c.model, Device: c.device,
@@ -216,3 +222,7 @@ func excerpt(b []byte) string {
 }
 
 func (c *Client) WithPrompts(pc *prompts.Catalog) *Client { c.Prompts = pc; return c }
+
+// WithOutputTokens applies the configured generation allowance to chat judges only.
+// Zero defers to the selected server; native typed judgments keep their protocol.
+func (c *Client) WithOutputTokens(n int) *Client { c.outputTokens = n; return c }
