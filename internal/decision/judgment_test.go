@@ -124,8 +124,35 @@ func TestSummaryString(t *testing.T) {
 		{Source: "a-src", Pick: "y", Confidence: 0.8, Resolution: "r1"},
 	}, []float64{0.7})
 	out := s.String()
-	want := "2 judgment(s)\nsource a-src: 1 (avg conf 0.800)\nsource b-src: 1 (avg conf 0.600)\nresolution r1: 1\nresolution r2: 1\nconf <0.7: 1\nconf >=0.7: 1\n"
+	want := "2 judgment(s)\nconfidence source unspecified: 2\nPooled scores: confidence sources are not comparable; unspecified provenance is unknown.\nsource a-src: 1 (avg conf 0.800)\nsource b-src: 1 (avg conf 0.600)\nresolution r1: 1\nresolution r2: 1\nconf <0.7: 1\nconf >=0.7: 1\n"
 	if out != want {
 		t.Errorf("got:\n%s\nwant:\n%s", out, want)
+	}
+}
+
+func TestJudgmentConfidenceProvenance(t *testing.T) {
+	var js []Judgment
+	for _, source := range []string{"model-self-report", ""} {
+		v := judgedVerdict()
+		v.ConfidenceSource = source
+		LogJudgment(func(kind, text string) {
+			if kind != KindJudgment {
+				return
+			}
+			j, ok := ParseJudgment(text)
+			if !ok {
+				t.Fatalf("cannot parse %q", text)
+			}
+			if j.ConfidenceSource != source {
+				t.Fatalf("provenance %q want %q", j.ConfidenceSource, source)
+			}
+			js = append(js, j)
+		}, SourceRiskyAuth, judgedRequest(), v, "allowed", 0)
+	}
+	out := Summarize(js, []float64{0.5}).String()
+	for _, want := range []string{"confidence source model-self-report: 1", "confidence source unspecified: 1", "not comparable"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in %s", want, out)
+		}
 	}
 }

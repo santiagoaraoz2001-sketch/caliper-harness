@@ -28,20 +28,28 @@ func LogJudgment(log func(kind, text string), source string, req Request, v Verd
 	if log == nil {
 		return
 	}
+	if v.ConfidenceSource != "" {
+		log("judgment_protocol", fmt.Sprintf("source=%s | protocol=%s | confidence_source=%s | model=%s | device=%s", source, v.Protocol, v.ConfidenceSource, v.Model, v.Device))
+	}
 	ctx := req.Context
 	if maxCtx > 0 && len([]rune(ctx)) > maxCtx {
 		ctx = string([]rune(ctx)[:maxCtx]) + "…"
 	}
-	log(KindJudgment, fmt.Sprintf("source=%s | pick=%s | conf=%.3f | resolution=%s | options=%s | context=%s",
-		source, v.Option, v.Confidence, resolution, strings.Join(req.Options, "; "), ctx))
+	provenance := ""
+	if v.ConfidenceSource != "" {
+		provenance = "confidence_source=" + v.ConfidenceSource + " | "
+	}
+	log(KindJudgment, fmt.Sprintf("source=%s | pick=%s | conf=%.3f | resolution=%s | options=%s | %scontext=%s",
+		source, v.Option, v.Confidence, resolution, strings.Join(req.Options, "; "), provenance, ctx))
 }
 
 // Judgment is one parsed judgment event.
 type Judgment struct {
-	Source     string
-	Pick       string
-	Confidence float64
-	Resolution string
+	ConfidenceSource string
+	Source           string
+	Pick             string
+	Confidence       float64
+	Resolution       string
 }
 
 // ParseJudgment reads back LogJudgment's format. Malformed lines fail
@@ -75,10 +83,27 @@ func ParseJudgment(text string) (Judgment, bool) {
 			return Judgment{}, false
 		}
 	}
-	if !strings.HasPrefix(parts[5], "context=") || j.Source == "" || j.Pick == "" || j.Resolution == "" {
+	tail := parts[5]
+	if strings.HasPrefix(tail, "confidence_source=") {
+		field, rest, ok := strings.Cut(tail, " | ")
+		if !ok {
+			return Judgment{}, false
+		}
+		j.ConfidenceSource = strings.TrimPrefix(field, "confidence_source=")
+		tail = rest
+	}
+	if !strings.HasPrefix(tail, "context=") || j.Source == "" || j.Pick == "" || j.Resolution == "" {
 		return Judgment{}, false
 	}
 	return j, true
+}
+
+// ConfidenceLabel does not infer a score's meaning from historical events.
+func ConfidenceLabel(source string) string {
+	if source == "" {
+		return "unspecified"
+	}
+	return source
 }
 
 // SourceStat aggregates one source: verdict count plus mean confidence.
@@ -95,16 +120,17 @@ type Bucket struct {
 
 // Summary aggregates parsed judgments for threshold calibration.
 type Summary struct {
-	Total        int
-	BySource     map[string]SourceStat
-	ByResolution map[string]int
-	Buckets      []Bucket
+	ByConfidenceSource map[string]int
+	Total              int
+	BySource           map[string]SourceStat
+	ByResolution       map[string]int
+	Buckets            []Bucket
 }
 
 // Summarize folds judgments into counts plus a confidence histogram over
 // edges (ascending cut points; empty edges yield one "all" bucket).
 func Summarize(js []Judgment, edges []float64) Summary {
-	s := Summary{BySource: map[string]SourceStat{}, ByResolution: map[string]int{}}
+	s := Summary{ByConfidenceSource: map[string]int{}, BySource: map[string]SourceStat{}, ByResolution: map[string]int{}}
 	labels := bucketLabels(edges)
 	s.Buckets = make([]Bucket, len(labels))
 	for i, l := range labels {
@@ -112,6 +138,7 @@ func Summarize(js []Judgment, edges []float64) Summary {
 	}
 	for _, j := range js {
 		s.Total++
+		s.ByConfidenceSource[ConfidenceLabel(j.ConfidenceSource)]++
 		st := s.BySource[j.Source]
 		st.AvgConf = (st.AvgConf*float64(st.Count) + j.Confidence) / float64(st.Count+1)
 		st.Count++
@@ -148,6 +175,17 @@ func bucketOf(c float64, edges []float64) int {
 func (s Summary) String() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d judgment(s)\n", s.Total)
+	confidenceSources := make([]string, 0, len(s.ByConfidenceSource))
+	for k := range s.ByConfidenceSource {
+		confidenceSources = append(confidenceSources, k)
+	}
+	sort.Strings(confidenceSources)
+	for _, k := range confidenceSources {
+		fmt.Fprintf(&b, "confidence source %s: %d\n", k, s.ByConfidenceSource[k])
+	}
+	if s.Total > 0 {
+		b.WriteString("Pooled scores: confidence sources are not comparable; unspecified provenance is unknown.\n")
+	}
 	sources := make([]string, 0, len(s.BySource))
 	for k := range s.BySource {
 		sources = append(sources, k)

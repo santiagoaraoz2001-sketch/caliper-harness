@@ -14,11 +14,12 @@ import (
 // DecisionRow is one verdict from this chat's runs: what the
 // decision model picked, how sure it was, what the harness did.
 type DecisionRow struct {
-	Source     string
-	Pick       string
-	Conf       float64
-	Resolution string
-	Session    string
+	ConfidenceSource string
+	Source           string
+	Pick             string
+	Conf             float64
+	Resolution       string
+	Session          string
 }
 
 // DecisionsState is the T6.7 feed: this chat's verdicts newest
@@ -89,7 +90,7 @@ func (m *Model) refreshDecisions() tea.Cmd {
 				st.Rows = append(st.Rows, DecisionRow{
 					Source: j.Source, Pick: j.Pick,
 					Conf: j.Confidence, Resolution: j.Resolution,
-					Session: ids[i],
+					Session: ids[i], ConfidenceSource: j.ConfidenceSource,
 				})
 				st.BySource[j.Source]++
 				st.Buckets[bucketOf(j.Confidence)]++
@@ -123,9 +124,20 @@ func (m Model) decisionsLayout(w, vh int) (body, hints []string, page int) {
 		b := m.Decisions.Buckets
 		lines = append(lines, Body.Render(fmt.Sprintf("%d verdicts · %s", len(m.Decisions.Rows), strings.Join(srcs, " · ")))+
 			Muted.Render(fmt.Sprintf(" · conf <0.5:%d 0.5–0.7:%d 0.7–0.9:%d ≥0.9:%d", b[0], b[1], b[2], b[3])))
+		var confidenceSources = map[string]int{}
+		for _, r := range m.Decisions.Rows {
+			confidenceSources[decision.ConfidenceLabel(r.ConfidenceSource)]++
+		}
+		var labels []string
+		for source, count := range confidenceSources {
+			labels = append(labels, fmt.Sprintf("%s %d", source, count))
+		}
+		sort.Strings(labels)
+		lines = append(lines, Muted.Render("Confidence: "+strings.Join(labels, " · ")),
+			Muted.Render("Pooled scores: sources are not comparable; unspecified provenance is unknown."))
 		lines = append(lines, SectionSt.Render("Source · Choice · Confidence · Resolution"))
 		for _, r := range m.Decisions.Rows {
-			lines = append(lines, PathSt.Render(r.Source)+Muted.Render(" → ")+Title.Render(r.Pick)+InfoSt.Render(fmt.Sprintf(" · %.2f", r.Conf))+Body.Render(" · "+r.Resolution))
+			lines = append(lines, PathSt.Render(r.Source)+Muted.Render(" → ")+Title.Render(r.Pick)+InfoSt.Render(fmt.Sprintf(" · %.2f [%s]", r.Conf, decision.ConfidenceLabel(r.ConfidenceSource)))+Body.Render(" · "+r.Resolution))
 		}
 	}
 	if m.Decisions.Skipped > 0 {

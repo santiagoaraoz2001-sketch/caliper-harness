@@ -114,12 +114,12 @@ workflows:
   verify_followup: true    # queue a review run per done task after completion
 
 decision:
-  runtime: laya            # laya or system_one; compatible downloaded checkpoints only
+  runtime: laya            # laya/system_one native sidecar; openai for a chat-model judge
   trust_remote_code: false # explicit opt-in for checkpoint code
   # path: /absolute/downloaded/assets
   # revision: pinned-revision
-  server: http://127.0.0.1:8090  # decision sidecar base URL
-  model: typed-decisions    # checkpoint id the sidecar must serve
+  server: http://127.0.0.1:8090  # native sidecar; openai uses the selected server /v1 URL
+  model: typed-decisions    # exact checkpoint/native ID or chat-server catalog model ID
   device: auto              # auto, cpu, or gpu
   timeout_seconds: 30       # one judgment round-trip cap
   risk_threshold: 0.7       # at/above: obey verdict; below: ask the human
@@ -142,7 +142,7 @@ watch:
 serve:
   probe_timeout_seconds: 3
   # model_dirs: ["/absolute/existing-model-root"]  # metadata only; never downloads
-  # recipes: []             # extra start recipes; built-ins cover ollama, mlx, sidecar
+  # recipes: []             # extra server recipes; see SERVER-MODELS.md; omit argv for an external endpoint
   # - name: vllm            # same-name entries replace their built-in
   #   kind: openai
   #   url: http://127.0.0.1:8000/v1

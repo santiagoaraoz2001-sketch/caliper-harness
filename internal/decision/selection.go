@@ -134,6 +134,9 @@ func (c *Client) WithSelection(s Selection) *Client {
 	return c
 }
 func (c *Client) Health(ctx context.Context) (Health, error) {
+	if c.expected != nil && c.expected.Runtime == "openai" {
+		return Health{}, fmt.Errorf("OpenAI chat judge has no native decision health; inspect its selected server for catalog and residency")
+	}
 	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/health", nil)
 	if err != nil {
 		return Health{}, err
@@ -149,6 +152,9 @@ func (c *Client) Health(ctx context.Context) (Health, error) {
 	return DecodeHealth(resp.Body)
 }
 func (c *Client) Activate(ctx context.Context, s Selection) (Health, error) {
+	if s.Runtime == "openai" || c.expected != nil && c.expected.Runtime == "openai" {
+		return Health{}, fmt.Errorf("OpenAI chat judge activation belongs to its selected server lifecycle")
+	}
 	b, err := json.Marshal(s)
 	if err != nil {
 		return Health{}, err
