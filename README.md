@@ -1,5 +1,19 @@
 <h1 align="center">Caliper Harness</h1>
 
+<pre align="center">
+        _
+       / |
+      /  |
+     /   |______________________________________________
+    /    | | | | | | | | | | | | | | | | | | | | | | |
+   /_____|_________[_____]____________________________|
+                    | | | |
+                    |_____|
+                   /
+                  /
+        measure twice - claim once
+</pre>
+
 <p align="center">
   <strong>A terminal coding workspace built for small local models.</strong><br>
   By <a href="https://github.com/santiagoaraoz2001-sketch">Specific Labs</a>
@@ -8,8 +22,8 @@
 <p align="center">
   <img alt="Status: developer preview" src="https://img.shields.io/badge/status-developer%20preview-orange">
   <img alt="Go" src="https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white">
-  <img alt="Platform: macOS Apple Silicon" src="https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-black?logo=apple&logoColor=white">
   <img alt="Local models first" src="https://img.shields.io/badge/models-local--first-green">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
 Caliper Harness lets a small local language model do real coding work in your
@@ -28,10 +42,10 @@ claimed result outrun an observed one.
 
 ## Why Caliper?
 
-- **Local-first, small-model native.** MLX and Ollama-style local servers are
-  first-class citizens, including native tool-calling transports for models
-  whose structured output is… creative. Malformed calls get repairable
-  refusals with the current legal call, not dead runs.
+- **Local-first, small-model native.** Local OpenAI-compatible model servers
+  are first-class citizens, including native tool-calling transports for
+  models whose structured output is… creative. Malformed calls get
+  repairable refusals with the current legal call, not dead runs.
 - **Plans the model can't fake.** Work is organized as Plan → Approach → Task
   (PAT) in a GraphQL state graph. A task only counts when its own declared
   check passes and an independent review agrees; prose claims settle nothing.
@@ -53,21 +67,20 @@ claimed result outrun an observed one.
 
 ## Quick start
 
-### Managed Mac build (Apple Silicon)
+### Managed bundle
 
 ```sh
 ./start.sh
 ```
 
 The launcher selects the locally validated self-contained development build
-(private Python, MLX/decision dependencies, and ripgrep included — no pip,
+(private Python, model/decision dependencies, and ripgrep included — no pip,
 virtualenvs, or Homebrew needed) and keeps your current project directory.
 See [FIRST-USE.md](FIRST-USE.md) for model prerequisites.
 
 ### Build from source
 
-Requirements: Go 1.25, Xcode command-line tools (CGO), and `uv` for the
-managed Python runtimes.
+Requirements: Go 1.25 with CGO, and `uv` for the managed Python runtimes.
 
 ```sh
 make build
@@ -105,7 +118,7 @@ every command.
 ┌────────────┐   native tool calls   ┌──────────────────┐
 │  Worker    │ ────────────────────▶ │  Agent loop      │
 │  model     │ ◀──────────────────── │  (Go)            │
-│  (MLX/HTTP)│   tools, refusals,    └──────┬───────────┘
+│  (HTTP)    │   tools, refusals,    └──────┬───────────┘
 └────────────┘   current questions          │ tool effects + receipts
                                             ▼
 ┌────────────┐   judgments (typed   ┌──────────────────┐
@@ -116,9 +129,9 @@ every command.
                                      └──────────────────┘
 ```
 
-- **Worker model** — any OpenAI-style local server. The Go worker side
-  (`python/worker/`) owns native tool-call parsing for GLM/Laguna-style
-  framing, including literal continuation of unfinished responses.
+- **Worker model** — any OpenAI-compatible local server. The Python worker
+  side (`python/worker/`) owns native tool-call parsing for framed
+  tool-call formats, including literal continuation of unfinished responses.
 - **Agent loop** — one executor. It validates every call against the
   *current* question's schema, tolerates known compatibility spellings of
   arguments, and refuses the rest with the exact legal call so the model can
@@ -238,12 +251,10 @@ python/
   worker/               native response parsing + literal continuation
   decision/             typed-choice decision sidecar
 schema/v1.graphqls      the state API contract
-scripts/                macOS bundle + runtime preparation
+scripts/                bundle + runtime preparation
 ```
 
 ## License
 
-No license has been published yet; all rights are reserved by Specific Labs
-until one lands. If you are reading this on GitHub, treat it as
-source-available for inspection and evaluation.
+MIT — see [LICENSE](LICENSE).
 
