@@ -61,6 +61,7 @@ func serveModelWithModels(t *testing.T) Model {
 }
 
 func TestServeModelRowsBuilt(t *testing.T) {
+	t.Setenv("PATH", t.TempDir()) // Isolate optional installed-server choices.
 	isolateModelRoots(t)
 	m := submit(New(testCfg(), "test"), "/status")
 	msg := m.probeServeWith(probeClient())()
@@ -480,6 +481,7 @@ func TestServeRender(t *testing.T) {
 }
 
 func TestServeProbeEntry(t *testing.T) {
+	t.Setenv("PATH", t.TempDir()) // Fixed baseline excludes optional installed launchers.
 	isolateModelRoots(t)
 	m := New(testCfg(), "test")
 	msg := m.probeServeWith(&http.Client{Transport: &pathStub{}})()

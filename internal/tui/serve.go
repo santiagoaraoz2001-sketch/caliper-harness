@@ -38,14 +38,15 @@ type ServeRow struct {
 // ServeState is the status screen: the endpoint table, selection,
 // processes we started, and one load/release in flight.
 type ServeState struct {
-	Rows     []ServeRow
-	Sel      int
-	Scroll   int
-	Spawned  map[string]*serve.Proc
-	Loading  string
-	Focus    string
-	Warnings []string
-	cancel   context.CancelFunc
+	Rows      []ServeRow
+	Sel       int
+	Scroll    int
+	Spawned   map[string]*serve.Proc
+	Loading   string
+	Focus     string
+	Warnings  []string
+	Installed []string
+	cancel    context.CancelFunc
 	// Mem is the hardware profile behind the MEMORY readout; MemErr
 	// names a failed detection (readout shows unknown, not zero).
 	Mem    hw.Profile
@@ -59,6 +60,7 @@ type serveProbedMsg struct {
 	mem         hw.Profile
 	memErr      string
 	warnings    []string
+	installed   []string
 	application *decisionApplied
 }
 
@@ -94,6 +96,7 @@ func humanBytes(b uint64) string {
 }
 
 type serveLoadMsg struct {
+	notice  string
 	model   string
 	url     string
 	proc    *serve.Proc
@@ -105,29 +108,50 @@ func (m *Model) serveActive() bool {
 	return m.Tabs[m.Active].at.view == ViewStatus
 }
 
-// serveEndpoints builds the table: the active worker (auto-detected),
-// the conventional alternates, and the decision sidecar.
+// sameServeURL matches the root/API-base alternatives already accepted by Probe.
+// Custom prefixes remain part of identity; only the optional /v1 suffix differs.
+func sameServeURL(a, b string) bool {
+	root := func(s string) string { return strings.TrimSuffix(strings.TrimRight(s, "/"), "/v1") }
+	return root(a) == root(b)
+}
+
+// serveEndpoints lists active roles, conventional endpoints and launch recipes.
 func (m *Model) serveEndpoints() []serve.Endpoint {
-	out := []serve.Endpoint{{Kind: serve.KindAuto, Label: "worker", URL: m.Cfg.Model.Server, Model: m.Cfg.Model.Name}}
+	worker := m.Cfg.Model.Server
+	for _, rec := range m.serveRecipes() {
+		if rec.Kind != serve.KindSidecar && sameServeURL(rec.URL, worker) {
+			worker = rec.URL
+			break
+		}
+	}
+	out := []serve.Endpoint{{Kind: serve.KindAuto, Label: "worker", URL: worker, Model: m.Cfg.Model.Name}}
 	for _, alt := range []serve.Endpoint{
 		{Kind: serve.KindOllama, Label: "ollama", URL: serve.OllamaURL},
 		{Kind: serve.KindOpenAI, Label: "mlx", URL: serve.MLXURL},
 	} {
-		if alt.URL != m.Cfg.Model.Server {
+		if !sameServeURL(alt.URL, worker) {
 			out = append(out, alt)
 		}
 	}
 	for _, rec := range m.serveRecipes() {
-		if rec.URL == m.Cfg.Decision.Server {
+		if rec.URL == m.Cfg.Decision.Server && m.Cfg.Decision.Runtime != "openai" {
 			continue
 		}
 		found := false
 		for _, ep := range out {
-			found = found || ep.URL == rec.URL
+			found = found || sameServeURL(ep.URL, rec.URL)
 		}
 		if !found && rec.URL != "" {
 			out = append(out, serve.Endpoint{Kind: rec.Kind, Label: rec.Name, URL: rec.URL})
 		}
+	}
+	if m.Cfg.Decision.Runtime == "openai" {
+		for _, e := range out {
+			if sameServeURL(e.URL, m.Cfg.Decision.Server) {
+				return out
+			}
+		}
+		return append(out, serve.Endpoint{Kind: serve.KindOpenAI, Label: "judge", URL: m.Cfg.Decision.Server, Model: m.Cfg.Decision.Model})
 	}
 	return append(out, serve.Endpoint{Kind: serve.KindSidecar, Label: "sidecar", URL: m.Cfg.Decision.Server, Model: m.Cfg.Decision.Model})
 }
@@ -139,6 +163,7 @@ func (m *Model) serveRecipes() []serve.Recipe {
 		extra = append(extra, serve.Recipe{Name: r.Name, Kind: r.Kind, Runtime: r.Runtime, URL: r.URL, Argv: r.Argv, Dir: r.Dir})
 	}
 	built := serve.DefaultRecipes(serve.FindHarnessDir(), m.Cfg.Model.Name, m.Cfg.Decision.Model, decision.SelectionFor(m.Cfg.Decision))
+	built = append(built, serve.InstalledRecipes(m.Cfg.Model.Server)...)
 	for i := range built {
 		if built[i].Kind == serve.KindSidecar {
 			built[i].URL = m.Cfg.Decision.Server
@@ -164,14 +189,15 @@ func (m *Model) probeServeWith(client *http.Client) tea.Cmd {
 		spawned[url] = p
 	}
 	worker, sidecar := m.Cfg.Model.Server, m.Cfg.Decision.Server
+	judge := m.Cfg.Decision
 	home, _ := os.UserHomeDir()
 	roots := serve.ModelRoots(home)
 	for _, p := range m.Cfg.Serve.ModelDirs {
 		roots = append(roots, serve.ModelRoot{Path: p})
 	}
 	var explicit []string
-	for _, name := range append([]string{m.Cfg.Model.Name}, recipeModels(recipes)...) {
-		if st, err := os.Stat(name); err == nil && st.IsDir() {
+	for _, name := range append([]string{m.Cfg.Model.Name, judge.Path}, recipeModels(recipes)...) {
+		if _, err := os.Stat(name); err == nil {
 			explicit = append(explicit, name)
 		}
 	}
@@ -181,17 +207,17 @@ func (m *Model) probeServeWith(client *http.Client) tea.Cmd {
 		var rows []ServeRow
 		for i, e := range endpoints {
 			r := ServeRow{Ep: e, Health: health[i], Have: true,
-				Worker:  e.URL == worker && e.Kind != serve.KindSidecar,
+				Worker:  sameServeURL(e.URL, worker) && e.Kind != serve.KindSidecar,
 				Sidecar: e.Kind == serve.KindSidecar && e.URL == sidecar}
 			for j, rec := range recipes {
-				if rec.URL == e.URL {
+				if rec.URL == e.URL && (r.Recipe == nil || rec.Name == e.Label) {
 					r.Recipe = &recipes[j]
 				}
 			}
 			if _, ok := spawned[e.URL]; ok {
-				r.Ours = !r.Sidecar || serve.Loopback(e.URL) && health[i].Decision != nil && spawned[e.URL].PID() != 0 && spawned[e.URL].PID() == health[i].Decision.PID
+				r.Ours = spawned[e.URL].PID() != 0 && (!r.Sidecar || serve.Loopback(e.URL) && health[i].Decision != nil && spawned[e.URL].PID() != 0 && spawned[e.URL].PID() == health[i].Decision.PID)
 			}
-			if r.Ours && r.Recipe != nil && r.Recipe.Runtime == "mlx" {
+			if r.Ours && spawned[e.URL].Runtime() == "mlx" {
 				h, err := serve.OwnedMLXReady(context.Background(), client, spawned[e.URL])
 				if err != nil {
 					h.Err = err.Error()
@@ -201,6 +227,18 @@ func (m *Model) probeServeWith(client *http.Client) tea.Cmd {
 				health[i] = h
 			}
 			rows = append(rows, r)
+			if r.Sidecar && (judge.Runtime == "laya" || judge.Runtime == "system_one") {
+				for _, asset := range assets {
+					if !asset.Complete || asset.Format != "safetensors" {
+						continue
+					}
+					a := asset
+					a.Runtime = judge.Runtime // Explicit selection; compatibility remains unconfirmed.
+					ep := e
+					ep.Model = a.Path
+					rows = append(rows, ServeRow{Ep: ep, Asset: &a, Sidecar: true, IsModel: true, Have: true})
+				}
+			}
 			// Ollama servers list each model: resident rows unload
 			// one, available rows load installed weights.
 			if health[i].Up && (e.Kind == serve.KindOllama ||
@@ -226,38 +264,58 @@ func (m *Model) probeServeWith(client *http.Client) tea.Cmd {
 				}
 			}
 		}
+		// Multiple installed/configured recipes may target one endpoint. Keep
+		// each explicit choice without probing or launching an extra server.
+		for j := range recipes {
+			rec := &recipes[j]
+			if rec.Kind == serve.KindSidecar {
+				continue
+			}
+			for _, server := range rows {
+				if server.IsModel || server.Sidecar || server.Ep.URL != rec.URL {
+					continue
+				}
+				if server.Recipe == nil || server.Recipe.Name != rec.Name {
+					choice := server
+					choice.Recipe, choice.Ep.Label = rec, rec.Name
+					rows = append(rows, choice)
+				}
+				break
+			}
+		}
 		for i := range assets {
-			a := &assets[i]
-			var rec *serve.Recipe
+			asset := assets[i]
+			matched := false
 			for j := range recipes {
-				if (a.Runtime == "mlx" && recipes[j].Runtime == "mlx" || a.Runtime == "ollama" && recipes[j].Kind == serve.KindOllama) && serve.Loopback(recipes[j].URL) {
-					if rec == nil || recipes[j].URL == worker {
-						rec = &recipes[j]
-					}
-					if recipes[j].URL == worker {
+				rec := &recipes[j]
+				compatible := asset.Format == "safetensors" && rec.Runtime == "mlx" || asset.Runtime == "ollama" && rec.Kind == serve.KindOllama || asset.Format == "gguf" && rec.Kind == serve.KindOpenAI && rec.Runtime != "mlx" && rec.HasModelPlaceholder()
+				if !compatible || !serve.Loopback(rec.URL) {
+					continue
+				}
+				matched = true
+				a := asset
+				a.Runtime = rec.Runtime // selected recipe; never checkpoint compatibility proof
+				if a.Runtime == "" {
+					a.Runtime = "openai"
+				}
+				r := ServeRow{Ep: serve.Endpoint{Kind: rec.Kind, Label: rec.Name, URL: rec.URL, Model: a.Path}, Recipe: rec, Asset: &a, IsModel: true, Have: true}
+				for _, server := range rows {
+					if !server.IsModel && server.Ep.URL == rec.URL {
+						r.Health, r.Ours = server.Health, server.Ours
+						for _, name := range r.Health.Loaded {
+							r.Resident = r.Resident || r.Ours && name == a.Path
+						}
 						break
 					}
 				}
+				rows = append(rows, r)
 			}
-			if rec == nil {
-				warnings = append(warnings, a.Path+": no local native recipe")
-				continue
+			if !matched {
+				warnings = append(warnings, asset.Path+": no local launch recipe for this format")
 			}
-			r := ServeRow{Ep: serve.Endpoint{Kind: rec.Kind, Label: rec.Name, URL: rec.URL, Model: a.Path}, Recipe: rec, Asset: a, IsModel: true, Have: true}
-			for _, server := range rows {
-				if !server.IsModel && server.Ep.URL == rec.URL {
-					r.Health = server.Health
-					r.Ours = server.Ours
-					for _, name := range r.Health.Loaded {
-						r.Resident = r.Resident || r.Ours && name == a.Path
-					}
-					break
-				}
-			}
-			rows = append(rows, r)
 		}
 		mem, err := hw.Detect()
-		msg := serveProbedMsg{rows: rows, mem: mem, warnings: warnings}
+		msg := serveProbedMsg{rows: rows, mem: mem, warnings: warnings, installed: serve.InstalledServers()}
 		if err != nil {
 			msg.memErr = err.Error()
 		}
@@ -275,7 +333,11 @@ func serveKeyOf(r ServeRow) string {
 	if r.Asset != nil {
 		kind = "asset"
 	}
-	return kind + "\x00" + r.Ep.URL + "\x00" + r.Ep.Model
+	key := kind + "\x00" + r.Ep.URL + "\x00" + r.Ep.Model
+	if r.Recipe != nil {
+		key += "\x00" + r.Recipe.Name
+	}
+	return key
 }
 
 // onServeProbed swaps in fresh results, keeping the selection on its row.
@@ -309,8 +371,9 @@ func (m *Model) onServeProbed(msg serveProbedMsg) {
 		keep = serveKeyOf(m.Serve.Rows[m.Serve.Sel])
 	}
 	m.Serve.Rows = msg.rows
+	m.Serve.Installed = msg.installed
 	for _, r := range msg.rows {
-		if !r.Sidecar && r.Have && (r.Ep.URL == m.Cfg.Model.Server || r.Health.APIBase == m.Cfg.Model.Server) {
+		if !r.Sidecar && r.Have && (sameServeURL(r.Ep.URL, m.Cfg.Model.Server) || r.Health.APIBase == m.Cfg.Model.Server) {
 			state := "offline"
 			if r.Health.Up {
 				state = "online"
@@ -335,7 +398,7 @@ func (m *Model) onServeProbed(msg serveProbedMsg) {
 		for i, r := range msg.rows {
 			if r.IsModel && (r.Ep.Model == wanted || canonical != "" && r.Ep.Model == canonical || r.Asset != nil && r.Asset.ID == wanted) {
 				matches = append(matches, i)
-				if r.Ep.URL == m.Cfg.Model.Server || r.Health.APIBase == m.Cfg.Model.Server {
+				if sameServeURL(r.Ep.URL, m.Cfg.Model.Server) || r.Health.APIBase == m.Cfg.Model.Server {
 					active = append(active, i)
 				}
 			}
@@ -426,7 +489,7 @@ func (m *Model) serveUse() {
 		m.alert("err", "the sidecar is not a worker runtime")
 		return
 	}
-	if r.Asset != nil && (r.Asset.Runtime != "mlx" || !r.Asset.Complete) {
+	if r.Asset != nil && (!r.Asset.LoadCandidate() || r.Asset.Runtime != "mlx" && (r.Recipe == nil || !r.Recipe.HasModelPlaceholder())) {
 		m.alert("err", r.Asset.Reason)
 		return
 	}
@@ -435,16 +498,16 @@ func (m *Model) serveUse() {
 		return
 	}
 	runtime := r.Health.Runtime
-	if runtime == "" && r.Ours && r.Recipe != nil {
-		runtime = r.Recipe.Runtime
+	if runtime == "" && r.Ours {
+		runtime = m.Serve.Spawned[r.Ep.URL].Runtime()
 	}
-	if runtime == "" && r.Ep.URL == m.Cfg.Model.Server {
+	if runtime == "" && sameServeURL(r.Ep.URL, m.Cfg.Model.Server) {
 		runtime = m.Cfg.Model.Runtime
 	}
 	if runtime == "" {
 		runtime = "openai"
 	}
-	m.Cfg.Model.Runtime = runtime
+	old := m.Cfg.Model
 	base := r.Health.APIBase
 	if base == "" {
 		base = r.Ep.URL
@@ -454,21 +517,83 @@ func (m *Model) serveUse() {
 	}
 	m.Cfg.Model.Runtime = runtime
 	m.Cfg.Model.Server = base
-	m.Server = base
 	if r.IsModel {
 		m.Cfg.Model.Name = r.Ep.Model
-		m.ModelName = r.Ep.Model
-		m.St.Model = r.Ep.Model
 	}
 	if err := m.persist(); err != nil {
+		m.Cfg.Model = old
 		m.alert("err", err.Error())
 		return
 	}
+	m.Server = base
 	if r.IsModel {
+		m.ModelName = r.Ep.Model
+		m.St.Model = r.Ep.Model
 		m.alert("info", fmt.Sprintf("runtime: %s on %s (next run)", r.Ep.Model, r.Ep.Label))
 		return
 	}
 	m.alert("info", fmt.Sprintf("runtime: %s (next run)", r.Ep.Label))
+}
+
+// serveUseJudge selects an existing catalog entry without loading or downloading.
+func (m *Model) serveUseJudge() {
+	r := m.serveCur()
+	if r == nil || m.servingBusy() {
+		return
+	}
+	if r.Sidecar && r.Asset != nil {
+		next := m.Cfg
+		if m.Settings.DecisionDraft != nil {
+			next.Decision = *m.Settings.DecisionDraft
+		}
+		a := r.Asset
+		if !a.Complete || a.Format != "safetensors" || a.Runtime != next.Decision.Runtime || (a.Runtime != "laya" && a.Runtime != "system_one") {
+			m.alert("err", "select a native decision runtime in Settings, then refresh its local candidates")
+			return
+		}
+		path, err := filepath.EvalSymlinks(a.Path)
+		if err != nil || !filepath.IsAbs(path) || path != a.Path {
+			m.alert("err", "judge candidate path changed or unavailable — refresh inventory")
+			return
+		}
+		next.Decision.Model, next.Decision.Path, next.Decision.Revision = a.ID, path, a.Revision
+		if err := next.Validate(); err != nil {
+			m.alert("err", err.Error())
+			return
+		}
+		m.Settings.DecisionDraft = &next.Decision
+		m.Settings.DecisionSeq++
+		m.Settings.DecisionNotice = fmt.Sprintf("judge candidate staged for %s; compatibility unconfirmed; trust_remote_code=%t retained — a applies; Settings s saves", a.Runtime, next.Decision.TrustRemoteCode)
+		m.alert("info", m.Settings.DecisionNotice)
+		return
+	}
+	if r.Sidecar || !r.IsModel || r.Asset != nil || !r.Health.Up {
+		m.alert("err", "select a model from a running server catalog for the judge")
+		return
+	}
+	next := m.Cfg
+	next.Decision.Runtime, next.Decision.Model, next.Decision.Device = "openai", r.Ep.Model, "auto"
+	next.Decision.Path, next.Decision.Revision = "", ""
+	next.Decision.TrustRemoteCode = false
+	next.Decision.Server = r.Health.APIBase
+	if next.Decision.Server == "" {
+		next.Decision.Server = r.Ep.URL
+	}
+	if err := next.Validate(); err != nil {
+		m.alert("err", err.Error())
+		return
+	}
+	old := m.Cfg
+	m.Cfg = next
+	if err := m.persist(); err != nil {
+		m.Cfg = old
+		m.alert("err", err.Error())
+		return
+	}
+	m.Settings.DecisionDraft = nil
+	m.Settings.DecisionSeq++ // Supersede any older native activation receipt.
+	m.Settings.DecisionNotice = "judge selected for next run; confidence self-reported; server manages residency; device unknown (local device setting has no effect)"
+	m.alert("info", m.Settings.DecisionNotice)
 }
 
 // labelOf names a row for messages: the model on model rows.
@@ -511,6 +636,10 @@ func (m *Model) serveStart() {
 	if m.servingBusy() {
 		return
 	}
+	if m.Serve.Spawned[r.Ep.URL].PID() != 0 {
+		m.alert("info", "live owned process already uses this endpoint — release its server row before starting another")
+		return
+	}
 	if !r.Sidecar && (r.Health.Reachable || !serve.Loopback(r.Ep.URL)) {
 		m.alert("err", "endpoint responds or is external — no second server started")
 		return
@@ -528,8 +657,8 @@ func (m *Model) serveStart() {
 		m.alert("err", fmt.Sprintf("no start recipe for %s", r.Ep.URL))
 		return
 	}
-	if rec.Runtime == "mlx" {
-		m.alert("err", "select a complete local model row and l load")
+	if rec.Runtime == "mlx" || rec.Discovered {
+		m.alert("err", "select an existing local model row and l load")
 		return
 	}
 	if r.Sidecar {
@@ -551,6 +680,16 @@ func (m *Model) serveStart() {
 			rec = &bound
 		}
 	}
+	selectedModel := m.Cfg.Model.Name
+	if sameServeURL(r.Ep.URL, m.Cfg.Decision.Server) && m.Cfg.Decision.Runtime == "openai" {
+		selectedModel = m.Cfg.Decision.Model
+	}
+	bound, err := serve.BindModel(*rec, selectedModel)
+	if err != nil {
+		m.alert("err", err.Error())
+		return
+	}
+	rec = &bound
 	log := filepath.Join(os.TempDir(), "caliper-harness-"+rec.Name+".log")
 	p, err := serve.Start(*rec, log, time.Duration(m.Cfg.Serve.ProbeTimeoutSeconds)*time.Second)
 	if err != nil {
@@ -599,6 +738,10 @@ func (m *Model) serveAction(load bool) tea.Cmd {
 		row.Asset = &asset
 	}
 	if row.Sidecar {
+		if row.Asset != nil {
+			m.alert("info", "j stages this judge candidate; a applies; select the sidecar server row to stop it")
+			return nil
+		}
 		if load {
 			m.alert("err", "no load API for sidecar: s start, a apply")
 			return nil
@@ -625,7 +768,7 @@ func (m *Model) serveAction(load bool) tea.Cmd {
 		m.alert("info", "model is not resident (unconfirmed) — l load; select owned server to release an unready child")
 		return nil
 	}
-	if row.Asset != nil && (row.Asset.Runtime != "mlx" || !row.Asset.Complete) {
+	if row.Asset != nil && (!row.Asset.LoadCandidate() || row.Asset.Runtime != "mlx" && (row.Recipe == nil || !row.Recipe.HasModelPlaceholder())) {
 		m.alert("err", row.Asset.Reason)
 		return nil
 	}
@@ -666,6 +809,20 @@ func (m *Model) serveAction(load bool) tea.Cmd {
 		}
 		if row.Recipe == nil {
 			msg.err = fmt.Errorf("no native MLX recipe")
+			return msg
+		}
+		if row.Asset.Runtime != "mlx" {
+			if row.Health.Reachable || !serve.Loopback(row.Ep.URL) {
+				msg.err = fmt.Errorf("endpoint responds or is external; no duplicate server started")
+				return msg
+			}
+			rec, err := serve.BindModel(*row.Recipe, row.Asset.Path)
+			if err != nil {
+				msg.err = err
+				return msg
+			}
+			msg.proc, msg.err = serve.StartContext(ctx, rec, filepath.Join(os.TempDir(), "caliper-harness-"+rec.Name+".log"), probeTimeout)
+			msg.notice = "server process started; refresh for catalog, residency unconfirmed"
 			return msg
 		}
 		rec, err := serve.PrepareMLX(*row.Recipe, filepath.Join(serve.FindHarnessDir(), "python", "worker", "server.py"), row.Asset.Path)
@@ -723,6 +880,10 @@ func (m *Model) onServeLoad(msg serveLoadMsg) {
 		m.alert("err", msg.err.Error())
 		return
 	}
+	if msg.notice != "" {
+		m.alert("info", msg.notice)
+		return
+	}
 	m.alert("info", "resident action confirmed for "+msg.model)
 }
 func recipeModels(recipes []serve.Recipe) []string {
@@ -777,7 +938,7 @@ func (m *Model) TrackSidecar(p *serve.Proc, h serve.Health) {
 func (m *Model) decisionOwner() *serve.Proc {
 	url := m.Cfg.Decision.Server
 	p := m.Serve.Spawned[url]
-	if !serve.Loopback(url) || p.PID() == 0 {
+	if m.Cfg.Decision.Runtime == "openai" || !serve.Loopback(url) || p.PID() == 0 {
 		return nil
 	}
 	for _, r := range m.Serve.Rows {
@@ -791,6 +952,9 @@ func (m *Model) commitExternalDecision() {
 	m.Cfg.Decision = *m.Settings.DecisionDraft
 	m.Settings.DecisionDraft = nil
 	m.Settings.DecisionNotice = "requested selection saved in memory — pending external activation (ownership unconfirmed)"
+	if m.Cfg.Decision.Runtime == "openai" {
+		m.Settings.DecisionNotice = "judge selection applies next run; confidence self-reported; server manages residency; device unknown (local device setting has no effect)"
+	}
 	m.alert("info", m.Settings.DecisionNotice)
 }
 
@@ -813,7 +977,7 @@ func (m *Model) applyDecisionSelection() tea.Cmd {
 		return nil
 	}
 	p := m.decisionOwner()
-	if p == nil {
+	if p == nil || m.Settings.DecisionDraft.Runtime == "openai" {
 		m.commitExternalDecision()
 		return nil
 	}
@@ -878,6 +1042,8 @@ func (m Model) serveKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			return m, nil, false
 		}
 		switch s := msg.String(); s {
+		case "j", "J":
+			m.serveUseJudge()
 		case "u", "U":
 			m.serveUse()
 		case "s", "S":
@@ -911,8 +1077,16 @@ func (m *Model) serveEnter() tea.Cmd {
 	if r == nil {
 		return nil
 	}
+	if r.Sidecar && r.Asset != nil {
+		m.serveUseJudge()
+		return nil
+	}
 	if r.Sidecar {
 		m.alert("info", "sidecar: m edit model · d stage device · a apply · s start · x stop")
+		return nil
+	}
+	if r.IsModel && r.Asset == nil && r.Have && r.Health.Up && r.Ep.Kind != serve.KindOllama && r.Health.Kind != serve.KindOllama {
+		m.serveUse()
 		return nil
 	}
 	if r.IsModel {
@@ -935,8 +1109,14 @@ func (m *Model) serveEnterLabel() string {
 	if r == nil {
 		return "act"
 	}
+	if r.Sidecar && r.Asset != nil {
+		return "stage judge"
+	}
 	if r.Sidecar {
 		return "sidecar guidance"
+	}
+	if r.IsModel && r.Asset == nil && r.Have && r.Health.Up && r.Ep.Kind != serve.KindOllama && r.Health.Kind != serve.KindOllama {
+		return "use worker"
 	}
 	if r.IsModel {
 		if r.Resident {
@@ -988,15 +1168,21 @@ func serveModelRow(m Model, i int, r ServeRow, inner int) string {
 	}
 	if r.Asset != nil {
 		state = "candidate — " + r.Asset.Reason
+		if r.Sidecar {
+			state = "j stage judge (" + r.Asset.Runtime + ") — " + r.Asset.Reason
+		}
 	}
 	if r.Resident {
 		state = "resident — x unload"
 	}
 	tags := ""
+	if m.Cfg.Decision.Runtime == "openai" && (sameServeURL(r.Ep.URL, m.Cfg.Decision.Server) || r.Health.APIBase == m.Cfg.Decision.Server) && r.Ep.Model == m.Cfg.Decision.Model {
+		tags += " " + InfoSt.Render("[judge next]")
+	}
 	if m.Serve.Loading == serveKeyOf(r) {
 		tags += " " + WarnSt.Render("[loading/releasing]")
 	}
-	if r.Ep.URL == m.Cfg.Model.Server && r.Ep.Model == m.Cfg.Model.Name && m.Cfg.Model.Name != "" {
+	if sameServeURL(r.Ep.URL, m.Cfg.Model.Server) && r.Ep.Model == m.Cfg.Model.Name && m.Cfg.Model.Name != "" {
 		tags += " " + InfoSt.Render("[requested next]")
 	}
 	display := r.Ep.Model
@@ -1027,7 +1213,7 @@ func serveModelRow(m Model, i int, r ServeRow, inner int) string {
 // discoverability never depends on terminal width.
 func (m Model) serveHints(inner int) []string {
 	var out []string
-	for _, l := range Wrap(m.ownedHint("↑↓ select · home/end rows · pgup/pgdn full details · enter "+m.serveEnterLabel()+" · u use · s start · x unload · l load · d stage device · m edit model · a apply decision · r refresh · "+m.escapeHint()), inner) {
+	for _, l := range Wrap(m.ownedHint("↑↓ select · home/end rows · pgup/pgdn full details · enter "+m.serveEnterLabel()+" · u use worker · j judge · s start · x unload · l load · d stage device · m edit model · a apply decision · r refresh · "+m.escapeHint()), inner) {
 		out = append(out, Guidance.Render(l))
 	}
 	return out
@@ -1102,6 +1288,17 @@ func (m Model) serveContent(w int) ([]string, int) {
 				}
 			}
 		}
+		if r.Recipe != nil && !r.Health.Up {
+			executable, err := r.Recipe.Executable()
+			if err != nil {
+				state += " · launcher unavailable: " + err.Error()
+			} else {
+				state += " · installed: " + executable
+			}
+		}
+		if r.Recipe != nil && r.Ep.Label == r.Recipe.Name {
+			state = "launch recipe; endpoint " + state
+		}
 		tags := ""
 		if r.Worker {
 			tags += " " + InfoSt.Render("[worker]")
@@ -1144,6 +1341,9 @@ func (m Model) serveContent(w int) ([]string, int) {
 		}
 		lines = append(lines, identity)
 	}
+	if len(m.Serve.Installed) > 0 {
+		lines = append(lines, "Installed server launchers (not running proof): "+strings.Join(m.Serve.Installed, "; "), "Configure endpoint/launch command in serve.recipes; installation does not imply a listening URL.")
+	}
 	if len(m.Serve.Warnings) > 0 {
 		lines = append(lines, WarnSt.Render(fmt.Sprintf("inventory warnings (%d): %s", len(m.Serve.Warnings), strings.Join(m.Serve.Warnings, "; "))))
 	}
@@ -1175,6 +1375,9 @@ func (m Model) serveContent(w int) ([]string, int) {
 		for _, l := range Wrap(fmt.Sprintf("requested: %s · %s/%s · path %s · revision %s · trust %t", m.Cfg.Decision.Model, m.Cfg.Decision.Runtime, m.Cfg.Decision.Device, m.Cfg.Decision.Path, m.Cfg.Decision.Revision, m.Cfg.Decision.TrustRemoteCode), inner) {
 			lines = append(lines, Muted.Render(l))
 		}
+	}
+	if m.Cfg.Decision.Runtime == "openai" {
+		lines = append(lines, "Decision judge: "+m.Cfg.Decision.Model+" · "+m.Cfg.Decision.Server+" · next run; confidence self-reported; residency/device unreported")
 	}
 	lines = append(lines, m.renderMemory())
 	if m.Serve.MemErr != "" {

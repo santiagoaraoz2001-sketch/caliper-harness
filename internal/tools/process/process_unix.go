@@ -1,3 +1,5 @@
+//go:build !windows
+
 // Package process owns one ordinary subprocess group for a tool call.
 package process
 

@@ -327,6 +327,7 @@ func ProbeAll(client *http.Client, endpoints []Endpoint) []Health {
 
 // Recipe starts one server: argv plus its working directory.
 type Recipe struct {
+	Discovered    bool   // installed launcher choice; select an existing local asset to load
 	Runtime       string // explicit worker wire contract, independent of display name
 	Name          string
 	Kind          string
@@ -342,7 +343,7 @@ type Recipe struct {
 // port from the URL (8090 when it names none). ok is false when the
 // repo (the server script) cannot be found.
 func SidecarRecipe(harnessDir, serverURL, model string, selected ...decision.Selection) (r Recipe, ok bool) {
-	if harnessDir == "" {
+	if harnessDir == "" || len(selected) > 0 && selected[0].Runtime == "openai" {
 		return Recipe{}, false
 	}
 	port := "8090"
@@ -457,6 +458,7 @@ type Proc struct {
 	cmd            *exec.Cmd
 	done           chan struct{}
 	localPath, url string
+	runtime        string
 }
 
 // Start launches a recipe detached, logging to logPath. Blank argv,
@@ -512,9 +514,17 @@ func StartContext(ctx context.Context, r Recipe, logPath string, probeTimeout ..
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("recipe %q failed to start: %v", r.Name, err)
 	}
-	p := &Proc{cmd: cmd, done: make(chan struct{}), localPath: r.localPath, url: r.URL}
+	p := &Proc{cmd: cmd, done: make(chan struct{}), localPath: r.localPath, url: r.URL, runtime: r.Runtime}
 	go func() { _ = cmd.Wait(); close(p.done) }()
 	return p, nil
+}
+
+// Runtime is the selected wire contract of the process actually launched.
+func (p *Proc) Runtime() string {
+	if p == nil {
+		return ""
+	}
+	return p.runtime
 }
 
 // PID returns only a still-owned, unreaped process identity.

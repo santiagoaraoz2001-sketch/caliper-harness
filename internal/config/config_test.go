@@ -202,7 +202,7 @@ func TestValidationIsPlainLanguage(t *testing.T) {
 		{"zero result chars", func(c *Config) { c.Subagents.MaxResultChars = 0 }, "subagents.max_result_chars must be positive, got 0"},
 		{"negative max retries", func(c *Config) { c.Workflows.MaxRetries = -1 }, "workflows.max_retries cannot be negative, got -1"},
 		{"negative retry delay", func(c *Config) { c.Workflows.RetryDelaySeconds = -1 }, "workflows.retry_delay_seconds cannot be negative, got -1"},
-		{"empty decision server", func(c *Config) { c.Decision.Server = "" }, "decision.server must name the sidecar URL"},
+		{"empty decision server", func(c *Config) { c.Decision.Server = "" }, "decision.server must be an http(s) URL"},
 		{"empty decision model", func(c *Config) { c.Decision.Model = "" }, "decision.model must name the checkpoint id"},
 		{"bad decision device", func(c *Config) { c.Decision.Device = "tpu" }, `decision.device must be auto, cpu, or gpu, got "tpu"`},
 		{"retired npu device", func(c *Config) { c.Decision.Device = "npu" }, `decision.device must be auto, cpu, or gpu, got "npu"`},

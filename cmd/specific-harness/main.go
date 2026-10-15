@@ -290,6 +290,9 @@ func ensureSidecarWith(cfg config.Config, note func(string)) *serve.Proc {
 }
 
 func ensureSidecarContext(ctx context.Context, cfg config.Config, note func(string)) *serve.Proc {
+	if cfg.Decision.Runtime == "openai" {
+		return nil
+	}
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -499,7 +502,7 @@ func runGraph(args cliArgs) {
 	defer s.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	dj := decision.New(cfg.Decision.Server, cfg.Decision.Model, cfg.Decision.Device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(decision.SelectionFor(cfg.Decision)).WithPrompts(pc)
+	dj := decision.New(cfg.Decision.Server, cfg.Decision.Model, cfg.Decision.Device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(decision.SelectionFor(cfg.Decision)).WithPrompts(pc).WithOutputTokens(int(cfg.Params.MaxOutputTokens))
 	api := graph.NewWithReady(s, version, sessionsDir, func(ctx context.Context, id string) (*plan.Approach, error) {
 		input, err := ask.NewFileInput(os.Stdin)
 		if err != nil {
@@ -774,12 +777,16 @@ func runDecision(args cliArgs) {
 	if err != nil {
 		fatal(err)
 	}
-	c := decision.New(server, cfg.Decision.Model, device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(selection).WithPrompts(pc)
+	c := decision.New(server, cfg.Decision.Model, device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(selection).WithPrompts(pc).WithOutputTokens(int(cfg.Params.MaxOutputTokens))
 	v, err := c.Judge(context.Background(), decision.Request{Context: ctxText, Instructions: instructions, Options: opts})
 	if err != nil {
 		fatal(err)
 	}
-	fmt.Printf("pick: %s (confidence %.2f, model %s, device %s)\n", v.Option, v.Confidence, v.Model, v.Device)
+	source := ""
+	if v.ConfidenceSource != "" {
+		source = "; " + v.ConfidenceSource
+	}
+	fmt.Printf("pick: %s (confidence %.2f%s, model %s, device %s)\n", v.Option, v.Confidence, source, v.Model, v.Device)
 }
 
 func fatal(err error) {

@@ -37,6 +37,7 @@ func settingFields() []SettingField {
 		{"params", "max_output_tokens", "output tokens including reasoning (0 = runtime policy unknown)", "int"},
 		{"auth", "mode", "auth mode", "auth"},
 		{"context", "window", "context window (0 = auto)", "int"},
+		{"decision", "server", "decision server URL", "text"},
 		{"decision", "runtime", "decision runtime", "runtime"},
 		{"decision", "path", "decision assets path (optional)", "text"},
 		{"decision", "revision", "decision revision (optional)", "text"},
@@ -105,6 +106,8 @@ func (m *Model) settingValue(f SettingField) string {
 		return c.Auth.Mode
 	case "context/window":
 		return strconv.Itoa(c.Context.Window)
+	case "decision/server":
+		return c.Decision.Server
 	case "decision/runtime":
 		return c.Decision.Runtime
 	case "decision/path":
@@ -165,7 +168,7 @@ func (m *Model) cycleField(f SettingField) {
 	case "runtime":
 		options := []string{llm.RuntimeOpenAI, llm.RuntimeOllama, llm.RuntimeMLX}
 		if f.Section == "decision" {
-			options = []string{"laya", "system_one"}
+			options = []string{"laya", "system_one", "openai"}
 		}
 		next = cycleNext(options, m.settingValue(f))
 	case "submode":
@@ -230,6 +233,8 @@ func (m *Model) applyField(f SettingField, val string) {
 		next.Auth.Mode = val
 	case "context/window":
 		setInt(&next.Context.Window)
+	case "decision/server":
+		next.Decision.Server = strings.TrimSpace(val)
 	case "decision/runtime":
 		next.Decision.Runtime = val
 	case "decision/path":
