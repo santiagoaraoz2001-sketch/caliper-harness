@@ -1,0 +1,19 @@
+Review {{.Title}}.
+workspace: {{.Workspace}} (relative paths resolve here)
+acceptance_command: {{.AcceptanceCommand}} (behavior assertion, first)
+check_command: {{.CheckCommand}} (configured suite, last)
+original execution requirements: {{.ExecutionRequest}}
+frozen task request: {{.TaskPrompt}}
+current: {{.TaskCurrent}}
+target: {{.Target}}
+sketch: {{.Sketch}}
+tests: {{.Tests}}
+Verify instructions: {{.Prompt}}
+acceptance: {{.Acceptance}}
+host worker execution evidence: {{.ExecutionEvidence}}
+current typed check facts: {{.CheckReceipt}}
+worker report (unverified): {{.Current}}
+
+Verify is instructions, not a tool name. Inspect the runtime entrypoint, responsible source and regression assertion. Reconcile source evidence with the frozen target and authored current/sketch; missing evidence stays unknown. The assertion must distinguish reported failure from target. Suite exit0 and worker reports prove neither coverage nor correctness; already-correct work needs observed evidence without mandatory edits.
+Run Verify actions independently, then the paired check episode (acceptance FIRST, configured suite LAST); later Bash or edits require a fresh whole episode. Do not modify artifacts, checks or gates. Never claim a command ran without its settled result.
+Use one tool call per reply and wait. Begin the final answer with PASS for observed acceptance, FAIL for an observed unmet condition, or UNVERIFIED with a concrete reason; include required Behavior after the verdict on the same line.

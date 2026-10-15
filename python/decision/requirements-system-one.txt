@@ -1,0 +1,5 @@
+# Optional native System One loader; checkpoint Python needs explicit trust opt-in.
+# The reviewed D1 adapter used these versions. Install in an owned environment.
+transformers==5.19.0
+torch==2.11.0
+PyYAML==6.0.1

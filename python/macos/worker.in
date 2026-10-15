@@ -1,0 +1,5 @@
+# Existing native MLX server/continuation contract; no model assets.
+mlx-lm==0.32.0
+mlx==0.32.2
+transformers==5.19.0
+PyYAML==6.0.1

@@ -1,0 +1,166 @@
+# caliper-harness.yaml — every tunable, with built-in defaults.
+# Copy to caliper-harness.yaml and delete any line to follow the built-in.
+# Percentages are 0-100. This file is drift-pinned: it must parse to the
+# exact built-in defaults (see TestExampleMatchesDefaults).
+
+context:
+  window: 0                 # model context, tokens; 0 = autodetect from hardware
+  compaction_trigger: 90    # emergency window % for automatic model-written summaries; 0 disables automatic summaries
+  compaction_keep: 40       # latest transcript % kept verbatim at compaction
+  compaction_summary: 10    # concise summary target %; full retained context governs admission
+  compaction_summary_step: 1   # writing target grows per successive compaction
+  compaction_summary_max: 20   # ceiling for the writing target, not a hard summary quota
+  summary_words_per_token: 0.75  # wording ratio for the summary target
+  output_prune_after_tokens: 50000 # only consumed output bodies strictly older than this estimate; 0 disables
+  # Age counts all subsequent messages, including reasoning and later schema messages,
+  # using the last request's calibration or the disclosed conservative byte estimate.
+  # Leading system text/tool definitions count toward occupancy, not output age.
+  # System/user intent, unread/current receipts, calls and reasoning stay exact;
+  # model-written compaction runs at the trigger or on explicit /compact.
+  inflight_outputs: 0       # deprecated percentage key: loads compatibly, has no pruning effect
+  # Migration: remove the retired unused prune_thinking key from older files.
+  # Strict loading rejects it; thinking is retained until model-written compaction.
+
+schemas:
+  inflight_cap: 0           # deprecated percentage key: loads compatibly, schemas never routinely prune
+  keep_latest: 3            # recent schemas protected during model-written compaction/resume; minimum 3
+
+retention:
+  session_months: 3         # auto-delete sessions this long after last use
+
+behavior:
+  max_tokens: 1000          # behavior doc cap, tokens; 0 disables injection
+  chars_per_token: 4        # sizing ratio for the file pre-read
+  path: behavior.md         # missing file = no behavior (silent)
+
+recall:
+  top_n: 3                  # memories auto-inserted; 0 disables recall
+  max_chars: 1000           # total recalled Unicode runes, including labels/ellipsis; 0 = unlimited
+  min_word: 4               # match words this long; 0 keeps every word
+
+auth:
+  mode: authorize-all       # yolo, authorize-risky, authorize-all
+  judged_tools: [bash, fetch]
+  free_tools: [grep, find, ask, judge, recall, find_file, find_dir, help]  # anything else is judged (fail closed)
+  max_arg_chars: 80         # arg chars shown in prompts; 0 = unlimited
+
+params:
+  max_output_tokens: 16384  # generated tokens including reasoning; 0 = runtime policy unknown
+  temperature: 0.7
+  top_k: 40
+  repetition_penalty: 1.0
+  thinking: true          # model thinking traces (wired in T6.10)
+
+model:
+  plain_request_timeout_seconds: 300 # HTTP total for plain calls; captured tool calls bypass it
+  tool_protocol: structured # explicit text compatibility available
+  runtime: openai # generic compatibility; choose ollama or mlx explicitly
+  server: http://127.0.0.1:8080/v1  # OpenAI-compatible base URL
+  name: ""                  # model id; empty means "pass --model"
+
+tools:
+  graphql:
+    max_request_bytes: 65536
+    max_selections: 1024
+    max_rows: 256
+    max_result_bytes: 65536
+    timeout_seconds: 30
+  bash:
+    default_timeout: 30     # seconds when the call omits timeout
+    max_timeout: 600        # seconds cap on any call
+    max_bytes: 65536        # returned output cap; source editing/AST is not restricted by this display budget
+    max_lines: 2000
+  search:
+    max_capture_bytes: 16777216 # aggregate raw stdout/stderr; overflow fails the query
+    max_matches: 100
+    max_bytes: 65536
+    max_line_length: 1000   # long match lines cut with a marker
+  fetch:
+    timeout_seconds: 30
+    max_bytes: 262144       # body chars kept
+
+agent:
+  max_run_seconds: 0 # no additional wall ceiling; caller cancellation still governs
+  max_steps: 0              # no separate call ceiling; positive values cap charged native calls/text attempts
+  loop_repeat: 3            # confirm after N identical calls in a row; 0 off
+  loop_stall: 5             # confirm after M steps with no success; 0 off
+
+store:
+  path: data/kuzu          # Kuzu database directory (created on first open)
+  buffer_pool_bytes: 268435456 # 256 MiB; 0=Kuzu auto, otherwise >=4096; not an RSS cap
+  # Apply policy changes in a fresh process after all database owners close.
+
+sessions:
+  path: data/sessions      # JSONL sessions directory (created on first append)
+
+# Edit the shipped prompts.yaml directly; the next run loads a fresh snapshot.
+# Optional absolute/relative override must contain the complete commented catalog.
+prompts:
+  path: ""
+# Legacy template-directory selection now requires <path>/prompts.yaml.
+# Standalone .tmpl files are not active prompt sources.
+templates:
+  path: templates          # legacy selector; custom directories need prompts.yaml
+
+subagents:
+  mode: concurrent         # sequential or concurrent
+  max_subagents: 0         # fan-out cap; 0 autodetects from hardware
+  context_window: 0        # per-subagent token budget; 0 inherits parent
+  max_result_chars: 2000   # output chars fed to parent (full text stays on node)
+
+workflows:
+  max_retries: 2           # per-task attempts after the first (0 = run once)
+  retry_delay_seconds: 0   # wait between attempts; 0 = no wait
+  verify_followup: true    # queue a review run per done task after completion
+
+decision:
+  runtime: laya            # laya or system_one; compatible downloaded checkpoints only
+  trust_remote_code: false # explicit opt-in for checkpoint code
+  # path: /absolute/downloaded/assets
+  # revision: pinned-revision
+  server: http://127.0.0.1:8090  # decision sidecar base URL
+  model: typed-decisions    # checkpoint id the sidecar must serve
+  device: auto              # auto, cpu, or gpu
+  timeout_seconds: 30       # one judgment round-trip cap
+  risk_threshold: 0.7       # at/above: obey verdict; below: ask the human
+  coherence_max_chars: 0         # legacy optional request byte guard; 0 uses native token admission
+  judgment_context_chars: 500    # context kept in a judgment event; 0 = unlimited
+  confidence_buckets: [0.5, 0.7, 0.9]  # judgments histogram edges (keep 0.7)
+  style_enforcement: false  # post-task style judge vs the workspace styleguide document (GraphQL knowledge key "styleguide"); the document stays readable when off
+
+watch:
+  max_file_bytes: 131072    # bytes per content capture, before allocation
+  startup_max_bytes: 8388608 # total initial captured bytes (8 MiB)
+  startup_max_files: 512    # eligible initial attempts, including empty/read failures
+  enabled: true             # diff-view file watcher (cwd, recursive)
+  debounce_ms: 200          # coalesce bursts per path
+  max_events: 100           # ring size; oldest drop first
+  diff_lines: 6             # lines kept per side of an event diff
+  file_lines: 200           # content lines kept per event for the viewer
+  attribute_window_s: 30    # stamp the last tool call when this fresh
+  # ignore: [scratch]       # extra rel-path prefixes (added to .git, data, state paths)
+
+serve:
+  probe_timeout_seconds: 3
+  # model_dirs: ["/absolute/existing-model-root"]  # metadata only; never downloads
+  # recipes: []             # extra start recipes; built-ins cover ollama, mlx, sidecar
+  # - name: vllm            # same-name entries replace their built-in
+  #   kind: openai
+  #   url: http://127.0.0.1:8000/v1
+  #   argv: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+  #   dir: ""
+
+ui:
+  max_file_entries: 500
+  max_file_view_lines: 2000
+  max_run_ids: 20
+  max_decision_rows: 100
+  max_alerts: 50
+  max_legacy_messages: 100
+
+tabs:
+  title_timeout_seconds: 20
+  title_every: 5            # worker retitles chat tabs every N turns; 0 disables
+
+coding:
+  check_command: "" # configured check, otherwise explicitly record a proposal

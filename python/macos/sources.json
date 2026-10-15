@@ -1,0 +1,15 @@
+{
+  "platform": "darwin-arm64",
+  "minimum_macos": "14.0",
+  "python": {
+    "version": "3.12.12",
+    "build": "20260203",
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260203/cpython-3.12.12%2B20260203-aarch64-apple-darwin-install_only_stripped.tar.gz",
+    "sha256": "f1a4a44f7e5c4a9a4a87f4dde275b500a4dbee70e1681714da6766832876eac5"
+  },
+  "ripgrep": {
+    "version": "15.1.0",
+    "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-aarch64-apple-darwin.tar.gz",
+    "sha256": "378e973289176ca0c6054054ee7f631a065874a352bf43f0fa60ef079b6ba715"
+  }
+}

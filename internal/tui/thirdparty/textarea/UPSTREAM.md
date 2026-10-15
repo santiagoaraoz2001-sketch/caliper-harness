@@ -1,0 +1,5 @@
+# Pinned Bubbles textarea leaf
+
+Copied from github.com/charmbracelet/bubbles@v1.0.0/textarea/textarea.go, original1472lines/43881bytes, SHA256 c710c8c2023382ab8f00275b81f833697cdc9d4bdcc72d32a82abb4f65b35515. Original MIT license retained. Existing public cursor/key/viewport/runeutil/memoization packages remain upstream dependencies; no wholemodule fork or go.mod replacement. Upstream code is thirdparty, separately counted from handwritten product code.
+
+Local patch: configurable sanitizer; canonicalize once for SetValue with preflightbeforeReset; refuse inherited10000line overflow for SetValue, paste and typednewline; expose cap to Ask comments; display literal tabs as singlecell→ markers with matching wrapped/verticalcaret width. Value always retains literal tab bytes. No parallel text/editor buffer; tab render copy is temporary. nil sanitizer restores upstream default. Native cap refusal leaves prior draft/cursor unchanged and reports Err; app shows it. Enter submit/CtrlJnewline is configured in composer.go. Upstream's other editing/key/layout behavior remains unchanged.

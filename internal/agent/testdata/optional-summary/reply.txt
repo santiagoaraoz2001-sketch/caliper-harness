@@ -1,0 +1,22 @@
+**Task Step:** Fix `dialogView` free-text rendering for chained Ask to show current question text + position.
+
+**Request/Constraints:** Fix TUI chained Ask showing first question's text for all free-text questions; preserve answers/comments association, cancellation, new Ask, single-question Ask, auth prompts; add regression test; run project check.
+
+**Observed:**
+- `dialogView` uses `d.Prompt` (always `qs[0].Text`) for free-text rendering instead of `d.Questions[d.QIdx].Text`.
+- Option rendering (`askOptionsView`) correctly uses `d.Questions[d.QIdx]` and shows "Question N/M".
+- `askDialog` always provides `len(qs) >= 1`; `advanceAsk` appends answers in order, increments QIdx, resets state.
+- `d.Prompt` still needed for auth dialogs.
+
+**Failed/Pending:**
+- Bug: free-text path shows wrong question text and generic "Question" title (no N/M).
+- Unverified: legacy empty-Questions path (comment mentions it) — no current caller found.
+
+**Current:**
+- Fix location: `dialogView` in dialog rendering.
+- Test: `TestAskDialogAnswer` checks view contains prompt text — must still pass.
+
+**Next:**
+- Modify `dialogView` free-text branch to use `d.Questions[d.QIdx].Text` and title `"Question N/M"` where N=`d.QIdx+1`, M=`len(d.Questions)`.
+- Add regression test: chained option→free-text→option and consecutive free-text, verifying each step shows correct text and position.
+- Run project check.

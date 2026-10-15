@@ -1,0 +1,64 @@
+[
+  {
+    "fixture": "ollama-sse.txt",
+    "historical_source": "verification/2026-10-09-product-eval/live/wire/worker-00006.response.txt",
+    "sha256": "655494ee7da39c87a43ad16c0bf77275de90816f8f2c8e7b30680188c6cd6ac5",
+    "bytes": 21031,
+    "stream": true,
+    "reply_sha256": "07f99bfbcff83a24d1cb58a79645421d5216f1b798aad5b9f50ff7f9977148b5",
+    "served_model": "qwen3:8b",
+    "usage_in": 417,
+    "usage_out": 97,
+    "nonempty_callbacks": 11,
+    "end_signals": [
+      "stop",
+      "DONE"
+    ],
+    "classification": "Byte-exact historical actual Mac backend response replay, NOT new inference/model capability qualification"
+  },
+  {
+    "fixture": "ollama-plain.json",
+    "historical_source": "verification/2026-10-09-product-eval/live/wire/worker-00053.response.txt",
+    "sha256": "ec8aa92f0a38e90c858cbc1a7baa03c8b9268165620399a9126bb02309bbe875",
+    "bytes": 2501,
+    "stream": false,
+    "reply_sha256": "9ecf4488ffe5298d9c12036ca5e61bc41f89e0b6c4b06f98b1878b12316b85ce",
+    "served_model": "qwen3:8b",
+    "usage_in": 2720,
+    "usage_out": 463,
+    "nonempty_callbacks": 0,
+    "end_signals": [],
+    "classification": "Byte-exact historical actual Mac backend response replay, NOT new inference/model capability qualification"
+  },
+  {
+    "fixture": "mlx-plain.json",
+    "historical_source": "verification/2026-10-09-product-eval/agents/coding/native-mlx/wire/native-mlx-00002.response.txt",
+    "sha256": "142167c8a7743ec035569fbf5ca317305f8d8aa65d3094762ac5719eaeb48606",
+    "bytes": 1129,
+    "stream": false,
+    "reply_sha256": "aa6ae8e29f885f7a4f5f2b2c47fc189c60fd546bd5bbddb0a5d873dce9a65868",
+    "served_model": "/Users/santiagoaraoz/.cache/huggingface/hub/models--mlx-community--SmolLM2-135M-Instruct/snapshots/422de227b90002f443a21a58b1087f6ee7632731",
+    "usage_in": 49,
+    "usage_out": 147,
+    "nonempty_callbacks": 0,
+    "end_signals": [],
+    "classification": "Byte-exact historical actual Mac backend response replay, NOT new inference/model capability qualification"
+  },
+  {
+    "fixture": "mlx-sse.txt",
+    "historical_source": "verification/2026-10-09-product-eval/agents/coding/native-mlx/wire/native-mlx-00003.response.txt",
+    "sha256": "9c1a3bd7e27ff673503f8072c22b869f514e06371c8548b4e4eb7143d944f32e",
+    "bytes": 158333,
+    "stream": true,
+    "reply_sha256": "d874697f176fd22706220c6e47bbbe7aaec4f687e9ed59f57b8dcecf553260d7",
+    "served_model": "/Users/santiagoaraoz/.cache/huggingface/hub/models--mlx-community--SmolLM2-135M-Instruct/snapshots/422de227b90002f443a21a58b1087f6ee7632731",
+    "usage_in": 49,
+    "usage_out": 346,
+    "nonempty_callbacks": 345,
+    "end_signals": [
+      "stop",
+      "DONE"
+    ],
+    "classification": "Byte-exact historical actual Mac backend response replay, NOT new inference/model capability qualification"
+  }
+]

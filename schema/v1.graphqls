@@ -1,0 +1,229 @@
+# Harness state API, versioned. v1 covers memory entries only;
+# Plan/Approach/Task nodes arrive with Phase 3 (schema migrates, not forks).
+type MemoryEntry {
+  id: ID!
+  kind: String!
+  body: String!
+  # RFC3339 UTC timestamp. Plain String keeps the generated code trivial;
+  # a custom scalar is unjustified weight for an internal API.
+  createdAt: String!
+  sessionRef: String!
+}
+
+type Query {
+  """Selected historical archive evidence in the captured project. Native call arrays and recorded results stay together. Explicit successful access refreshes retention; old PASS grants no current authority."""
+  sessionEvidence(sessionId: ID!, offset: Int!, limit: Int!, callId: ID): EvidencePage!
+  """Historical task records by absolute offset and stored attempt/kind. With explicit record index and phase (execution, reviewer, check), offset/limit/callId selects that record's actual saved event groups instead. Old outcomes grant no current authority."""
+  taskEvidence(taskId: ID!, offset: Int!, limit: Int!, attempt: Int, kind: String, record: Int, phase: String, callId: ID): EvidencePage!
+  """Exact owning authored contract and explicit pending revisions; not an approval or execution receipt."""
+  revisionContract(kind: String!, id: ID!): RevisionContract!
+
+  """Read authored comments for an exact task attempt. Oversized raw logs refuse before fetch."""
+  taskComments(taskId: ID!, attempt: Int!, limit: Int!): [TaskComment!]!
+  """Read authored project knowledge heads, or an immutable version by id. Not verified execution evidence."""
+  knowledge(key: String, id: ID, limit: Int): [Knowledge!]!
+  version: String!
+  memories(kind: String, text: String, limit: Int): [MemoryEntry!]!
+  sessions: [Session!]!
+  session(id: ID!): Session
+  plan(id: ID!): Plan
+  plans(state: String): [Plan!]!
+  approach(id: ID!): Approach
+  task(id: ID!): Task
+}
+
+input FreshTaskInput {
+  planTitle: String!
+  planGoal: String!
+  approachTitle: String!
+  taskTitle: String!
+  taskPrompt: String!
+  current: String!
+  target: String!
+  sketch: String!
+  acceptance: String!
+  tests: String!
+  verify: String!
+  checkCommand: String!
+  acceptanceCommand: String!
+}
+
+type PreparedTask {
+  plan: Plan!
+  approach: Approach!
+  task: Task!
+}
+
+type Mutation {
+  """Explicit revision intent, never inferred from guidance wording. Existing artifacts survive."""
+  requestRevision(kind: String!, id: ID!, expectedSnapshot: String!, text: String!): Revision!
+  editRevision(kind: String!, id: ID!, expectedSnapshot: String!, field: String!, value: String!): RevisionContract!
+  resolveRevision(kind: String!, id: ID!, revisionId: ID!, expectedSnapshot: String!): Revision!
+
+  """Append authored advice to a current Running task attempt; no brief/check/reviewer authority."""
+  addTaskComment(taskId: ID!, expectedAttempt: Int!, text: String!): TaskComment!
+  """Author fresh Draft PAT with four explicit partial-effect receipts; does not activate, Ready or claim work."""
+  prepareTask(input: FreshTaskInput!): PreparedTask!
+  """Append an authored project note using the actual current id; empty expectedPreviousId creates a new key."""
+  appendKnowledge(key: String!, body: String!, expectedPreviousId: ID!, taskId: ID, filePath: String): Knowledge!
+  """Compatibility name for appendKnowledge; appends an immutable version with the same compare-and-set rule."""
+  putKnowledge(key: String!, body: String!, expectedPreviousId: ID!, taskId: ID, filePath: String): Knowledge! @deprecated(reason: "Use appendKnowledge; both append immutable versions")
+  """Explicitly bind a legacy unscoped plan to the captured host workspace. Does not activate or qualify work."""
+  bindPlanProject(id: ID!): Plan!
+  addMemory(kind: String!, body: String!, sessionRef: String!): MemoryEntry!
+  addSessionEvent(sessionId: ID!, kind: String!, text: String!): SessionEvent!
+  createPlan(title: String!, goal: String!): Plan!
+  createApproach(planId: ID!, title: String!): Approach!
+  createTask(approachId: ID!, title: String!, prompt: String!): Task!
+  transitionPlan(id: ID!, to: String!): Plan!
+  transitionApproach(id: ID!, to: String!): Approach!
+  transitionTask(id: ID!, to: String!): Task!
+  setTaskBlock(id: ID!, current: String!, target: String!, sketch: String!, acceptance: String!, tests: String!, verify: String!, checkCommand: String, acceptanceCommand: String): Task!
+  retirePlan(id: ID!): Plan!
+  retireApproach(id: ID!): Approach!
+}
+
+# A past run: events stream in as JSONL lines, indexed by scanning the dir.
+type Session {
+  id: ID!
+  events: [SessionEvent!]!
+}
+
+type SessionEvent {
+  time: String!
+  kind: String!
+  text: String!
+}
+
+type EvidencePage {
+  projectRoot: String!
+  sessionId: ID!
+  taskId: ID!
+  historical: Boolean!
+  nextOffset: Int
+  """An unfinished recorded call group, with no invented results. Complete earlier groups remain readable; reread this offset after settlement."""
+  unsettledOffset: Int
+  groups: [EvidenceGroup!]!
+}
+
+type EvidenceGroup {
+  reference: ID!
+  offset: Int!
+  callIds: [ID!]!
+  records: [EvidenceRecord!]!
+}
+
+type EvidenceRecord {
+  offset: Int!
+  time: String!
+  kind: String!
+  source: String!
+  """Recorded host workspace provenance; a historical worker path grants no filesystem or execution authority."""
+  workspace: String!
+  """Exact archived event text or task record JSON. Select message instead to avoid importing native reasoning."""
+  text: String!
+  message: EvidenceMessage
+}
+
+"""Exact decoded native message fields. Call arguments/results are independently selectable from reasoning and raw event text."""
+type EvidenceMessage {
+  role: String!
+  content: String!
+  thinking: String!
+  reasoning: String!
+  reasoningContent: String!
+  toolCallId: ID!
+  name: String!
+  toolCalls: [EvidenceCall!]!
+}
+
+type EvidenceCall { id: ID!, name: String!, arguments: String! }
+
+# Planning graph (T3.1: types only; root fields and lifecycle arrive in T3.2).
+# States are plain Strings — the owning package enforces legal values with
+# better errors than an enum could give.
+type Plan {
+  projectRoot: String
+  id: ID!
+  title: String!
+  goal: String!
+  state: String!
+  createdAt: String!
+  approaches: [Approach!]!
+  next: [String!]!
+}
+
+type Approach {
+  id: ID!
+  title: String!
+  state: String!
+  needsReady: Boolean!
+  createdAt: String!
+  tasks: [Task!]!
+  # Raw legacy complete state alone is not proof of qualified work.
+  qualified: Boolean!
+  next: [String!]!
+}
+
+type Task {
+  id: ID!
+  title: String!
+  prompt: String!
+  state: String!
+  createdAt: String!
+  current: String!
+  target: String!
+  sketch: String!
+  acceptance: String!
+  tests: String!
+  verify: String!
+  # Explicit command, never inferred from prose. Empty means no declared check.
+  checkCommand: String!
+  acceptanceCommand: String!
+  result: String!
+  attempts: Int!
+  execution: String!
+  executionReason: String!
+  verification: String!
+  verificationReason: String!
+  review: String!
+  attemptLog: String!
+  qualified: Boolean!
+  next: [String!]!
+}
+
+"""An immutable authored note. Host scope/session provenance cannot be supplied by the model; freshness is unknown."""
+type Knowledge {
+ id: ID!
+ key: String!
+ body: String!
+ createdAt: String!
+ sessionRef: String!
+ previousId: ID!
+ taskId: ID!
+ filePath: String!
+}
+
+type TaskComment {
+ id: ID!
+ taskId: ID!
+ attempt: Int!
+ source: String!
+ sessionRef: String!
+ text: String!
+ createdAt: String!
+}
+
+ type RevisionContract { snapshot: String!, brief: String!, pending: [Revision!]! }
+ type Revision {
+ id: ID!
+ kind: String!
+ targetKind: String!
+ targetId: ID!
+ text: String!
+ source: String!
+ sessionRef: String!
+ createdAt: String!
+ resolves: String!
+ taskIds: [ID!]!
+ }

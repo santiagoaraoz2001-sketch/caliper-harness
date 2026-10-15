@@ -1,0 +1,18 @@
+/specific-harness
+/caliper-harness
+/data/
+/python/decision/models/
+
+# Local verification campaigns: multi-GB wire captures, staged runtimes and
+# session records. Curated reports may be added explicitly later.
+/verification/
+
+# Local session stores and logs
+/internal/tui/data/
+*.log
+.DS_Store
+
+# future features: parked work, ignored by git; manifest in future/README.md
+/future/*
+!/future/README.md
+__pycache__/

@@ -1,0 +1,44 @@
+# Caliper Harness: first use on an Apple Silicon Mac
+
+This application folder is a development build. Local relocation is tested; fresh-host installation, public signing and broader coding capability are still being qualified.
+
+Keep the folder intact: `caliper-harness`, `lib/`, `bin/`, `runtime/`, `prompts.yaml`, `python/`, notices and `MANIFEST.sha256` belong together. From that folder, verify the supplied files with `shasum -a 256 -c MANIFEST.sha256`. Run the executable by its absolute path, or add the whole folder to `PATH`. Go and Xcode are builder tools; they are not needed to run the supplied executable.
+
+## Prepare your project and existing models
+
+Work from the project directory you want the model to edit. Run the supplied `caliper-harness` executable with no arguments. Startup shows the filled white/mint ASCII Specific Labs mark at70columns, scaling down on narrower terminals, followed by real configuration, prompt-catalog and command-availability checks. The full mark takes30rows and startup naturally scrolls on shorter terminals. A pending throbber accompanies work that takes time; `Ctrl+C` cancels startup. Missing tools and service failures remain named rather than appearing ready.
+
+When no worker is configured, Setup opens automatically. It lists existing reachable endpoints and complete supported local assets; it does not acquire model weights or Python environments. Use up/down and Enter to select, enter your project's exact check command, then review the model, runtime, endpoint, command and destination. Enter on Review saves through the configuration owner and returns to Chat. Setup never executes that check. Escape returns one step at a time; leaving Setup preserves the staged form, ordinary composer draft and existing configuration. Use Tab in the check field to reach the ordinary slash-command composer. `/setup` reopens its retained tab. Existing commands and controls remain available.
+
+If no model appears, start an existing compatible worker and press `r`, or configure another endpoint in `/settings`. A discovered checkpoint may still need loading through `/status`. “Found”, “configured” and “saved” do not mean inference has passed. Review uses PgUp/PgDn when the terminal is too short to show every wrapped value. Save refuses while active work owns the model or when the configuration file has changed outside Setup.
+
+For manual configuration, copy the application's `caliper-harness.yaml.example` into the project as `caliper-harness.yaml`, then edit it. If only `specific-harness.yaml` exists, the CLI still selects it; when both exist, `caliper-harness.yaml` takes precedence. An explicit `--config` always selects exactly that path. Unknown YAML keys are rejected with the key name. Paths such as `data/kuzu`, `data/sessions` and `behavior.md` are relative to your working directory. The bundled example omits legacy `templates.path`; the executable finds its shipped `prompts.yaml`.
+
+The self-contained Apple Silicon bundle supplies private standalone Python, pinned MLX worker dependencies, both supported decision adapters and their PyTorch/Transformers dependencies, and ripgrep. Its built-in recipes select those interpreters automatically. Users do not create virtual environments, activate them, run pip or install Homebrew for harness dependencies. macOS supplies Bash. Nothing changes the system Python or your project environment. Explicit custom recipes retain their original interpreter and environment.
+
+Model weights and your project's own check tools remain separate. Use compatible models you already acquired; Caliper does not download replacements. Ollama remains an optional externally installed runtime; the bundled native MLX worker does not require it. Discovery reads the standard Hugging Face and Ollama locations and their environment overrides; add other model roots to `serve.model_dirs`. The pinned worker wheel targets macOS 14 or newer on Apple Silicon. This development folder was checked on this Mac and after relocation; fresh-host/Gatekeeper and native model qualification remain separate.
+
+Set these values to match the runtimes you will use:
+
+- `model.runtime`: `mlx`, `ollama`, or `openai` for a generic compatible server.
+- `model.server`: the worker's actual API base, including `/v1` where required.
+- `model.name`: the server's actual model identity. An MLX load needs a complete local checkpoint path; an Ollama alias is not an MLX checkpoint.
+- `decision.runtime`, `decision.model`, `decision.path` and `decision.server`: the compatible downloaded decision asset and its sidecar endpoint. The shipped adapters support native Laya and System One decisions; an arbitrary chat model cannot supply the required typed decision confidence.
+- `decision.device`: use `gpu` when GPU execution is required and confirm the active device in Status. Checkpoint Python requires your explicit `decision.trust_remote_code` choice.
+- `coding.check_command`: a real project check, such as the project's documented test command. The harness records its actual exit status; passing establishes only what that check covers.
+
+For harness-owned MLX loading in the self-contained Mac folder, the default recipe already uses the private worker interpreter. Select a complete compatible local checkpoint in Status and press `l`; no Python configuration is required. Advanced explicit `mlx` recipes still preserve their selected interpreter and native arguments. For an externally managed worker or decision service, start it in its compatible environment and bind the matching endpoint and identity; saving a requested external decision selection does not activate it.
+
+Edit the application’s commented `prompts.yaml` to customize model instructions, tool guidance, decision prompts, reviews and compaction. Only the applicable sections enter context. A new run reads a validated snapshot; its roles keep that snapshot until the run settles. `prompts.path` explicitly selects another complete catalog. Missing keys, invalid interpolation or an absent explicit file refuse by name. Legacy custom template directories must contain the same `prompts.yaml`; standalone `.tmpl` files are no longer active sources. User project facts, actual tool schemas, permissions and verification rules remain owned by the harness.
+
+## Run and inspect
+
+From your project directory, run `/absolute/application-folder/caliper-harness`. The existing explicit form `/absolute/application-folder/caliper-harness tui --config caliper-harness.yaml` remains supported. `/help` lists the current commands. Open `/status` and refresh with `r`. Select a discovered model with the arrow keys: `l` loads it into memory, `u` selects it for the next run, and `x` unloads it under the displayed ownership rules. These actions do not download weights. A listed asset is not proof that its runtime can load it; inspect the actual readiness and error messages.
+
+Ask for a concrete change and its expected behavior. Ordinary coding can inspect, edit and run the declared project check directly. Use the model’s `plan` tool when planning helps or you request a plan. Planned work uses Plan→Approach→Task readiness and claims; qualifying a planned task requires its frozen behavioral check, the project check and independent reviewer PASS. Missing, failed or stale verification remains visible even if the model says it finished. Managed stops and thinking-only replies require explicit resume.
+
+`agent.max_steps: 0` means there is no separate tool-call ceiling. A positive value sets the maximum charged calls; each native array member counts once. Cancellation and configured run time still apply. Progress judgments are advisory: Continue is silent, confidence below 0.5 produces no nudge, and other valid directions preserve reasoning and literal continuation. Remove the obsolete `context.prune_thinking` key from older configurations; proactive context cleanup is deterministic, and model compaction runs at context pressure or on explicit request. File-tool output paging limits govern what enters context, separately from processing a source file.
+
+Use `/settings` to edit supported values, then press `s` to write the YAML. A refused value leaves configuration unchanged. `/sessions` opens recorded work; `/quit` exits normally. Keep your project configuration, graph, sessions, behavior file and model/runtime environments when replacing the entire application folder with an update. Do not replace the executable alone.
+
+If startup or loading fails, read the named missing executable, package, checkpoint or endpoint first. Verify it in the selected environment, then refresh Status. The harness does not silently download a replacement or switch to another model.

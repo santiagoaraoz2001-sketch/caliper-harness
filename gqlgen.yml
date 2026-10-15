@@ -1,0 +1,18 @@
+# gqlgen codegen config. Regenerate with:
+#   go run github.com/99designs/gqlgen generate
+schema:
+  - schema/*.graphqls
+exec:
+  package: generated
+  filename: internal/graph/generated/generated.go
+model:
+  package: model
+  filename: internal/graph/model/models.go
+resolver:
+  package: graph
+  filename: internal/graph/resolver.go
+  type: Resolver
+  # Owned by hand: regen never touches this file, so the Resolver struct
+  # keeps its fields and helpers. When the schema changes, the compiler
+  # (not codegen) tells us which signatures to update.
+  preserve_resolver: true
