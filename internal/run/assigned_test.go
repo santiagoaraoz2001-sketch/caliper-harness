@@ -35,7 +35,7 @@ func selectedFixtureScope(t *testing.T, s *store.Store, ref string) *session.Wor
 	return scope
 }
 
-func TestAssignedDraftEffectRemainsProjectWork(t *testing.T) {
+func TestAssignedDraftEffectRequiresClaim(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	cfg := config.Defaults()
@@ -55,11 +55,16 @@ func TestAssignedDraftEffectRemainsProjectWork(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	r.Run(context.Background(), "investigate and repair")
-	if marker, err := os.ReadFile("marker"); err != nil || string(marker) != "forbidden" {
-		t.Fatalf("draft project effect was refused: %q %v", marker, err)
+	for _, name := range []string{"read", "find_file", "find_dir", "grep", "help", "plan", "graphql"} {
+		if _, ok := r.Registry.Lookup(name); !ok {
+			t.Fatalf("draft discovery/bookkeeping missing %s", name)
+		}
 	}
-	if r.Continuation.Assignment != nil || r.Continuation.Coding == nil || r.Continuation.Coding.Attempt != 0 {
+	r.Run(context.Background(), "investigate and repair")
+	if marker, err := os.ReadFile("marker"); !os.IsNotExist(err) {
+		t.Fatalf("draft project effect executed without claim: %q %v", marker, err)
+	}
+	if r.Continuation.Assignment != nil || r.Continuation.Coding != nil && r.Continuation.Coding.Attempt != 0 {
 		t.Fatal("ordinary draft effect acquired Task claim authority")
 	}
 }

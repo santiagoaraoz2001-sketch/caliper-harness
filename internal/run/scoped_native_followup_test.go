@@ -128,8 +128,8 @@ func TestScopedHostConfiguredCheckUsesOwningDefinition(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			if _, ok := r.Registry.Lookup("check"); !ok {
-				t.Fatal("draft registry lost ordinary project check availability")
+			if _, ok := r.Registry.Lookup("check"); ok {
+				t.Fatal("draft registry exposes check before claim")
 			}
 			// Component-only projection double: keep check hidden across claim/refresh.
 			// The factory's retained definition, approvals, commands and receipts are real.

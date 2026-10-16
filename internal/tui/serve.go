@@ -948,7 +948,7 @@ func (m *Model) applyDecisionSelection() tea.Cmd {
 		a := &decisionApplied{seq: seq, url: cfg.Server, proc: p, cfg: cfg}
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.TimeoutSeconds)*time.Second)
 		defer cancel()
-		client := decision.New(cfg.Server, cfg.Model, cfg.Device, time.Duration(cfg.TimeoutSeconds)*time.Second)
+		client := decision.New(cfg.Server, cfg.Model, cfg.Device, time.Duration(cfg.TimeoutSeconds)*time.Second).WithInputLimit(cfg.MaxInputTokens)
 		h, err := client.Health(ctx)
 		if err == nil && (p.PID() != pid || h.PID != pid) {
 			err = fmt.Errorf("owned process identity changed — no activation sent")

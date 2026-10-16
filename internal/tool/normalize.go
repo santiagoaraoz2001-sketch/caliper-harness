@@ -31,6 +31,8 @@ func (r *Registry) ResolveName(name string) (Definition, bool) {
 
 // Only these owner-known fields have compatibility spellings; unknown meaning
 // remains an error. String data is never trimmed, decoded or rewritten here.
+func ArgumentName(d Definition, name string) string { return argumentName(d, name) }
+
 func argumentName(d Definition, name string) string {
 	key := strings.ToLower(strings.TrimSpace(name))
 	if d.hasParam(key) {

@@ -55,11 +55,11 @@ func TestEmittedPlanningRoleMatchesActualAssignmentRoutes(t *testing.T) {
 					if strings.Contains(system, "substitute your own task claim for worker dispatch") {
 						t.Errorf("selected role universally forbids the advertised direct claim: %s", system)
 					}
-					if names["task_start"] != (mode == "advanced") || names["ready_task"] != (mode == "advanced") || !names["write"] || !names["edit"] || !names["bash"] || !names["check"] {
+					if names["task_start"] != (mode == "advanced") || names["ready_task"] != (mode == "advanced") || names["write"] || names["edit"] || names["bash"] || names["check"] || !names["read"] || !names["find_file"] || !names["graphql"] {
 						t.Errorf("actual selected tool route changed: %s %v", mode, names)
 					}
-					if mode == "guided" && (!names["plan"] || !strings.Contains(system, "answer only plan's current question") || !strings.Contains(system, "pre-claim effects are ordinary project work") || strings.Contains(system, `plan(invoke="EXECUTE")`)) {
-						t.Errorf("guided planning lost current-question focus or ordinary draft coding: %v %s", names, system)
+					if mode == "guided" && (!names["plan"] || !strings.Contains(system, "answer only plan's current question") || !strings.Contains(system, "Finish all Task briefs for this Approach") || strings.Contains(system, `plan(invoke="EXECUTE")`)) {
+						t.Errorf("guided planning lost current-question focus or Approach drafting before claim: %v %s", names, system)
 					}
 				}
 				http.Error(w, "component request capture; no generation", http.StatusServiceUnavailable)

@@ -369,6 +369,7 @@ func (c *Client) chatStream(ctx context.Context, msgs []Message, onDelta func(st
 	complete := false
 	done := false
 	var finishErr error
+	var framingErr *ToolFramingError
 	defer func() { err = errors.Join(finishErr, err) }()
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 1024*1024), 32<<20) // Same transport guard; literal prefixes can span several output windows.
@@ -384,6 +385,9 @@ func (c *Client) chatStream(ctx context.Context, msgs []Message, onDelta func(st
 		if data == "[DONE]" {
 			complete, done = true, true
 			continue // Read through EOF: DONE cannot hide a broken HTTP transfer.
+		}
+		if framingErr != nil {
+			return "", servedModel, usage, fmt.Errorf("model server sent data after failed tool boundary; response is partial")
 		}
 		var chunk streamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil || !strings.HasPrefix(data, "{") {
@@ -415,6 +419,12 @@ func (c *Client) chatStream(ctx context.Context, msgs []Message, onDelta func(st
 			usage = Usage{In: chunk.Usage.Prompt, Out: chunk.Usage.Completion, Reported: true}
 		}
 		if msg, refused := errorMessage(chunk.Error); refused {
+			if candidate := toolFramingError(chunk.Error); candidate != nil && capture != nil && len(tools) > 0 && !complete && !done && finishErr == nil && candidate.CallIndex == len(calls) {
+				if _, callErr := orderedCalls(calls); callErr == nil {
+					framingErr = candidate
+					continue // Wait for clean EOF; a broken transfer is not repairable.
+				}
+			}
 			return "", servedModel, usage, fmt.Errorf("model server at %s refused the stream: %s — check the server and retry; reply is partial", c.baseURL, msg)
 		}
 		if done {
@@ -482,6 +492,12 @@ func (c *Client) chatStream(ctx context.Context, msgs []Message, onDelta func(st
 			return "", servedModel, usage, fmt.Errorf("response cancelled: %w; reply is partial", err)
 		}
 		return "", servedModel, usage, fmt.Errorf("stream from %s broke: %w — check the server and retry; reply is partial", c.baseURL, err)
+	}
+	if framingErr != nil {
+		if cause := context.Cause(ctx); cause != nil {
+			return "", servedModel, usage, cause
+		}
+		return "", servedModel, usage, framingErr
 	}
 	if finishErr != nil {
 		if capture != nil && capture.FinishReason == "length" {

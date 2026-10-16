@@ -218,51 +218,85 @@ func (r *Runner) nativeStep(ctx context.Context, reply llm.Message, exec Exec, l
 	args := make([]tool.Args, len(reply.ToolCalls))
 	names := make([]string, len(reply.ToolCalls))
 	q := ""
-	scopeChange, codingEffect := false, false
-	for i, call := range reply.ToolCalls {
-		if def, ok := r.Registry.ResolveName(call.Name); ok {
-			names[i] = def.Name
-		}
-		switch names[i] {
-		case "workflow_plan", "workflow_approach", "workflow_task", "workflow_focus", "task_start":
-			scopeChange = true
-		}
-		codingEffect = codingEffect || executionTool(names[i])
-	}
-	if scopeChange && codingEffect {
-		q = "scope-changing and coding calls cannot share this array; send separately and wait for each receipt; entire call array refused; no calls ran"
-	}
+	notes := make([]string, len(reply.ToolCalls))
+	authored := make([]tool.Args, len(reply.ToolCalls))
+	parseErrors := make([]error, len(reply.ToolCalls))
+	_, mixed, _ := tool.Extract(reply.Content, r.Prompts)
+	// Establish complete, unambiguous identities/arguments for the entire array
+	// before seeking any repair. Original calls stay byte-exact in the archive.
 	for i, c := range reply.ToolCalls {
 		if c.ID == "" || strings.ContainsAny(c.ID, "\r\n\t ") || c.Name == "" || ids[c.ID] {
 			return "", "", fmt.Errorf("uncorrelatable native call IDs/names")
 		}
 		ids[c.ID] = true
-		if names[i] == "plan" && len(reply.ToolCalls) != 1 {
-			q = "plan changes the planning phase; call it alone, then wait for its receipt; entire call array refused; no calls ran"
-		}
-		// Shape errors in argument JSON are repairable refusals via
-		// ValidateJSON below; genuinely ambiguous bytes (duplicate keys,
-		// trailing data, not one object) have no settled meaning to
-		// repair toward and stay hard failures.
-		if _, e := tool.JSONObject(c.Arguments); errors.Is(e, tool.ErrAmbiguousArguments) {
+		parsed, e := tool.JSONObject(c.Arguments)
+		if errors.Is(e, tool.ErrAmbiguousArguments) {
 			return "", "", e
 		}
+		authored[i], parseErrors[i] = tool.Args(parsed), e
+	}
+	repairAllowed := !mixed
+	for _, e := range parseErrors {
+		repairAllowed = repairAllowed && e == nil
+	}
+	for i, c := range reply.ToolCalls {
 		def, ok := r.Registry.ResolveName(c.Name)
+		repair := ""
 		if !ok {
-			q = fmt.Sprintf("unknown tool %q; entire call array refused; no calls ran", c.Name)
+			repair = fmt.Sprintf("unknown tool %q", c.Name)
 		} else {
-			defs[i] = def
-			var repair string
-			args[i], repair = tool.ValidateJSON(def, c.Arguments)
-			if repair == "" {
-				defs[i], args[i], repair = prepareInvocation(ctx, def, args[i])
-			}
-			if repair != "" {
-				q = "entire call array refused; no calls ran: " + repair
+			defs[i], names[i] = def, def.Name
+			if parseErrors[i] != nil {
+				_, repair = tool.ValidateJSON(def, c.Arguments)
+			} else {
+				var discarded []string
+				input := authored[i]
+				if !mixed {
+					input, discarded = tool.NormalizeOpening(def, input)
+				}
+				raw, e := json.Marshal(input)
+				if e != nil {
+					return "", "", e
+				}
+				args[i], repair = tool.ValidateJSON(def, string(raw))
+				if repair == "" && len(discarded) > 0 {
+					notes[i] = r.Prompts.Format("repair.opening.receipt", strings.Join(discarded, ", "))
+				}
 			}
 		}
+		if repair != "" && repairAllowed {
+			fixed, values, selected, e := r.repairInvocation(ctx, c.Name, authored[i], repair, log, reply)
+			if e != nil {
+				return "", "", e
+			}
+			if selected {
+				defs[i], args[i], names[i], repair = fixed, values, fixed.Name, ""
+				notes[i] = r.Prompts.Format("repair.call_reconstructed.receipt", fixed.Name)
+			}
+		}
+		if repair == "" && !mixed {
+			defs[i], args[i], repair = prepareInvocation(ctx, defs[i], args[i])
+		}
+		if repair != "" {
+			q = "entire call array refused; no calls ran: " + repair
+		}
 	}
-	if _, found, _ := tool.Extract(reply.Content, r.Prompts); found {
+	// Policies apply to effective calls, including D1-selected corrections.
+	scopeChange, codingEffect := false, false
+	for _, name := range names {
+		switch name {
+		case "workflow_plan", "workflow_approach", "workflow_task", "workflow_focus", "task_start":
+			scopeChange = true
+		}
+		codingEffect = codingEffect || executionTool(name)
+		if name == "plan" && len(reply.ToolCalls) != 1 {
+			q = "plan changes the planning phase; call it alone, then wait for its receipt; entire call array refused; no calls ran"
+		}
+	}
+	if scopeChange && codingEffect {
+		q = "scope-changing and coding calls cannot share this array; send separately and wait for each receipt; entire call array refused; no calls ran"
+	}
+	if mixed {
 		q = r.Prompts.Text("repair.native.mixed_protocol")
 	}
 	if remaining != nil && len(reply.ToolCalls) > *remaining {
@@ -318,6 +352,7 @@ func (r *Runner) nativeStep(ctx context.Context, reply llm.Message, exec Exec, l
 					executed = true
 					r.nativeCharges++
 					text, sig, productive = r.invokeValidated(ctx, defs[i], args[i], exec)
+					text = annotateInvocationResult(text, notes[i])
 				}
 			}
 		}

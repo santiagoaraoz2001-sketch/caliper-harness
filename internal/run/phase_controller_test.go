@@ -122,8 +122,8 @@ func TestMainPhaseCheckRemediation(t *testing.T) {
 						}
 						if mainCalls == 0 {
 							for _, name := range []string{"bash", "edit", "write", "check"} {
-								if !names[name] {
-									t.Errorf("draft phase hides ordinary project tool %s", name)
+								if names[name] {
+									t.Errorf("draft phase exposes effect %s", name)
 								}
 							}
 						}
@@ -275,8 +275,8 @@ func TestMainPlanningWithoutConfiguredCheck(t *testing.T) {
 					}
 				}
 				for _, name := range []string{"edit", "write", "bash", "check"} {
-					if !names[name] {
-						t.Errorf("draft ordinary project tool %s missing", name)
+					if names[name] {
+						t.Errorf("draft phase exposes effect %s", name)
 					}
 				}
 				delta, finish := map[string]any{"content": "check proposal remains unclaimed"}, "stop"

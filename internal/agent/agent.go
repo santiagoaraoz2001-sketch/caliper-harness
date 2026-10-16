@@ -905,6 +905,48 @@ steps:
 		} else {
 			reply, _, u, err = r.chat(ctx, transcript)
 		}
+		var framing *llm.ToolFramingError
+		if errors.As(err, &framing) && ctx.Err() == nil && !native.OutputLimit {
+			fixed, selected, recoveryErr := r.recoverFraming(ctx, native, framing, func(k, v string) error { log(k, v); return sessErr })
+			if recoveryErr != nil {
+				if ctx.Err() != nil {
+					return finish(outcome.Cancelled, ctx.Err().Error(), "", ctx.Err())
+				}
+				return finish(outcome.Failed, recoveryErr.Error(), "", recoveryErr)
+			}
+			if selected {
+				native, err = fixed, nil
+			} else {
+				// Keep the worker's actual reasoning, but no active calls from a
+				// refused array. The exact raw reply is in tool-framing-failure.
+				retained := native.Message.Clone()
+				retained.ToolCalls = nil
+				r.Continuation.Entries = append(r.Continuation.Entries, session.Entry{Kind: "reply", Message: retained})
+				feedback := r.Prompts.Format("repair.framing.unrepaired", framing.Reason, framing.Draft)
+				log("tool-framing-feedback", feedback)
+				add("failure", "user", feedback, false)
+				if sessErr != nil {
+					return finish(outcome.Failed, sessErr.Error(), "", sessErr)
+				}
+				r.recordUsage(u)
+				measurePrompt(u)
+				if watch != nil {
+					if trip := watch.observe("tool-framing:"+framing.Draft, false, r.LoopRepeat, r.LoopStall); trip != "" {
+						r.progressCheckpoint(step, startedAt)
+						advice, adviceErr := r.confirmLoop(ctx, watch, trip, func(k, v string) error { log(k, v); return sessErr }, feedback)
+						if adviceErr != nil {
+							return finish(outcome.Failed, adviceErr.Error(), "", adviceErr)
+						}
+						if advice != "" {
+							add("guidance", "user", advice, false)
+						}
+						watch.reset()
+					}
+				}
+				transcript = r.Continuation.Messages()
+				continue
+			}
+		}
 		if err != nil {
 			if !native.OutputLimit || ctx.Err() != nil {
 				r.Continuation.Measured = false
@@ -1090,7 +1132,7 @@ steps:
 		obs, sig, productive := r.handleCall(ctx, call, repair, exec)
 		log("result", obs)
 		kind := "output"
-		if def, ok := r.Registry.ResolveName(call.Name); ok && repair == "" && len(call.Slots) == 0 && len(def.Params) > 0 && !boundTaskOmission(def) {
+		if def, ok := r.Registry.ResolveName(call.Name); ok && repair == "" && len(call.Slots) == 0 && len(def.Params) > 0 && !boundTaskOmission(def) && !def.Opening {
 			_ = def
 			kind = "schema"
 		} else if !productive {
@@ -1187,22 +1229,63 @@ func boundTaskOmission(def tool.Definition) bool {
 }
 
 func (r *Runner) handleInvocation(ctx context.Context, call tool.Call, repair, nativeJSON string, exec Exec) (string, string, bool) {
-	def, ok := r.Registry.ResolveName(call.Name)
-	if !ok {
-		return r.Prompts.Format("repair.unknown_tool", call.Name, strings.Join(r.Registry.Names(), ", ")), "", false
-	}
-	if len(call.Slots) == 0 && nativeJSON == "" && len(def.Params) > 0 && !boundTaskOmission(def) {
-		return r.Prompts.Format("repair.schema_only", def.Name, def.Schema()), "", false
-	}
 	if repair != "" {
 		return repair, "", false
 	}
-	args, q := tool.Validate(def, call.Slots)
+	log := func(kind, text string) error {
+		if r.Session != nil {
+			return r.Session.Append(ctx, r.SessionID, kind, text)
+		}
+		return nil
+	}
+	authored := tool.Args{}
+	for name, value := range call.Slots {
+		authored[name] = value
+	}
 	if nativeJSON != "" {
-		args, q = tool.ValidateJSON(def, nativeJSON)
+		parsed, err := tool.JSONObject(nativeJSON)
+		if err != nil {
+			return err.Error(), "", false
+		}
+		authored = tool.Args(parsed)
+	}
+	def, ok := r.Registry.ResolveName(call.Name)
+	var args tool.Args
+	q, note := "", ""
+	if !ok {
+		q = r.Prompts.Format("repair.unknown_tool", call.Name, strings.Join(r.Registry.Names(), ", "))
+	} else {
+		if len(call.Slots) == 0 && nativeJSON == "" && len(def.Params) > 0 && !boundTaskOmission(def) && !def.Opening {
+			return r.Prompts.Format("repair.schema_only", def.Name, def.Schema()), "", false
+		}
+		input, discarded := tool.NormalizeOpening(def, authored)
+		if nativeJSON != "" {
+			raw, err := json.Marshal(input)
+			if err != nil {
+				return err.Error(), "", false
+			}
+			args, q = tool.ValidateJSON(def, string(raw))
+		} else {
+			slots := map[string]string{}
+			for name, value := range input {
+				slots[name] = value.(string)
+			}
+			args, q = tool.Validate(def, slots)
+		}
+		if q == "" && len(discarded) > 0 {
+			note = r.Prompts.Format("repair.opening.receipt", strings.Join(discarded, ", "))
+		}
 	}
 	if q != "" {
-		return q, "", false
+		fixed, values, selected, err := r.repairInvocation(ctx, call.Name, authored, q, log)
+		if err != nil {
+			return "call not executed: " + err.Error(), "", false
+		}
+		if !selected {
+			return q, "", false
+		}
+		def, args = fixed, values
+		note = r.Prompts.Format("repair.call_reconstructed.receipt", def.Name)
 	}
 	def, args, q = prepareInvocation(ctx, def, args)
 	if q != "" {
@@ -1217,7 +1300,34 @@ func (r *Runner) handleInvocation(ctx context.Context, call tool.Call, repair, n
 			return "call not executed: normalized invocation recording failed: " + err.Error(), "", false
 		}
 	}
-	return r.invokeValidated(ctx, def, args, exec)
+	text, sig, productive := r.invokeValidated(ctx, def, args, exec)
+	return annotateInvocationResult(text, note), sig, productive
+}
+
+// Keep structured tool receipts parseable; existing data/effects remain unchanged.
+func annotateInvocationResult(text, note string) string {
+	if note == "" {
+		return text
+	}
+	const prefix = "tool result:\n"
+	if strings.HasPrefix(text, prefix) {
+		var object map[string]json.RawMessage
+		if json.Unmarshal([]byte(strings.TrimPrefix(text, prefix)), &object) == nil && object != nil {
+			// A result owner may already use this name; never overwrite its data.
+			key := "_harness_call_note"
+			for n := 2; ; n++ {
+				if _, exists := object[key]; !exists {
+					break
+				}
+				key = fmt.Sprintf("_harness_call_note_%d", n)
+			}
+			object[key], _ = json.Marshal(note)
+			if raw, err := json.Marshal(object); err == nil {
+				return prefix + string(raw)
+			}
+		}
+	}
+	return text + "\n" + note
 }
 
 // Original call bytes stay in the reply archive; this receipt records the exact
@@ -1354,14 +1464,24 @@ func (r *Runner) invokeValidated(ctx context.Context, def tool.Definition, args 
 	if res.Failed {
 		return "tool result:\n" + res.Text, callSignature(def.Name, args), false
 	}
+	note := ""
 	if res.Focus != nil {
 		value := *res.Focus
+		if a := r.Continuation.Assignment; a != nil && r.ClaimedTaskScope(&session.WorkflowScope{Store: a.Store, Kind: "task", ID: a.TaskID}) && !r.ClaimedTaskScope(res.Focus) {
+			// Browsing/metadata can return another node, but cannot hand off an
+			// unfinished claim or strand its check/review behind another tool view.
+			note = r.Prompts.Format("continuation.workflow.active_claim_focus", value.Kind, value.ID, a.TaskID)
+			if def.Name == "workflow_focus" {
+				res.Text = strings.Replace(res.Text, "workflow focus for next request:", "requested workflow target:", 1)
+			}
+			value = session.WorkflowScope{Store: a.Store, Kind: "task", ID: a.TaskID}
+		}
 		r.pendingFocus = &value
 	}
 	if res.Truncated {
-		return "tool result (truncated):\n" + res.Text, callSignature(def.Name, args), true
+		return annotateInvocationResult("tool result (truncated):\n"+res.Text, note), callSignature(def.Name, args), true
 	}
-	return "tool result:\n" + res.Text, callSignature(def.Name, args), true
+	return annotateInvocationResult("tool result:\n"+res.Text, note), callSignature(def.Name, args), true
 }
 
 func systemPrompt(reg *tool.Registry) string {

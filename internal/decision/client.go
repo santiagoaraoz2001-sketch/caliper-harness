@@ -24,12 +24,13 @@ const (
 
 // Client talks to the decision sidecar's /judge endpoint.
 type Client struct {
-	Prompts  *prompts.Catalog
-	baseURL  string
-	model    string
-	device   string
-	expected *Selection
-	http     *http.Client
+	Prompts    *prompts.Catalog
+	baseURL    string
+	model      string
+	device     string
+	inputLimit int
+	expected   *Selection
+	http       *http.Client
 }
 
 // New returns a client for a sidecar base URL (e.g. http://127.0.0.1:8090),
@@ -41,6 +42,12 @@ func New(server, model, device string, timeout time.Duration) *Client {
 		device:  device,
 		http:    &http.Client{Timeout: timeout},
 	}
+}
+
+// WithInputLimit sets the complete native judgment input budget in tokens.
+func (c *Client) WithInputLimit(tokens int) *Client {
+	c.inputLimit = tokens
+	return c
 }
 
 // Request is one judgment: pick the option that best fits the context.
@@ -63,12 +70,14 @@ type Verdict struct {
 }
 
 type judgeRequest struct {
-	Model        string     `json:"model"`
-	Device       string     `json:"device"`
-	Context      string     `json:"context"`
-	Instructions string     `json:"instructions,omitempty"`
-	Options      []string   `json:"options"`
-	Expected     *Selection `json:"expected,omitempty"`
+	MaxInputTokens int        `json:"max_input_tokens,omitempty"`
+	DeadlineUnixMS int64      `json:"deadline_unix_ms,omitempty"`
+	Model          string     `json:"model"`
+	Device         string     `json:"device"`
+	Context        string     `json:"context"`
+	Instructions   string     `json:"instructions,omitempty"`
+	Options        []string   `json:"options"`
+	Expected       *Selection `json:"expected,omitempty"`
 }
 
 type judgeResponse struct {
@@ -112,7 +121,12 @@ func (c *Client) Judge(ctx context.Context, r Request) (Verdict, error) {
 	if c.expected != nil && !nativeRuntime(c.expected.Runtime) {
 		return Verdict{}, fmt.Errorf("decision runtime %q is unsupported; use laya or system_one", c.expected.Runtime)
 	}
+	var deadlineUnixMS int64
+	if deadline, ok := ctx.Deadline(); ok {
+		deadlineUnixMS = deadline.UnixMilli()
+	}
 	buf, err := json.Marshal(judgeRequest{
+		DeadlineUnixMS: deadlineUnixMS, MaxInputTokens: c.inputLimit,
 		Model: c.model, Device: c.device,
 		Context: r.Context, Instructions: r.Instructions, Options: r.Options, Expected: c.expected,
 	})
@@ -203,10 +217,17 @@ func nativeCapacityRefusal(body []byte) bool {
 	if response.Error == "complete context does not fit the selected Laya model; shorten context/options" {
 		return true
 	}
-	var count, maximum int
-	const format = "request has %d tokens; model context limit is %d; shorten context/options"
-	n, err := fmt.Sscanf(response.Error, format, &count, &maximum)
-	return err == nil && n == 2 && maximum > 0 && count > maximum && response.Error == fmt.Sprintf(format, count, maximum)
+	for _, format := range []string{
+		"request has %d tokens; model context limit is %d; shorten context/options",
+		"request has %d tokens; decision input limit is %d; shorten context/options",
+	} {
+		var count, maximum int
+		n, err := fmt.Sscanf(response.Error, format, &count, &maximum)
+		if err == nil && n == 2 && maximum > 0 && count > maximum && response.Error == fmt.Sprintf(format, count, maximum) {
+			return true
+		}
+	}
+	return false
 }
 
 func excerpt(b []byte) string {

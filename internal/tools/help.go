@@ -13,7 +13,7 @@ import (
 // Help resolves the active view at execution time, including newly claimed checks.
 func helpDefinition(cfg config.Config, reg *tool.Registry, pc *prompts.Catalog, current ...func() *tool.Registry) tool.Definition {
 	pc = prompts.Select(pc)
-	return tool.Definition{Prompts: pc, Name: "help", Desc: pc.Text("tools.help.description"), Purpose: pc.Text("tools.help.purpose"), Params: []tool.Param{{Name: "topic", Type: tool.TypeString, AllowEmpty: true, Desc: pc.Text("tools.help.parameters.topic")}}, Execute: func(ctx context.Context, a tool.Args) (tool.Result, error) {
+	return tool.Definition{Opening: true, Prompts: pc, Name: "help", Desc: pc.Text("tools.help.description"), Purpose: pc.Text("tools.help.purpose"), Params: []tool.Param{{Name: "topic", Type: tool.TypeString, AllowEmpty: true, Desc: pc.Text("tools.help.parameters.topic")}}, Execute: func(ctx context.Context, a tool.Args) (tool.Result, error) {
 		if err := ctx.Err(); err != nil {
 			return tool.Result{}, err
 		}

@@ -1190,7 +1190,7 @@ func (m *Model) compactChat() tea.Cmd {
 	}
 	server, model, runtime := m.Server, m.ModelName, cfg.Model.Runtime
 	params := run.ModelParams(cfg.Params)
-	dj := decision.New(cfg.Decision.Server, cfg.Decision.Model, cfg.Decision.Device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(decision.SelectionFor(cfg.Decision)).WithPrompts(pc)
+	dj := decision.New(cfg.Decision.Server, cfg.Decision.Model, cfg.Decision.Device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(decision.SelectionFor(cfg.Decision)).WithPrompts(pc).WithInputLimit(cfg.Decision.MaxInputTokens)
 	r := agent.Runner{Prompts: pc, ModelKey: m.contextKey(), Model: llm.New(server, model).WithPlainTimeout(time.Duration(cfg.Model.PlainRequestTimeoutSeconds) * time.Second).WithRuntime(runtime).WithParams(params), MaxTokens: m.St.CtxWindow, TemplatesDir: cfg.TemplatesDir(), Compaction: agent.Compaction{Summary: cfg.Context.Summary, Step: cfg.Context.SummaryStep, Max: cfg.Context.SummaryMax, WordsPerToken: cfg.Context.SummaryWordsPerToken}, Judge: dj.Judge, Threshold: cfg.Decision.RiskThreshold, JudgmentContextChars: cfg.Decision.JudgmentContextChars}
 	r.ThinkingLoop = run.ThinkingLoopPolicy(cfg)
 	var ctx context.Context

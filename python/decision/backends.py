@@ -210,27 +210,36 @@ def complete_usage(raw, maximum, expected=None):
         raise RuntimeError("Laya native usage does not match the admitted complete input")
 
 
+MAX_JUDGMENT_TOKENS = 15999  # Complete native input, including instructions and options.
+
+
 class Backend:
     def __init__(self, selection, model, identity, choice=None):
         self.selection, self.model, self.identity, self.choice = selection, model, identity, choice
 
-    def judge(self, context, options, instructions):
+    def judge(self, context, options, instructions, max_input_tokens=MAX_JUDGMENT_TOKENS):
         question = {"pick": {"type": "choice", "instructions": instructions, "criteria": {o: o for o in options}}}
         expected = None
+        if type(max_input_tokens) is not int or max_input_tokens <= 0:
+            raise BadRequest("max_input_tokens must be a positive integer")
+        maximum = min(self.identity["context_limit"], max_input_tokens)
+        limit_name = "decision input" if maximum < self.identity["context_limit"] else "model context"
         if self.selection.runtime == "system_one":
             count = self.model.engine.tokens(context, [self.choice(instructions, {o: o for o in options})])
             if type(count) is not int or count <= 0:
                 raise RuntimeError("native tokenizer returned an invalid token count")
-            if count > self.identity["context_limit"]:
-                raise BadRequest(f"request has {count} tokens; model context limit is {self.identity['context_limit']}; shorten context/options")
+            if count > maximum:
+                raise BadRequest(f"request has {count} tokens; {limit_name} limit is {maximum}; shorten context/options")
             raw = self.model.system_one(context, question)
         else:
             expected = laya_input(self.model, context, question["pick"])
+            if expected["input_tokens"] > maximum:
+                raise BadRequest(f"request has {expected['input_tokens']} tokens; {limit_name} limit is {maximum}; shorten context/options")
             before = getattr(self.model, "cpu_fallback_count", 0)
             raw = self.model.predict(context, question)
             if getattr(self.model, "cpu_fallback_count", 0) != before:
                 raise RuntimeError("Laya used CPU fallback; judgment refused rather than reporting the loaded GPU")
-        complete_usage(raw, self.identity["context_limit"], expected)
+        complete_usage(raw, maximum, expected)
         weights = self.model.model if self.selection.runtime == "laya" else self.model
         model_identity(weights, self.identity["native_device"].split(":")[0])
         label, confidence = typed_answer(raw, options, self.selection.runtime)
@@ -275,6 +284,9 @@ def load_backend(selection):
         identity["context_limit"] = config.get("max_position_embeddings") if isinstance(config, dict) else getattr(config, "max_position_embeddings", None)
         if type(identity["context_limit"]) is not int or identity["context_limit"] <= 0:
             raise BadRequest("native System One checkpoint has no verified context limit")
+        if target == "mps":
+            from mps_attention import install
+            identity["mps_chunked_attention"] = install(model)
         weights = model
     identity.update(model_identity(weights, target))
     identity["architecture"] = type(model).__name__
