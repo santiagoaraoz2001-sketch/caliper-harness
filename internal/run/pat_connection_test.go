@@ -74,13 +74,28 @@ func TestPATMainChecksReviewsAndHandsOffTwoTasks(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	if err := os.WriteFile("first.txt", []byte("first\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	firstBefore, err := os.Stat("first.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
 	tasks := []*plan.Task{}
 	for _, name := range []string{"first", "second"} {
-		x, err := plan.CreateTask(s, a.ID, name, "create "+name+".txt")
+		objective, sketch := "create "+name+".txt", "write requested file"
+		if name == "first" {
+			objective, sketch = "verify existing first.txt", "preserve existing file and verify current contents"
+		}
+		x, err := plan.CreateTask(s, a.ID, name, objective)
 		if err != nil {
 			t.Fatal(err)
 		}
-		x, err = plan.SetTaskBlock(s, x.ID, "file absent", "exact "+name+" artifact", "write requested file", "exact contents", "read actual bytes", "inspect file and behavioral result", "true", "test \"$(cat "+name+".txt)\" = "+name)
+		current := "file absent"
+		if name == "first" {
+			current = "already implemented before claim; first.txt contains first"
+		}
+		x, err = plan.SetTaskBlock(s, x.ID, current, "exact "+name+" artifact", sketch, "exact contents", "read actual bytes", "inspect file and behavioral result", "true", "test \"$(cat "+name+".txt)\" = "+name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -119,7 +134,11 @@ func TestPATMainChecksReviewsAndHandsOffTwoTasks(t *testing.T) {
 			if !strings.Contains(body.Messages[0].Content, "exact "+name+" artifact") {
 				t.Error("claimed task not installed at system role", mainCalls)
 			}
-			call("write", map[string]string{"path": name + ".txt", "content": name + "\n"})
+			if name == "first" {
+				call("read", map[string]string{"path": "first.txt"})
+			} else {
+				call("write", map[string]string{"path": name + ".txt", "content": name + "\n"})
+			}
 		case 2, 6:
 			delta = map[string]any{"content": "implemented the current artifact; request actual verification"}
 			reason = "stop"
@@ -162,6 +181,10 @@ func TestPATMainChecksReviewsAndHandsOffTwoTasks(t *testing.T) {
 		if e != nil || !current.Qualified() || current.Attempts != 1 || !current.Checked() {
 			t.Fatal(current, e)
 		}
+	}
+	firstAfter, err := os.Stat("first.txt")
+	if err != nil || !firstBefore.ModTime().Equal(firstAfter.ModTime()) {
+		t.Fatal("pre-claim artifact rewritten", err)
 	}
 	parent, e := plan.GetPlan(s, p.ID)
 	if e != nil || parent.State != plan.PlanComplete {

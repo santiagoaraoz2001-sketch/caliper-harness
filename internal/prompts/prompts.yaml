@@ -9,9 +9,9 @@ texts:
   # Original use sites: internal/agent/context.go:147 (basePrompt).
   # Fields: none. Supplied by the owning Go caller.
   system.coding.requirements: |2
-    Inspect responsible source and tests. For a reported defect, add and run its distinguishing regression
-    on original source, record the actual result, then repair it. Report already-correct or unreproduced
-    behavior honestly. For a new deliverable, implement the target with meaningful behavioral assertions.
+    Inspect responsible source and tests. For a reported defect still unfixed, run its distinguishing regression before
+    repairing it. For work already implemented, reuse known source and receipts; do not recreate the defect.
+    Report missing pre-change evidence honestly. For a new deliverable, implement the target with meaningful behavioral assertions.
     Use read's full-file sha256 as expected_hash. Edit one unique exact old span or a fully observed
     inclusive start_line/end_line range, never both; reread only missing bytes or after hash refusal.
     Implement the requested behavior and run check after changes: the frozen behavioral command first, project suite last. Keep the corrected
@@ -73,7 +73,8 @@ texts:
   # Stable PAT handoff instructions shared by the main executor and real workers.
   # Fields: none. The harness owns identities, checks, review and legal transitions.
   system.task.handoff: |2-
-    Implement this frozen task and use the advertised check for its behavioral command then project check.
+    For work already implemented, preserve it and address only unmet requirements. Use known source and
+    receipts; do not redo the fix. Run a fresh check for the frozen behavioral command then project check.
     Finish with actual changes, results and remaining problems; your answer requests independent review,
     not completion. Address remediation through the same task's current requeue/readiness/start route.
     After VALIDATED, report progress and follow plan's current question for the next task or approach.
@@ -90,8 +91,8 @@ texts:
     Use known facts and receipts; inspect missing facts. Honor requested grouping: each behavior
     task owns implementation, assertions and checks. A plan answer saves draft metadata and runs
     no code. Core coding tools remain usable while drafting; pre-claim effects are ordinary project
-    work. An actual claim binds the main model to its frozen task, paired checks and independent
-    review. Preserve failures and partial effects; stopped work needs authorized recovery.
+    work. For work already implemented, draft from those observations and receipts, then let the main model claim for
+    remaining work, fresh paired checks and independent review. Do not recreate the defect. Preserve failures and partial effects; stopped work needs authorized recovery.
 
   # System role: owning task settlement and explicit rework/next task.
   # Original use sites: internal/agent/context.go:141 (basePrompt).
@@ -316,9 +317,9 @@ texts:
     You are the bounded worker, not the user-facing orchestrator. Follow the actual plan/approach
     constraints and this frozen task; report comments, failures and missing decisions through the
     orchestrator. COMPLETE is a request for validation, never a self-issued success receipt.
-    Inspect source/tests. For a reported defect, add the distinguishing regression first and run it
-    on original source before fixing it. Record the actual failure without manufacturing one;
-    report already-correct or non-reproducible behavior honestly. For a new deliverable, implement
+    Inspect source/tests. For a reported defect still unfixed, run its distinguishing regression before repair. For work
+    already implemented, reuse known source and receipts; do not recreate the defect. Report missing
+    pre-change evidence honestly and address only unmet requirements. For a new deliverable, implement
     the frozen target and real behavioral assertions. Run the declared paired check using check when available, and
     report actual results and unexecuted checks. Do not revert or disable a passing deliverable to prove
     causality; a genuinely needed later control uses an isolated copy or overlay, followed by a final current check. Follow applicable behavior
@@ -561,7 +562,8 @@ texts:
     No unfinished same-project plan is present. Inspect just enough source for one bounded task,
     then use advertised prepare_task to author the brief from the request and observations.
     Fields: plan_title, plan_goal, approach_title, task_title, task_prompt, current, target,
-    sketch, acceptance, tests, verify, check_command, acceptance_command. Mark tests unexecuted.
+    sketch, acceptance, tests, verify, check_command, acceptance_command. Mark only planned tests unexecuted.
+    For work already implemented, reuse observations/receipts; claim for remaining work and fresh checks/review.
     Omit check_command to bind the configured suite; otherwise declare an inspected command.
     Declare the behavioral acceptance_command. Read the four effect receipts; after complete
     unambiguous preparation, separately call ready_task(), then task_start() after Ready. For
@@ -1306,7 +1308,7 @@ texts:
     prerequisites. Reuse suitable existing nodes through graphql instead of duplicating them.
 
     acceptance_command runs a concrete distinguishing assertion on inspected artifacts/tests, including
-    a planned regression to implement after claim. It may use the project suite if it contains the task assertions. Omit check_command
+    an existing regression or a planned assertion. It must exit nonzero on wrong behavior, not merely print a boolean. It may use the project suite if it contains the task assertions. Omit check_command
     when configured: the host binds its exact literal. When unset, author it from inspected files.
     Explicit empty or mismatched configured values refuse before effects. The actual receipt returns
     stored checkCommand and configuredCheckCommand/proposedCheckCommand identifying its source; both
@@ -1979,7 +1981,7 @@ texts:
   # host-owned.
   # Original use sites: internal/tools/graph/graph.go:93 (Preparation).
   # Fields: none. Supplied by the owning Go caller.
-  tools.prepare_task.parameters.sketch: "implementation/assertion/check steps inside this behavior task; for defects reproduce then repair; respect grouping and prerequisites"
+  tools.prepare_task.parameters.sketch: "implementation/assertion/check steps inside this behavior task; for unfixed defects reproduce then repair; preserve existing fixes; respect grouping and prerequisites"
 
   # Argument explanation for prepare_task.target; GraphQL name/type/required rules remain
   # host-owned.
@@ -2173,7 +2175,7 @@ texts:
   # Argument explanation for workflow_block.sketch; executable schema remains Go-owned.
   # Original use sites: internal/launch/build.go:118 (NewBuild).
   # Fields: none. Supplied by the owning Go caller.
-  tools.workflow_block.parameters.sketch: "intended implementation/assertion/check steps; for defects reproduce then repair within this task"
+  tools.workflow_block.parameters.sketch: "intended implementation/assertion/check steps; for unfixed defects reproduce then repair; preserve existing fixes"
 
   # Argument explanation for workflow_block.target; executable schema remains Go-owned.
   # Original use sites: internal/launch/build.go:117 (NewBuild).
@@ -2579,7 +2581,7 @@ texts:
 
   # Corrective advice for internal/tools/judge/judge.go:67; no authority or effects implied.
   # Fields: none. Supplied by the owning Go caller.
-  guidance.judge.unreachable: "start it (python3 python/decision/server.py --port 8090)"
+  guidance.judge.unreachable: "ask the user to check the selected decision server in the TUI /status page; start/load it there if harness-managed, or restore the configured external service through its own launcher. /status is a user UI action, not a coding tool. Do not search the project for server code or guess a launch command"
 
 
   # Explicit outside discovery; ordinary bound tools retain workspace scope.
@@ -2648,8 +2650,8 @@ texts:
 
   # Focused instruction; owning tool/runtime supplies the facts. Fields: none.
   progress.execute: >2-
-    For a reported defect, add and run its distinguishing regression on original source, record
-    the actual result, then repair this task's behavior. For a new deliverable, implement the
+    For a reported defect still unfixed, run its distinguishing regression then repair it. For work
+    already implemented, reuse source and receipts, preserve the fix and address only unmet requirements. For a new deliverable, implement the
     frozen target with real behavioral assertions; do not invent a prior bug. Run the required
     current paired behavioral/project check and report actual results for independent review.
     Never manufacture failure or disable a passing deliverable for a later causal control.
@@ -2681,8 +2683,9 @@ texts:
   system.coding.direct: |2
     Execute ordinary coding with core tools; no PAT is required. For guided planning, call plan with {}.
     Coding tools stay usable during drafts; pre-claim effects are ordinary project work.
-    Inspect responsible source and tests. For a reported defect, add and run a distinguishing regression
-    on original source before repairing it; report already-correct or unreproduced behavior honestly.
+    Inspect responsible source and tests. For a reported defect still unfixed, run its distinguishing regression before
+    repairing it. For work already implemented, reuse known source and receipts; do not recreate the defect.
+    Report missing pre-change evidence honestly.
     For a new deliverable, implement the target with meaningful behavioral assertions.
     Run the exact configured project check, or propose one grounded in inspected files when unset.
     Later effects invalidate a pass. Keep the passing deliverable; a genuinely needed later causal
@@ -2698,7 +2701,8 @@ texts:
     Answer only the current question and arguments shown above, then wait for its next schema.
     The host binds IDs. A plan answer saves draft metadata; it runs no code. Core coding tools remain
     usable during drafts, with pre-claim effects recorded as ordinary project work. A real Task claim
-    binds its frozen brief, actual paired checks and independent review. Preserve failures and stopped
+    binds its frozen brief, actual paired checks and independent review. For work already implemented,
+    use known observations/receipts to draft; after claim, address remaining work and run fresh checks. Preserve failures and stopped
     state. Full planning, orchestration, validation, remediation and handoff use cases:
     help(topic="reference.pat") or help(topic="reference.workers").
 
@@ -2745,7 +2749,9 @@ texts:
   planning.proof: |2-
     DRAFT PROOF: State observable acceptance, distinguishing existing/proposed assertions and the literal
     behavioral command. This task implements its behavior and assertions; no future task supplies its acceptance.
-    For a reported defect, reproduce then repair within this task; a regression-only task cannot promise post-fix behavior. Mark planned tests unexecuted.
+    For work already implemented, cite known observations/receipts and plan only remaining work plus fresh
+    checks and review. For a reported defect still unfixed, reproduce then repair. Mark planned tests unexecuted.
+    Name the regression/assertion; its command must exit nonzero on a wrong result, not just print a boolean.
     The configured project check is bound automatically; when unset, propose one from inspected files.
     The two declared roles run in order and may use the same suite if it contains the needed assertions.
 
@@ -2868,7 +2874,7 @@ texts:
 
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
   planning.answer.acceptance_command: >-
-    Which literal command executes the behavioral assertion?
+    Which literal command runs the named behavioral assertion and exits nonzero when it is wrong? Printing a boolean alone is not an assertion.
 
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
   planning.answer.check_command: >-
@@ -3033,7 +3039,9 @@ texts:
     Main/orchestrator: call plan(), answer the newest schema, then wait; the host binds IDs.
     Earlier checkpoint advice is historical. Draft objective → observations/target → proof, then subtask
     objective → execution → validation → more. more=true asks another subtask objective;
-    more=false asks reviewer instructions. Draft intentions are not executed commands.
+    more=false asks reviewer instructions. For work already implemented, draft from known observations/receipts;
+    preserve the fix and plan remaining work, fresh paired checks and independent review. Draft intentions
+    are not executed commands; prior receipts are historical, not present qualification.
     In DRAFT TASKS, plan(invoke="TASK", title="<title>", objective="<outcome>") adds a task;
     plan(invoke="COMPLETE") requests readiness after all approach briefs. At START, plan(invoke="EXECUTE")
     claims the main model's next task; its frozen brief becomes system instructions. Behavioral command then
@@ -3049,7 +3057,8 @@ texts:
     Its frozen task becomes system instructions; the host supplies actual IDs, attempts and checks.
     For intentional delegation, explicit launch runs workers for a Ready approach under its current
     schema. Workers implement frozen tasks, preserve constraints/failures and return results; they
-    neither recreate PAT nor delegate their own task. Planned execution requires real behavioral/
+    neither recreate PAT nor delegate their own task. For work already implemented, preserve it, address unmet
+    requirements and run fresh checks; do not recreate the defect. Planned execution requires real behavioral/
     project checks and independent review. Reviewer prose cannot manufacture a pass. Draft/Ready
     state or a launcher exit is not qualification. GraphQL introspection lists graph operations,
     not execution tools. Read help(topic="launch") or help(topic="reference.scope") for details.

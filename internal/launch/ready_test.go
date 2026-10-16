@@ -295,3 +295,23 @@ func TestReadyUncertaintyShowsExactJudgedContext(t *testing.T) {
 		t.Fatalf("overcap judge/ask=%d/%d", judges, asks)
 	}
 }
+
+func TestReadinessFailureUsesSelectedServiceRecovery(t *testing.T) {
+	_, aid, d := gateDeps(t, 1)
+	cause := errors.New("http://127.0.0.1:18103/judge: connection refused")
+	d.Judge = stubVerdict(decision.Verdict{}, cause)
+	err := ReadyCheck(context.Background(), d, aid)
+	if err == nil {
+		t.Fatal("outage admitted readiness")
+	}
+	for _, want := range []string{"18103", "/status", "external"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("missing %q in %v", want, err)
+		}
+	}
+	for _, bad := range []string{"8090", "python/decision/server.py"} {
+		if strings.Contains(err.Error(), bad) {
+			t.Errorf("guessed deployment in %v", err)
+		}
+	}
+}
