@@ -1,19 +1,13 @@
 <h1 align="center">Caliper Harness</h1>
-
-<pre align="center">
-        _
-       / |
-      /  |
-     /   |______________________________________________
-    /    | | | | | | | | | | | | | | | | | | | | | | |
-   /_____|_________[_____]____________________________|
-                    | | | |
-                    |_____|
-                   /
-                  /
-        measure twice - claim once
-</pre>
-
+        /|           _ 
+       / |          |  \  
+      /  |          |   \
+     /   |__________|____\________________________________
+    /    | | | | | | | | | | | | | | | | | | | | | | |    | 
+   /_____|_________[_______]______________________________|
+                    |     |
+                    |WWWWW|
+                  
 <p align="center">
   <strong>A terminal coding workspace built for small local models.</strong><br>
   By <a href="https://github.com/santiagoaraoz2001-sketch">Specific Labs</a>
