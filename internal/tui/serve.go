@@ -134,7 +134,7 @@ func (m *Model) serveEndpoints() []serve.Endpoint {
 		}
 	}
 	for _, rec := range m.serveRecipes() {
-		if rec.URL == m.Cfg.Decision.Server && m.Cfg.Decision.Runtime != "openai" {
+		if rec.URL == m.Cfg.Decision.Server {
 			continue
 		}
 		found := false
@@ -144,14 +144,6 @@ func (m *Model) serveEndpoints() []serve.Endpoint {
 		if !found && rec.URL != "" {
 			out = append(out, serve.Endpoint{Kind: rec.Kind, Label: rec.Name, URL: rec.URL})
 		}
-	}
-	if m.Cfg.Decision.Runtime == "openai" {
-		for _, e := range out {
-			if sameServeURL(e.URL, m.Cfg.Decision.Server) {
-				return out
-			}
-		}
-		return append(out, serve.Endpoint{Kind: serve.KindOpenAI, Label: "judge", URL: m.Cfg.Decision.Server, Model: m.Cfg.Decision.Model})
 	}
 	return append(out, serve.Endpoint{Kind: serve.KindSidecar, Label: "sidecar", URL: m.Cfg.Decision.Server, Model: m.Cfg.Decision.Model})
 }
@@ -567,33 +559,7 @@ func (m *Model) serveUseJudge() {
 		m.alert("info", m.Settings.DecisionNotice)
 		return
 	}
-	if r.Sidecar || !r.IsModel || r.Asset != nil || !r.Health.Up {
-		m.alert("err", "select a model from a running server catalog for the judge")
-		return
-	}
-	next := m.Cfg
-	next.Decision.Runtime, next.Decision.Model, next.Decision.Device = "openai", r.Ep.Model, "auto"
-	next.Decision.Path, next.Decision.Revision = "", ""
-	next.Decision.TrustRemoteCode = false
-	next.Decision.Server = r.Health.APIBase
-	if next.Decision.Server == "" {
-		next.Decision.Server = r.Ep.URL
-	}
-	if err := next.Validate(); err != nil {
-		m.alert("err", err.Error())
-		return
-	}
-	old := m.Cfg
-	m.Cfg = next
-	if err := m.persist(); err != nil {
-		m.Cfg = old
-		m.alert("err", err.Error())
-		return
-	}
-	m.Settings.DecisionDraft = nil
-	m.Settings.DecisionSeq++ // Supersede any older native activation receipt.
-	m.Settings.DecisionNotice = "judge selected for next run; confidence self-reported; server manages residency; device unknown (local device setting has no effect)"
-	m.alert("info", m.Settings.DecisionNotice)
+	m.alert("err", "judge selection requires a native Laya or System One candidate under the sidecar")
 }
 
 // labelOf names a row for messages: the model on model rows.
@@ -681,9 +647,6 @@ func (m *Model) serveStart() {
 		}
 	}
 	selectedModel := m.Cfg.Model.Name
-	if sameServeURL(r.Ep.URL, m.Cfg.Decision.Server) && m.Cfg.Decision.Runtime == "openai" {
-		selectedModel = m.Cfg.Decision.Model
-	}
 	bound, err := serve.BindModel(*rec, selectedModel)
 	if err != nil {
 		m.alert("err", err.Error())
@@ -938,7 +901,7 @@ func (m *Model) TrackSidecar(p *serve.Proc, h serve.Health) {
 func (m *Model) decisionOwner() *serve.Proc {
 	url := m.Cfg.Decision.Server
 	p := m.Serve.Spawned[url]
-	if m.Cfg.Decision.Runtime == "openai" || !serve.Loopback(url) || p.PID() == 0 {
+	if !serve.Loopback(url) || p.PID() == 0 {
 		return nil
 	}
 	for _, r := range m.Serve.Rows {
@@ -952,9 +915,6 @@ func (m *Model) commitExternalDecision() {
 	m.Cfg.Decision = *m.Settings.DecisionDraft
 	m.Settings.DecisionDraft = nil
 	m.Settings.DecisionNotice = "requested selection saved in memory — pending external activation (ownership unconfirmed)"
-	if m.Cfg.Decision.Runtime == "openai" {
-		m.Settings.DecisionNotice = "judge selection applies next run; confidence self-reported; server manages residency; device unknown (local device setting has no effect)"
-	}
 	m.alert("info", m.Settings.DecisionNotice)
 }
 
@@ -977,7 +937,7 @@ func (m *Model) applyDecisionSelection() tea.Cmd {
 		return nil
 	}
 	p := m.decisionOwner()
-	if p == nil || m.Settings.DecisionDraft.Runtime == "openai" {
+	if p == nil {
 		m.commitExternalDecision()
 		return nil
 	}
@@ -1176,9 +1136,6 @@ func serveModelRow(m Model, i int, r ServeRow, inner int) string {
 		state = "resident — x unload"
 	}
 	tags := ""
-	if m.Cfg.Decision.Runtime == "openai" && (sameServeURL(r.Ep.URL, m.Cfg.Decision.Server) || r.Health.APIBase == m.Cfg.Decision.Server) && r.Ep.Model == m.Cfg.Decision.Model {
-		tags += " " + InfoSt.Render("[judge next]")
-	}
 	if m.Serve.Loading == serveKeyOf(r) {
 		tags += " " + WarnSt.Render("[loading/releasing]")
 	}
@@ -1375,9 +1332,6 @@ func (m Model) serveContent(w int) ([]string, int) {
 		for _, l := range Wrap(fmt.Sprintf("requested: %s · %s/%s · path %s · revision %s · trust %t", m.Cfg.Decision.Model, m.Cfg.Decision.Runtime, m.Cfg.Decision.Device, m.Cfg.Decision.Path, m.Cfg.Decision.Revision, m.Cfg.Decision.TrustRemoteCode), inner) {
 			lines = append(lines, Muted.Render(l))
 		}
-	}
-	if m.Cfg.Decision.Runtime == "openai" {
-		lines = append(lines, "Decision judge: "+m.Cfg.Decision.Model+" · "+m.Cfg.Decision.Server+" · next run; confidence self-reported; residency/device unreported")
 	}
 	lines = append(lines, m.renderMemory())
 	if m.Serve.MemErr != "" {

@@ -343,8 +343,15 @@ type Recipe struct {
 // port from the URL (8090 when it names none). ok is false when the
 // repo (the server script) cannot be found.
 func SidecarRecipe(harnessDir, serverURL, model string, selected ...decision.Selection) (r Recipe, ok bool) {
-	if harnessDir == "" || len(selected) > 0 && selected[0].Runtime == "openai" {
+	if harnessDir == "" {
 		return Recipe{}, false
+	}
+	if len(selected) > 0 {
+		switch selected[0].Runtime {
+		case "", "laya", "system_one":
+		default:
+			return Recipe{}, false
+		}
 	}
 	port := "8090"
 	if u, err := url.Parse(serverURL); err == nil && u.Port() != "" {
@@ -455,6 +462,9 @@ func FindHarnessDir() string {
 
 // Proc is one recipe we started; only these may be stopped by us.
 type Proc struct {
+	stopTree       func() error
+	stopOnce       sync.Once
+	stopErr        error
 	cmd            *exec.Cmd
 	done           chan struct{}
 	localPath, url string
@@ -511,11 +521,17 @@ func StartContext(ctx context.Context, r Recipe, logPath string, probeTimeout ..
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if err := cmd.Start(); err != nil {
+	stopTree, err := startResident(cmd)
+	if err != nil {
 		return nil, fmt.Errorf("recipe %q failed to start: %v", r.Name, err)
 	}
-	p := &Proc{cmd: cmd, done: make(chan struct{}), localPath: r.localPath, url: r.URL, runtime: r.Runtime}
-	go func() { _ = cmd.Wait(); close(p.done) }()
+	p := &Proc{stopTree: stopTree, cmd: cmd, done: make(chan struct{}), localPath: r.localPath, url: r.URL, runtime: r.Runtime}
+	go func() {
+		_ = cmd.Wait()
+		// A launcher can exit while its server children remain alive.
+		p.cleanup()
+		close(p.done)
+	}()
 	return p, nil
 }
 
@@ -540,13 +556,23 @@ func (p *Proc) PID() int {
 	}
 }
 
-// Stop kills our process. Already-exited reads as stopped, not an error.
+// cleanup releases only the process tree established by StartContext.
+func (p *Proc) cleanup() {
+	p.stopOnce.Do(func() {
+		if p.stopTree != nil {
+			p.stopErr = p.stopTree()
+		}
+	})
+}
+
+// Stop kills our owned process tree and waits for its leader to settle.
 func (p *Proc) Stop() error {
 	if p == nil || p.cmd == nil || p.cmd.Process == nil {
 		return nil
 	}
-	if err := p.cmd.Process.Kill(); err != nil && !strings.Contains(err.Error(), "process already finished") {
-		return fmt.Errorf("could not stop: %v", err)
+	p.cleanup()
+	if p.stopErr != nil {
+		return fmt.Errorf("could not stop: %w", p.stopErr)
 	}
 	if p.done != nil {
 		select {
