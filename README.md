@@ -1,4 +1,6 @@
 <h1 align="center">Caliper Harness</h1>
+
+```
         /|           _ 
        / |          |  \  
       /  |          |   \
@@ -7,7 +9,8 @@
    /_____|_________[_______]______________________________|
                     |     |
                     |WWWWW|
-                  
+```
+               
 <p align="center">
   <strong>A terminal coding workspace built for small local models.</strong><br>
   By <a href="https://github.com/santiagoaraoz2001-sketch">Specific Labs</a>
