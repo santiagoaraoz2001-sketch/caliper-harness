@@ -89,7 +89,7 @@ func checkCoherence(ctx context.Context, d Deps, approachID string, p *plan.Plan
 		return ctx.Err()
 	}
 	if err != nil {
-		return fmt.Errorf("launch refused: the decision sidecar refused or is unreachable (%v) — start it (python3 python/decision/server.py --port 8090)", err)
+		return fmt.Errorf("launch refused: the decision sidecar refused or is unreachable (%v) — %s", err, d.Prompts.Text("guidance.judge.unreachable"))
 	}
 	if v.Option != req.Options[0] && v.Option != req.Options[1] {
 		return fmt.Errorf("launch refused: decision returned unknown readiness option %q", v.Option)
