@@ -166,7 +166,7 @@ func TestJudgeCompleteBodyLimit(t *testing.T) {
 	if len(<-bodies) != actual || calls.Load() != before+1 {
 		t.Fatal("exact wire boundary failed")
 	}
-	c.expected = &Selection{Model: "m", Runtime: "d1"}
+	c.expected = &Selection{Model: "m", Runtime: "system_one"}
 	req.MaxBytes = actual
 	before = calls.Load()
 	if _, err := c.Judge(context.Background(), req); err == nil || !strings.Contains(err.Error(), "complete request bytes") || calls.Load() != before {

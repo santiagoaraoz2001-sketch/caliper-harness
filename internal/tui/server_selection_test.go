@@ -9,55 +9,7 @@ import (
 	"specific-harness/internal/serve"
 	"strings"
 	"testing"
-	"time"
 )
-
-func TestCatalogJudgeSelectionPersistsWithoutNativeActivation(t *testing.T) {
-	m := serveModelWithModels(t)
-	m.CfgPath = filepath.Join(t.TempDir(), "config.yaml")
-	m.Serve.Sel = 2
-	worker := m.Cfg.Model
-	m.serveUseJudge()
-	if m.Cfg.Model != worker || m.Cfg.Decision.Runtime != "openai" || m.Cfg.Decision.Model != "qwen3:8b" || m.Cfg.Decision.Server != serve.OllamaURL {
-		t.Fatalf("selection %+v", m.Cfg.Decision)
-	}
-	saved, _, err := config.Load(m.CfgPath)
-	if err != nil || saved.Decision.Model != "qwen3:8b" {
-		t.Fatalf("saved %+v %v", saved.Decision, err)
-	}
-	for _, ep := range m.serveEndpoints() {
-		if ep.URL == m.Cfg.Decision.Server && ep.Kind == serve.KindSidecar {
-			t.Fatal("chat judge probed as native sidecar")
-		}
-	}
-	if m.decisionOwner() != nil || !strings.Contains(lastAlert(m).Text, "next run") {
-		t.Fatal("claimed native activation")
-	}
-}
-
-func TestCatalogJudgeSelectionRollsBackOnSaveFailure(t *testing.T) {
-	m := serveModelWithModels(t)
-	m.CfgPath = t.TempDir() // directory cannot be replaced as YAML
-	m.Serve.Sel = 2
-	old := m.Cfg
-	draft := m.Cfg.Decision
-	m.Settings.DecisionDraft, m.Settings.DecisionSeq, m.Settings.DecisionNotice = &draft, 7, "previous notice"
-	m.serveUseJudge()
-	if !reflect.DeepEqual(m.Cfg, old) || m.Settings.DecisionDraft != &draft || m.Settings.DecisionSeq != 7 || m.Settings.DecisionNotice != "previous notice" {
-		t.Fatal("failed save changed selection or staging state")
-	}
-}
-
-func TestGenericDecisionSettingsApplyDoesNotCallNativeActivation(t *testing.T) {
-	m := settingsModel(t)
-	m.applyField(settingsField("decision", "runtime", "runtime"), "openai")
-	if cmd := m.applyDecisionSelection(); cmd != nil {
-		t.Fatal("generic transport attempted activation")
-	}
-	if m.Cfg.Decision.Runtime != "openai" || !strings.Contains(m.Settings.DecisionNotice, "next run") {
-		t.Fatalf("selection %+v notice %s", m.Cfg.Decision, m.Settings.DecisionNotice)
-	}
-}
 
 func TestGGUFCandidateListedForEachConfiguredServer(t *testing.T) {
 	isolateModelRoots(t)
@@ -126,7 +78,7 @@ func TestNativeJudgeCatalogStagesExactLocalIdentity(t *testing.T) {
 			before, worker := m.Cfg.Decision, m.Cfg.Model
 			probe := m.probeServeWith(probeClient())
 			// Inventory must use its captured configuration, not later UI edits.
-			m.Cfg.Decision.Runtime = "openai"
+			m.Cfg.Decision.Runtime = "system_one"
 			got := probe().(serveProbedMsg)
 			m.Cfg.Decision = before
 			var rows []ServeRow
@@ -185,7 +137,7 @@ func TestNativeJudgeCandidateRefusesStaleRuntimeAndInvalidConfig(t *testing.T) {
 	}
 	m.Serve.Rows = []ServeRow{{Sidecar: true, IsModel: true, Asset: &serve.Asset{ID: "org/model", Path: path, Revision: "commit", Format: "safetensors", Complete: true, Runtime: "laya"}}}
 	before := m.Cfg.Decision
-	m.Cfg.Decision.Runtime = "openai"
+	m.Cfg.Decision.Runtime = "system_one"
 	m.serveUseJudge()
 	if m.Settings.DecisionDraft != nil {
 		t.Fatal("stale native row changed selected runtime")
@@ -227,61 +179,6 @@ func TestNativeJudgeCandidateUsesOwnedActivationRoute(t *testing.T) {
 	if m.Cfg.Decision.Model == "org/native" {
 		t.Fatal("unexecuted activation committed selection")
 	}
-}
-
-func TestCatalogJudgeSelectionInvalidatesPendingNativeReceipt(t *testing.T) {
-	m := serveModelWithModels(t)
-	m.CfgPath = filepath.Join(t.TempDir(), "config.yaml")
-	m.Serve.Sel = 2
-	old, seq := m.Cfg.Decision, m.Settings.DecisionSeq
-	m.Settings.Applying = true
-	m.serveUseJudge()
-	selected := m.Cfg.Decision
-	m.onServeProbed(serveProbedMsg{application: &decisionApplied{seq: seq, cfg: old, health: decision.Health{Active: &decision.Identity{NativeDevice: "cpu"}}}})
-	if !reflect.DeepEqual(m.Cfg.Decision, selected) || m.Cfg.Decision.Runtime != "openai" || !strings.Contains(m.Settings.DecisionNotice, "stale") {
-		t.Fatalf("old activation replaced new catalog selection: %+v / %s", m.Cfg.Decision, m.Settings.DecisionNotice)
-	}
-}
-
-func TestSelectedJudgeBaseRetainsLaunchRecipeAndRole(t *testing.T) {
-	isolateModelRoots(t)
-	m := settingsModel(t)
-	m.Cfg.Decision.Runtime, m.Cfg.Decision.Model = "openai", "judge-choice"
-	m.Cfg.Decision.Server = "http://127.0.0.1:18888/custom/v1"
-	m.Cfg.Model.Name = "worker-choice"
-	root := "http://127.0.0.1:18888/custom"
-	m.Cfg.Serve.Recipes = []config.RecipeConfig{{Name: "custom-judge", Kind: "openai", URL: root, Argv: []string{"/bin/sh", "-c", `printf '%s' "$1" > "$2"`, "fixture", "{model}", filepath.Join(t.TempDir(), "argv")}}}
-	got := m.probeServeWith(probeClient())().(serveProbedMsg)
-	var found []ServeRow
-	for _, r := range got.rows {
-		if !r.IsModel && strings.HasPrefix(r.Ep.URL, root) {
-			found = append(found, r)
-		}
-	}
-	if len(found) != 1 || found[0].Recipe == nil {
-		t.Fatalf("selected judge split/lost recipe: %+v", found)
-	}
-	found[0].Health = serve.Health{} // Server stopped after catalog selection.
-	m.Serve.Rows, m.Serve.Sel = found, 0
-	m.serveStart()
-	p := m.Serve.Spawned[found[0].Ep.URL]
-	if p == nil {
-		t.Fatalf("not started: %s", lastAlert(m).Text)
-	}
-	defer p.Stop()
-	out := m.Cfg.Serve.Recipes[0].Argv[5]
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		b, err := os.ReadFile(out)
-		if err == nil && len(b) > 0 {
-			if string(b) != "judge-choice" {
-				t.Fatalf("launched wrong role model %q", b)
-			}
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatal("fixture did not capture argv")
 }
 
 func TestSelectedWorkerAPIBaseRetainsOwnedRecipeIdentity(t *testing.T) {
@@ -351,5 +248,28 @@ func TestWorkerCatalogSelectionRollsBackOnSaveFailure(t *testing.T) {
 	m.serveUse()
 	if m.Cfg.Model != before || m.Server != server || m.ModelName != name || m.St.Model != session {
 		t.Fatal("failed save changed worker selection or derived state")
+	}
+}
+
+func TestOrdinaryCatalogCannotSelectJudge(t *testing.T) {
+	m := serveModelWithModels(t)
+	m.Serve.Sel = 2
+	before := m.Cfg
+	m.serveUseJudge()
+	if !reflect.DeepEqual(m.Cfg, before) || m.Settings.DecisionDraft != nil || !strings.Contains(lastAlert(m).Text, "native") {
+		t.Fatal("ordinary catalog changed judge selection")
+	}
+	m.serveUse()
+	if m.Cfg.Model.Name != "qwen3:8b" {
+		t.Fatal("worker catalog selection was affected")
+	}
+}
+
+func TestSettingsRejectsChatJudgeWithoutChangingSelection(t *testing.T) {
+	m := settingsModel(t)
+	before := m.Cfg.Decision
+	m.applyField(settingsField("decision", "runtime", "runtime"), "openai")
+	if !reflect.DeepEqual(m.Cfg.Decision, before) || m.Settings.DecisionDraft != nil {
+		t.Fatal("invalid judge selection staged")
 	}
 }

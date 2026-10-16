@@ -168,7 +168,7 @@ func (m *Model) cycleField(f SettingField) {
 	case "runtime":
 		options := []string{llm.RuntimeOpenAI, llm.RuntimeOllama, llm.RuntimeMLX}
 		if f.Section == "decision" {
-			options = []string{"laya", "system_one", "openai"}
+			options = []string{"laya", "system_one"}
 		}
 		next = cycleNext(options, m.settingValue(f))
 	case "submode":

@@ -134,8 +134,8 @@ func (c *Client) WithSelection(s Selection) *Client {
 	return c
 }
 func (c *Client) Health(ctx context.Context) (Health, error) {
-	if c.expected != nil && c.expected.Runtime == "openai" {
-		return Health{}, fmt.Errorf("OpenAI chat judge has no native decision health; inspect its selected server for catalog and residency")
+	if c.expected != nil && !nativeRuntime(c.expected.Runtime) {
+		return Health{}, fmt.Errorf("unsupported decision runtime; use laya or system_one")
 	}
 	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/health", nil)
 	if err != nil {
@@ -152,8 +152,8 @@ func (c *Client) Health(ctx context.Context) (Health, error) {
 	return DecodeHealth(resp.Body)
 }
 func (c *Client) Activate(ctx context.Context, s Selection) (Health, error) {
-	if s.Runtime == "openai" || c.expected != nil && c.expected.Runtime == "openai" {
-		return Health{}, fmt.Errorf("OpenAI chat judge activation belongs to its selected server lifecycle")
+	if !nativeRuntime(s.Runtime) || c.expected != nil && !nativeRuntime(c.expected.Runtime) {
+		return Health{}, fmt.Errorf("unsupported decision runtime; use laya or system_one")
 	}
 	b, err := json.Marshal(s)
 	if err != nil {
@@ -181,4 +181,8 @@ func (c *Client) Activate(ctx context.Context, s Selection) (Health, error) {
 		err = fmt.Errorf("activation has not established requested decision identity")
 	}
 	return h, err
+}
+
+func nativeRuntime(runtime string) bool {
+	return runtime == "" || runtime == "laya" || runtime == "system_one"
 }

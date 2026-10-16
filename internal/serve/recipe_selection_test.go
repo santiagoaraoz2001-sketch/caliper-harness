@@ -30,8 +30,10 @@ func TestRecipeModelBindingAndInstallation(t *testing.T) {
 	if _, err := (Recipe{}).Executable(); err == nil {
 		t.Fatal("external endpoint called installed")
 	}
-	if _, ok := SidecarRecipe("/repo", "http://localhost:8080/v1", "judge", decision.Selection{Runtime: "openai"}); ok {
-		t.Fatal("generic judge starts native sidecar")
+	for _, runtime := range []string{"openai", "ollama", "unknown"} {
+		if _, ok := SidecarRecipe("/repo", "http://localhost:8080/v1", "judge", decision.Selection{Runtime: runtime}); ok {
+			t.Fatalf("unsupported judge runtime %q starts native sidecar", runtime)
+		}
 	}
 }
 

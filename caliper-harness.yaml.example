@@ -114,7 +114,7 @@ workflows:
   verify_followup: true    # queue a review run per done task after completion
 
 decision:
-  runtime: laya            # laya/system_one native sidecar; openai for a chat-model judge
+  runtime: laya            # laya/system_one native decision sidecar only
   trust_remote_code: false # explicit opt-in for checkpoint code
   # path: /absolute/downloaded/assets
   # revision: pinned-revision
