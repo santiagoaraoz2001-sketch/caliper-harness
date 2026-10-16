@@ -290,7 +290,8 @@ func ensureSidecarWith(cfg config.Config, note func(string)) *serve.Proc {
 }
 
 func ensureSidecarContext(ctx context.Context, cfg config.Config, note func(string)) *serve.Proc {
-	if cfg.Decision.Runtime == "openai" {
+	if cfg.Decision.Runtime != "" && cfg.Decision.Runtime != "laya" && cfg.Decision.Runtime != "system_one" {
+		note("unsupported decision runtime: select laya or system_one")
 		return nil
 	}
 	if ctx.Err() != nil {
@@ -502,7 +503,7 @@ func runGraph(args cliArgs) {
 	defer s.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	dj := decision.New(cfg.Decision.Server, cfg.Decision.Model, cfg.Decision.Device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(decision.SelectionFor(cfg.Decision)).WithPrompts(pc).WithOutputTokens(int(cfg.Params.MaxOutputTokens))
+	dj := decision.New(cfg.Decision.Server, cfg.Decision.Model, cfg.Decision.Device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(decision.SelectionFor(cfg.Decision)).WithPrompts(pc)
 	api := graph.NewWithReady(s, version, sessionsDir, func(ctx context.Context, id string) (*plan.Approach, error) {
 		input, err := ask.NewFileInput(os.Stdin)
 		if err != nil {
@@ -777,7 +778,7 @@ func runDecision(args cliArgs) {
 	if err != nil {
 		fatal(err)
 	}
-	c := decision.New(server, cfg.Decision.Model, device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(selection).WithPrompts(pc).WithOutputTokens(int(cfg.Params.MaxOutputTokens))
+	c := decision.New(server, cfg.Decision.Model, device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(selection).WithPrompts(pc)
 	v, err := c.Judge(context.Background(), decision.Request{Context: ctxText, Instructions: instructions, Options: opts})
 	if err != nil {
 		fatal(err)

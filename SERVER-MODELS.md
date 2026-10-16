@@ -4,7 +4,7 @@ This guide describes the server-management candidate under development. See SERV
 
 ## Choose the worker or judge
 
-Open `/status` and refresh with `r`. Server rows show endpoint health and the availability of their launch executable. Model rows distinguish server catalog entries from confirmed residency. Select a catalog model and press `u` for the worker or `j` for an ordinary chat-model judge. Selections apply to the next run and save to the selected configuration file.
+Open `/status` and refresh with `r`. Server rows show endpoint health and the availability of their launch executable. Model rows distinguish server catalog entries from confirmed residency. Select a catalog model and press `u` for the worker. Judges use native Laya/System One candidates under the sidecar; `j` stages those candidates only. Selections apply to the next run and save to the selected configuration file.
 
 Installed `gufo` and `llama-server` executables also appear as explicit launch choices on the configured HTTP loopback endpoint, using its existing port. Select an existing local model candidate and press `l`; discovery never starts these servers or downloads a model. Custom prefixes or other endpoint layouts use an explicit recipe.
 
@@ -36,20 +36,10 @@ argv: ["/absolute/path/to/gufo", "serve", "--host", "127.0.0.1", "--port", "8080
 
 [Gufo's server documentation](https://github.com/gufo-org/gufo/blob/main/docs/SERVER.md) identifies Linux x86-64 Strix Halo as its supported production platform. This recipe is not a claim that Gufo runs on this Mac. No Gufo-specific unload endpoint is assumed.
 
-## Ordinary chat model as judge
+## Native decision judges
 
-```yaml
-decision:
-  runtime: openai
-  server: http://127.0.0.1:8080/v1
-  model: exact-model-id-from-server-catalog
-  device: auto
-```
+Only `decision.runtime: laya` or `system_one` is supported. Ordinary OpenAI-compatible chat models cannot be selected as judges; those servers remain available for worker models. Existing configurations with `decision.runtime: openai` must select a compatible native decision service. Remove any retired `decision.chat.instructions` override from custom prompt YAML; unknown prompt keys are rejected.
 
-The selected server must support OpenAI-compatible chat completions and JSON object output. Chat judges use the existing `params.max_output_tokens` allowance; zero delegates to the server. The separate `decision.timeout_seconds` still bounds the request. Native typed judges keep their original protocol. The adapter validates the completed response and exact choice against the supplied options. It rejects incomplete, malformed or contradictory verdicts. Device remains unknown unless the selected server's lifecycle provides evidence. Confidence is the model's self-reported estimate, not a calibrated native decision probability; validate judgment quality before relying on a new model for authorization.
-
-For native Laya/System One judges, `/status` lists local safetensors candidates under the configured sidecar. Enter or `j` stages the exact local model path and snapshot revision; `a` applies through the existing ownership rules, and Settings `s` saves. External services show pending external activation. Candidate metadata does not establish runtime compatibility. The current device and explicit `trust_remote_code` permission are retained and disclosed. Native models retain their `laya`/`system_one` selection and typed sidecar protocol. Generic chat selection does not start that sidecar or claim its native health/readiness. The editable adapter instruction is `decision.chat.instructions` in `prompts.yaml`.
+For native Laya/System One judges, `/status` lists local safetensors candidates under the configured sidecar. Enter or `j` stages the exact local model path and snapshot revision; `a` applies through the existing ownership rules, and Settings `s` saves. External services show pending external activation. Candidate metadata does not establish runtime compatibility. The current device and explicit `trust_remote_code` permission are retained and disclosed. Native models retain their `laya`/`system_one` selection and typed sidecar protocol.
 
 The Decisions view and CLI summaries label each recorded confidence source. Historical verdicts without provenance remain unspecified; pooled scores across sources are not comparable.
-
-If worker and judge use different models on the same fixed-model custom endpoint, starting that custom server currently binds the judge selection. Use separate endpoints or explicitly load the intended local candidate; automatic role arbitration is not implemented.

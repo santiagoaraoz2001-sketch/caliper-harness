@@ -24,13 +24,12 @@ const (
 
 // Client talks to the decision sidecar's /judge endpoint.
 type Client struct {
-	outputTokens int
-	Prompts      *prompts.Catalog
-	baseURL      string
-	model        string
-	device       string
-	expected     *Selection
-	http         *http.Client
+	Prompts  *prompts.Catalog
+	baseURL  string
+	model    string
+	device   string
+	expected *Selection
+	http     *http.Client
 }
 
 // New returns a client for a sidecar base URL (e.g. http://127.0.0.1:8090),
@@ -110,8 +109,8 @@ func (c *Client) Judge(ctx context.Context, r Request) (Verdict, error) {
 		}
 		seen[o] = true
 	}
-	if c.expected != nil && c.expected.Runtime == "openai" {
-		return c.judgeChat(ctx, r)
+	if c.expected != nil && !nativeRuntime(c.expected.Runtime) {
+		return Verdict{}, fmt.Errorf("decision runtime %q is unsupported; use laya or system_one", c.expected.Runtime)
 	}
 	buf, err := json.Marshal(judgeRequest{
 		Model: c.model, Device: c.device,
@@ -222,7 +221,3 @@ func excerpt(b []byte) string {
 }
 
 func (c *Client) WithPrompts(pc *prompts.Catalog) *Client { c.Prompts = pc; return c }
-
-// WithOutputTokens applies the configured generation allowance to chat judges only.
-// Zero defers to the selected server; native typed judgments keep their protocol.
-func (c *Client) WithOutputTokens(n int) *Client { c.outputTokens = n; return c }
