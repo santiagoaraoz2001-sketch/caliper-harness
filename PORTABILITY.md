@@ -4,7 +4,7 @@ MacOS, Windows and Linux retain the same shared source and platform-specific bui
 
 # Windows
 
-Branch: codex/windows-conversion. Base: b5f61fc. This is an incomplete Windows source port, not a Windows release. No commits were created during this wave.
+Branch: Windows. This is a Windows source and packaging candidate, not a qualified Windows release. Historical evidence below retains its original scope.
 
 ## Implemented
 
