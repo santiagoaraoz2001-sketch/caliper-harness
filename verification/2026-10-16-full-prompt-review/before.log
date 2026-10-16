@@ -1,0 +1,5 @@
+--- FAIL: TestRunningPlanningStatusExplainsReviewHandoff (0.62s)
+    completion_instruction_test.go:25: running task mislabeled: stopped <nil>
+FAIL
+FAIL	specific-harness/internal/run	1.056s
+FAIL

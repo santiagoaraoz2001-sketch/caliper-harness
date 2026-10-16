@@ -127,10 +127,10 @@ func TestPATMainChecksReviewsAndHandsOffTwoTasks(t *testing.T) {
 			delta["tool_calls"] = []any{map[string]any{"index": 0, "id": fmt.Sprint("actual-", mainCalls), "type": "function", "function": map[string]string{"name": name, "arguments": string(raw)}}}
 		}
 		switch mainCalls {
-		case 0, 4:
+		case 0, 6:
 			call("plan", map[string]string{"invoke": "EXECUTE"})
-		case 1, 5:
-			name := []string{"first", "second"}[(mainCalls-1)/4]
+		case 1, 7:
+			name := []string{"first", "second"}[(mainCalls-1)/6]
 			if !strings.Contains(body.Messages[0].Content, "exact "+name+" artifact") {
 				t.Error("claimed task not installed at system role", mainCalls)
 			}
@@ -139,21 +139,34 @@ func TestPATMainChecksReviewsAndHandsOffTwoTasks(t *testing.T) {
 			} else {
 				call("write", map[string]string{"path": name + ".txt", "content": name + "\n"})
 			}
-		case 2, 6:
+		case 2:
+			call("check", map[string]string{})
+		case 3:
+			if !strings.Contains(body.Messages[len(body.Messages)-1].Content, "Current paired check passed") {
+				t.Error("passed check omitted review handoff", body.Messages[len(body.Messages)-1].Content)
+			}
+			call("plan", map[string]string{"invoke": "STATUS"})
+		case 4, 8:
+			if mainCalls == 4 {
+				last := body.Messages[len(body.Messages)-1].Content
+				if !strings.Contains(last, "normal final answer") || !strings.Contains(last, "no tool call") || strings.Contains(last, "running, stopped or cancelled") || strings.Contains(last, "answer only the next") {
+					t.Error("STATUS contradicts review completion", last)
+				}
+			}
 			delta = map[string]any{"content": "implemented the current artifact; request actual verification"}
 			reason = "stop"
-		case 3, 7:
+		case 5, 9:
 			call("plan", map[string]string{"invoke": "NEXT"})
-		case 8:
+		case 10:
 			call("plan", map[string]string{"invoke": "NEXT_ARTICLE"})
-		case 9:
+		case 11:
 			call("plan", map[string]string{"invoke": "COMPLETE"})
 		default:
 			delta = map[string]any{"content": "both artifacts have actual check and independent review receipts"}
 			reason = "stop"
 		}
 		mainCalls++
-		if mainCalls > 13 {
+		if mainCalls > 15 {
 			t.Error("unexpected repeated handoff requests")
 		}
 		raw, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": delta, "finish_reason": reason}}})
@@ -168,12 +181,12 @@ func TestPATMainChecksReviewsAndHandsOffTwoTasks(t *testing.T) {
 	cfg.Model.ToolProtocol = "structured"
 	cfg.Templates.Path = assignedTemplates()
 	bindDecisionFixture(t, &cfg, nil)
-	r, _, e := New(Deps{Tools: "full", Cfg: cfg, Store: s, Server: server.URL, Model: "component", Window: 32768, MaxSteps: 20, Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: "handoff", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, a.ID)}}, "create both artifacts")
+	r, _, e := New(Deps{Tools: "full", Cfg: cfg, Store: s, Server: server.URL, Model: "component", Window: 262144, MaxSteps: 20, Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: "handoff", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, a.ID)}}, "create both artifacts")
 	if e != nil {
 		t.Fatal(e)
 	}
 	_, _, e = r.Run(t.Context(), "create both artifacts")
-	if e != nil || r.Outcome.Status != outcome.Completed || mainCalls != 11 || reviews != 2 {
+	if e != nil || r.Outcome.Status != outcome.Completed || mainCalls != 13 || reviews != 2 {
 		t.Fatalf("main handoff failed: outcome=%+v calls=%d review=%d err=%v", r.Outcome, mainCalls, reviews, e)
 	}
 	for _, x := range tasks {

@@ -32,8 +32,17 @@ func nativeHelpTemplate(t *testing.T, text string) struct {
 		Name      string         `json:"name"`
 		Arguments map[string]any `json:"arguments"`
 	}
-	if err := json.Unmarshal([]byte(block), &call); err != nil {
+	if err := json.Unmarshal([]byte(block), &call.Arguments); err != nil {
 		t.Fatal(err)
+	}
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "Call ") && strings.Contains(line, " with these argument fields directly") {
+			call.Name = strings.Fields(line)[1]
+			break
+		}
+	}
+	if call.Name == "" || call.Arguments == nil {
+		t.Fatal("missing tool name or flat arguments", text)
 	}
 	return call
 }

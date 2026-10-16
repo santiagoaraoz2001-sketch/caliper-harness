@@ -45,7 +45,7 @@ func TestInterfaceZeroArgumentCurrentCall(t *testing.T) {
 		t.Fatalf("valid empty call refused: %+v %s", args, repair)
 	}
 	for _, shown := range []string{d.Schema(), func() string { _, repair := ValidateJSON(d, `{"invoke":"BEGIN"}`); return repair }()} {
-		if !strings.Contains(shown, "no arguments") || !strings.Contains(shown, `"name": "plan"`) || !strings.Contains(shown, `"arguments": {}`) || strings.Contains(shown, "slots:\n") || strings.Contains(shown, "Valid arguments: .") {
+		if !strings.Contains(shown, "no arguments") || !strings.Contains(shown, "Call plan") || !strings.Contains(shown, "\n{}\n") || strings.Contains(shown, "slots:\n") || strings.Contains(shown, "Valid arguments: .") {
 			t.Fatalf("zero-argument recovery is not explicit: %s", shown)
 		}
 	}

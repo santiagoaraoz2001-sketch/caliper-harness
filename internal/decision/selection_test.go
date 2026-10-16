@@ -197,3 +197,24 @@ func TestSelectionActualNativeD1Identity(t *testing.T) {
 		})
 	}
 }
+
+func TestSelectionNativeD1ChunkedAttentionHealth(t *testing.T) {
+	var h Health
+	if err := json.Unmarshal([]byte(nativeD1HealthBeforeMetadata), &h); err != nil {
+		t.Fatal(err)
+	}
+	h.PID = 123
+	h.Active.Selection = *h.Requested
+	b, err := json.Marshal(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire := strings.Replace(string(b), `"native_device":"mps:0"`, `"mps_chunked_attention":true,"native_device":"mps:0"`, 1)
+	actual, err := DecodeHealth(strings.NewReader(wire))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !actual.Matches(*h.Requested) || actual.Active.MPSChunkedAttention == nil || !*actual.Active.MPSChunkedAttention {
+		t.Fatal("native identity/diagnostic mismatch")
+	}
+}

@@ -72,6 +72,7 @@ type Runner struct {
 	PlanningCompletion     func(*session.WorkflowScope) (*outcome.Report, error)
 	pendingFocus           *session.WorkflowScope
 	workflowHeader         string
+	preparationQuestion    string
 	Exec                   Exec
 	MaxSteps               int
 	MaxRunSeconds          int

@@ -1,8 +1,6 @@
 package tools
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -79,18 +77,6 @@ func helpSchema(topic string, active, registered *tool.Registry, pc *prompts.Cat
 	return pc.Format("help.schema.tool", d.Name, strings.TrimSpace(d.Desc+"\n"+d.Purpose), d.CallTemplate(), slots.String()), nil
 }
 
-func nativeTemplate(name string, args map[string]any) string {
-	var data bytes.Buffer
-	encoder := json.NewEncoder(&data)
-	encoder.SetEscapeHTML(false)
-	encoder.SetIndent("", "  ")
-	_ = encoder.Encode(struct {
-		Name      string         `json:"name"`
-		Arguments map[string]any `json:"arguments"`
-	}{name, args})
-	return strings.TrimSuffix(data.String(), "\n")
-}
-
 func schemaUnknown(topic string, names []string, prefix string, pc *prompts.Catalog) error {
 	best := ""
 	for _, name := range names {
@@ -146,7 +132,7 @@ func helpGraphQLSchema(suffix string, d tool.Definition, pc *prompts.Catalog) (s
 	if output := schema.Types[field.Type.Name()]; output.IsCompositeType() {
 		call += " { " + graphSelection(schema, output) + " }"
 	}
-	text := pc.Format("help.schema.graphql.operation", graphSignature(field), nativeTemplate(d.Name, map[string]any{"query": operation + " { " + call + " }"}))
+	text := pc.Format("help.schema.graphql.operation", graphSignature(field), (tool.Definition{Name: d.Name, Prompts: pc, Example: tool.Args{"query": operation + " { " + call + " }"}}).CallTemplate())
 	if pc.Has("help.schema.graphql." + name) {
 		text += "\n" + pc.Text("help.schema.graphql."+name)
 	}

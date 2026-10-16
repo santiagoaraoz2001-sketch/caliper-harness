@@ -1,11 +1,3 @@
-Task {{.Title}}: {{.Prompt}}
-workspace: {{.Workspace}} (relative paths resolve here)
-acceptance_command: {{.AcceptanceCommand}} (behavior assertion, first)
-check_command: {{.CheckCommand}} (configured suite, last)
-current: {{.Current}}
-target: {{.Target}}
-sketch: {{.Sketch}}
-acceptance: {{.Acceptance}}
-tests: {{.Tests}}
-verify: {{.Verify}}
-Complete the task with tools. Verification uses the declared acceptance-first/suite-last check episode; use check when advertised and report any checks not actually observed; do not infer missing files/interpreters from a failed different command. When done, report observed results and follow applicable behavior instructions.
+# Legacy source-navigation pointer; this file is not loaded as a prompt.
+# Edit templates.subagent in internal/prompts/prompts.yaml
+# (or the installed prompts.yaml). Go and Python use the shared YAML catalog.

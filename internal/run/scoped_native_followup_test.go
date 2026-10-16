@@ -327,9 +327,7 @@ func TestScopedCreationWireExplicitFocusAndGuide(t *testing.T) {
 			c, _ := m["content"].(string)
 			if strings.HasPrefix(c, "You are a professional software engineer") {
 				base++
-				if !strings.Contains(c, "Selected workflow: "+kinds[i]+" ") || !strings.Contains(c, "legal tools: "+strings.Join(names, ", ")+".") {
-					t.Errorf("request%d missing scoped guide %q", i+1, c)
-				}
+
 			}
 			if c == "ONE_BEHAVIOR" {
 				behavior++
@@ -337,6 +335,14 @@ func TestScopedCreationWireExplicitFocusAndGuide(t *testing.T) {
 			if c == "ONE_INTENT" {
 				intent++
 			}
+		}
+		foundScope := false
+		for _, m := range req.Messages {
+			c, _ := m["content"].(string)
+			foundScope = foundScope || strings.Contains(c, "Selected workflow: "+kinds[i]+" ") && strings.Contains(c, "legal tools: "+strings.Join(names, ", ")+".")
+		}
+		if !foundScope {
+			t.Errorf("request%d missing current scope guidance", i+1)
 		}
 		if base != 1 || behavior != 1 || intent != 1 {
 			t.Errorf("request%d base%d behavior%d intent%d", i+1, base, behavior, intent)
@@ -392,7 +398,7 @@ func TestScopedCreationWireExplicitFocusAndGuide(t *testing.T) {
 		c, _ := m["content"].(string)
 		joined += c + "\n"
 	}
-	if strings.Count(joined, "Plan → Approach → Task") != 1 || strings.Count(joined, "ONE_BEHAVIOR") != 1 || strings.Count(joined, "ONE_INTENT") != 1 {
+	if strings.Count(joined, "PLANNING ORCHESTRATOR:") != 1 || strings.Count(joined, "ONE_BEHAVIOR") != 1 || strings.Count(joined, "ONE_INTENT") != 1 {
 		t.Fatalf("resume prefix missing or duplicated %q", joined)
 	}
 }

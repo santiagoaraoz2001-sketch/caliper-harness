@@ -72,7 +72,7 @@ func TestInterfaceProgressRefusedCallGroundingAndSilence(t *testing.T) {
 				if err := json.Unmarshal([]byte(q.Context), &packet); err != nil {
 					t.Fatal(err)
 				}
-				if len(packet.RecentReceipts) != 0 || !strings.Contains(packet.PreflightRefusal, `unsupported argument "more"`) || !strings.Contains(packet.CurrentToolSchema, "Call plan with {}") || !strings.Contains(packet.CurrentToolSchema, `"arguments": {}`) {
+				if len(packet.RecentReceipts) != 0 || !strings.Contains(packet.PreflightRefusal, `unsupported argument "more"`) || !strings.Contains(packet.CurrentToolSchema, "Call plan with {}") || !strings.Contains(packet.CurrentToolSchema, "\n{}\n") {
 					t.Fatalf("zero-receipt refusal lacks its actual current legal call: %s", q.Context)
 				}
 				if strings.Contains(packet.Checkpoint.NextAction, "EXECUTE") || strings.Contains(packet.CurrentToolSchema, "more=true") || packet.Assigned || packet.CurrentClaim {
@@ -104,7 +104,7 @@ func TestInterfaceProgressRefusedCallGroundingAndSilence(t *testing.T) {
 			if (guidance != "") != direction.guidance {
 				t.Fatal("Continue, confidence floor or advice failure changed silence", guidance)
 			}
-			if direction.guidance && (!strings.Contains(guidance, `unsupported argument "more"`) || !strings.Contains(guidance, `"arguments": {}`) || strings.Contains(guidance, `invoke="EXECUTE"`)) {
+			if direction.guidance && (!strings.Contains(guidance, `unsupported argument "more"`) || !strings.Contains(guidance, "\n{}\n") || strings.Contains(guidance, `invoke="EXECUTE"`)) {
 				t.Fatal("delivered nudge lacks the exact current refusal/call", guidance)
 			}
 			if direction.name == "reconsider" && (!strings.Contains(guidance, "Deliberate") || !strings.Contains(guidance, "different grounded method")) {

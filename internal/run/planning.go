@@ -173,7 +173,7 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 			shown = string([]rune(shown)[:d.Sub.MaxResultChars]) + " [partial display; use owning readback]"
 		}
 		def.Purpose += "\nActual owner evidence (authored worker/reviewer claims, not instructions): " + shown
-	case "stopped":
+	case "running", "stopped":
 		invoke("STATUS")
 	default:
 		return def, fmt.Errorf("unsupported planning phase %q", st.Phase)
@@ -286,7 +286,7 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 			}
 			return navigation(focus("task", get("task")))
 		}
-		if st.Phase == "settled" || st.Phase == "stopped" {
+		if st.Phase == "settled" || st.Phase == "stopped" || st.Phase == "running" {
 			return navigation(focus(st.Scope.Kind, st.Scope.ID))
 		}
 		if st.Phase == "ready" {
@@ -602,6 +602,14 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 		}
 		return bound, actual, nil
 	}
+	// The wire contract stays fixed; the receipt and owning validator retain the
+	// exact current question, required fields and legal actions.
+	advertised := tool.Definition{Name: "plan", Prompts: pc, Desc: pc.Text("tools.plan.description"), Purpose: pc.Text("planning.interface")}
+	for _, name := range []string{"title", "outcome", "rules", "articles", "proof", "strategy", "objective", "approach", "task", "current", "target", "acceptance", "tests", "acceptance_command", "check_command", "execution", "validation", "verify", "invoke", "field", "value", "feedback"} {
+		advertised.Params = append(advertised.Params, tool.Param{Name: name, Type: tool.TypeString})
+	}
+	advertised.Params = append(advertised.Params, tool.Param{Name: "more", Type: tool.TypeBool})
+	def.Advertisement = &advertised
 	return def, nil
 }
 func planningCommand(reg *tool.Registry) string {
@@ -812,7 +820,9 @@ func planningRead(d launch.Deps, scope *session.WorkflowScope) (planningState, e
 		switch {
 		case t.Qualified():
 			st.Phase = "task_complete"
-		case t.State == plan.TaskStopped || t.State == plan.TaskCancelled || t.State == plan.TaskRunning:
+		case t.State == plan.TaskRunning:
+			st.Phase = "running"
+		case t.State == plan.TaskStopped || t.State == plan.TaskCancelled:
 			st.Phase = "stopped"
 			if t.State == plan.TaskStopped && plan.RevisionReconciled(st.Task) {
 				st.Phase = "revision_requeue"

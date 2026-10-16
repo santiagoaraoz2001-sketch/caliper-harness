@@ -128,7 +128,11 @@ func TestPreparationRecoveryCurrentNextWire(t *testing.T) {
 									t.Error("actual refusal receipt was lost from model context")
 								}
 							}
-							if sequence == "coherent final fallback" && n >= 4 && (!strings.Contains(body.Messages[0].Content, "Selected workflow: task ") || !strings.Contains(body.Messages[0].Content, taskID)) {
+							currentScope := false
+							for _, m := range body.Messages {
+								currentScope = currentScope || strings.Contains(m.Content, "Selected workflow: task ") && strings.Contains(m.Content, taskID)
+							}
+							if sequence == "coherent final fallback" && n >= 4 && !currentScope {
 								t.Error("historical preparation guidance superseded the actual current task role")
 							}
 							if n >= 3 && strings.Contains(text, "No unfinished same-project plan exists") {

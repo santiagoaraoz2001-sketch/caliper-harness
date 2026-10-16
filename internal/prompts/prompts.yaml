@@ -16,7 +16,7 @@ texts:
     inclusive start_line/end_line range, never both; reread only missing bytes or after hash refusal.
     Implement the requested behavior and run check after changes: the frozen behavioral command first, project suite last. Keep the corrected
     deliverable; use an isolated copy for any genuinely needed later causal control, then check the
-    final current source again. Report actual results and unexecuted checks. A final answer requests
+    final current source again. Report actual results and unexecuted checks. A normal final answer with no tool call requests
     independent review; authored claims and a passing suite alone do not qualify the task.
 
   # System role: configured check missing; grounded proposal guidance.
@@ -74,9 +74,10 @@ texts:
   # Fields: none. The harness owns identities, checks, review and legal transitions.
   system.task.handoff: |2-
     For work already implemented, preserve it and address only unmet requirements. Use known source and
-    receipts; do not redo the fix. Run a fresh check for the frozen behavioral command then project check.
-    Finish with actual changes, results and remaining problems; your answer requests independent review,
-    not completion. Address remediation through the same task's current requeue/readiness/start route.
+    receipts; do not redo the fix. Use check for the frozen behavioral command then project check;
+    reuse a current passed episode unless later effects made it stale.
+    Give a normal final answer with no tool call: actual changes, results and remaining problems.
+    This requests independent review, not completion; no COMPLETE/FINISH tool call is needed. Address remediation through the same task's current requeue/readiness/start route.
     After VALIDATED, report progress and follow plan's current question for the next task or approach.
     A dispatched worker returns its result to the orchestrator. The harness carries IDs and admission.
 
@@ -87,12 +88,15 @@ texts:
   # Original use sites: internal/agent/context.go:143 (basePrompt).
   # Fields: none. Supplied by the owning Go caller.
   system.task.prepare: |2
-    PLANNING ORCHESTRATOR: answer only plan's current question, then wait for its next schema.
-    Use known facts and receipts; inspect missing facts. Honor requested grouping: each behavior
-    task owns implementation, assertions and checks. A plan answer saves draft metadata and runs
-    no code. Finish all Task briefs for this Approach before readiness and claim; discovery remains available.
-    For work already implemented, draft from those observations and receipts, then let the main model claim for
-    remaining work, fresh paired checks and independent review. Do not recreate the defect. Preserve failures and partial effects; stopped work needs authorized recovery.
+    PLANNING ORCHESTRATOR: you are the main model. Answer the latest plan question using known facts;
+    inspect only what is missing. Each answer saves a draft, not code or test results.
+    Draft all Task briefs for this Approach, then request readiness and claim a Task.
+    After claim, use the current edit/write tools for implementation and check for verification.
+    During drafting, use read/find_file/find_dir/grep and graphql for missing facts; commands wait until claim.
+    Each Task owns its implementation, regression assertions and checks. Finishing the step list
+    only finishes drafting those steps; it neither runs validation nor completes the Task.
+    For work already implemented, use actual receipts and preserve fixes; still obtain fresh paired
+    checks and independent review. Preserve failed attempts; stopped work needs authorized recovery.
 
   # System role: owning task settlement and explicit rework/next task.
   # Original use sites: internal/agent/context.go:141 (basePrompt).
@@ -120,50 +124,33 @@ texts:
     tasks or invitations to demonstrate tools. Follow the active role and unchanged brief: implement
     when assigned to code, review without modifying artifacts when reviewing, and preserve read-only
     constraints. Send one tool block per reply; multiple blocks run nothing. Wait for its result.
-    Example:
+    Use only currently advertised tools. For directory inspection, for example:
 
     ```tool
 
-    tool: bash
+    tool: read
 
-    cmd: ls
-
-    ```
-
-    Scalar slots use `NAME: value`; never YAML `|` or `>`. Multiline Bash example:
-
-    ```tool
-
-    tool: bash
-
-    cmd: <<END
-
-    python3 - <<'PY'
-
-    print('OK')
-
-    PY
-
-    END
+    path: .
 
     ```
 
-    END closes cmd; PY closes the shell heredoc. Keep both unindented and distinct. Raw lines keep
-    their newlines; choose a delimiter absent from the data. Never write the word `slot`; write the
-    real slot names from the tool's schema. A block with just `tool: NAME` shows that tool's slots
-    first. When the task is done, answer in plain words with no tool block.
+    Scalar slots use `NAME: value`; never YAML `|` or `>`. A multiline string uses `NAME: <<END`,
+    raw lines, then an unindented END line. Use the real argument name from the current schema and
+    a delimiter absent from the data; shell heredoc markers inside data must be distinct.
+    A block with just `tool: NAME` displays its schema. In text mode, invoke a zero-argument
+    action with `invoke: run` when advertised. When finished, give a normal final answer with no tool block.
   # Focused workflow instruction projected onto the actual selected legal node; authority and
   # schemas remain host-owned.
   # Original use sites: internal/launch/focus.go:191 (FocusView).
   # Fields: none. Supplied by the owning Go caller.
-  system.workflow.creation_focus: " Creation selects the new node for the next request. Follow its current plan question or advertised arguments; no task was claimed or executed."
+  system.workflow.creation_focus: " Creation selects the new node for the next request. Follow its latest plan question; no task was claimed or executed."
 
   # System role: node-bound workflow sequence; actual scope header supplied by Go.
   # Original use sites: internal/agent/context.go:134 (basePrompt).
   # Fields: none. Supplied by the owning Go caller.
   system.workflow.focused: |2-
-     Use the selected Plan → Approach → Task and plan's current question or advertised arguments.
-    Wait for its receipt and next schema; the host binds IDs. Draft answers save metadata. Finish all
+     Use the selected Plan → Approach → Task and plan's latest question.
+    Wait for its receipt and next question; the host binds IDs. Draft answers save metadata. Finish all
     Task briefs for this Approach before readiness and claim; inspect source as needed while drafting.
     A real Task claim binds its frozen brief, actual checks and independent review. Use current receipts, report
     failures honestly and resume stopped work only when authorized.
@@ -173,8 +160,8 @@ texts:
   # Fields: none. Supplied by the owning Go caller.
   system.workflow.hierarchy: |2-
     PAT is plan → approach strategy → behavior-owned tasks. Creation and brief updates only save metadata.
-    Answer the current guided question when planning is requested; ordinary coding needs no PAT and
-    stays usable during drafts. A real Task claim binds its frozen brief and verification. Follow only
+    Ordinary coding without a selected PAT needs no planning. With a selected PAT, finish all Task
+    briefs before readiness and claim. A real Task claim binds its frozen brief and verification. Follow only
     current advertised transitions; use settled receipts already in context and inspect missing facts.
     Qualified children and any parent check are required for parent completion. Stopped work requires
     authorized recovery. Full lifecycle guidance is available through help(topic="reference.pat").
@@ -286,8 +273,8 @@ texts:
     Inspect the responsible runtime source. For a reported defect, inspect its distinguishing
     regression; for a new deliverable, inspect assertions of its requested behavior. Compare them with the
     request/target; authored current/sketch and suite exit0 alone do not establish coverage or correctness.
-    Perform Verify actions, then run the acceptance-first/project-last episode. Later Bash/effects
-    require a fresh whole episode. Do not modify artifacts/checks/gates. Mark denied/unexecuted checks
+    Perform Verify actions with the advertised inspection tools, then use check for the
+    acceptance-first/project-last episode. Later potentially modifying actions require a fresh whole episode. Do not modify artifacts/checks/gates. Mark denied/unexecuted checks
     as missing evidence; do not treat superseded failures as current. Already-correct work needs proof,
     not mandatory edits. Verify is instructions, not a tool.
     For each finding, give the observed cause and consequence under its first applicable category:
@@ -316,11 +303,12 @@ texts:
 
     You are the bounded worker, not the user-facing orchestrator. Follow the actual plan/approach
     constraints and this frozen task; report comments, failures and missing decisions through the
-    orchestrator. COMPLETE is a request for validation, never a self-issued success receipt.
+    orchestrator. Give a normal final answer with no tool call to request independent review;
+    there is no worker COMPLETE/FINISH tool call, and your report is not a success receipt.
     Inspect source/tests. For a reported defect still unfixed, run its distinguishing regression before repair. For work
     already implemented, reuse known source and receipts; do not recreate the defect. Report missing
     pre-change evidence honestly and address only unmet requirements. For a new deliverable, implement
-    the frozen target and real behavioral assertions. Run the declared paired check using check when available, and
+    the frozen target and real behavioral assertions. Run the declared paired check with the advertised check tool, and
     report actual results and unexecuted checks. Do not revert or disable a passing deliverable to prove
     causality; a genuinely needed later control uses an isolated copy or overlay, followed by a final current check. Follow applicable behavior
     instructions. A failed different command does not establish a missing file/interpreter.
@@ -411,7 +399,7 @@ texts:
   decision.loop.instructions: >2-
     Choose between three directions from human requirements and actual current receipts.
     Continue productive work when it gains relevant information, answers or effects. Repair a
-    rejected call when the actual refusal identifies a call problem; use CurrentToolSchema,
+    rejected call only while PendingRepair identifies an unresolved call problem; use CurrentToolSchema,
     not an earlier planning example. Reconsider an unsuccessful approach when repeated legal
     attempts or explanations need further deliberation or a different method. Cadence and long
     thinking alone are not failure. Draft answers save metadata. In selected PAT, finish all Approach Task briefs before readiness and claim;
@@ -770,7 +758,7 @@ texts:
   # Fields: none. Supplied by the owning Go caller.
   continuation.validated: " Report actual progress and follow the current question for the next task, or answer the user if work is complete."
   # Original use sites: internal/agent/style.go (styleSendback).
-  continuation.style_sendback: "STYLE SEND-BACK: the completed code conflicts with the workspace styleguide below. Adjust only the conflicting code to follow it, rerun the task checks, and report actual results. Do not change behavior beyond the style conflict."
+  continuation.style_sendback: "STYLE SEND-BACK: use the reported conflict below to reopen/requeue this task through its existing rework route, obtain readiness and a fresh claim, then adjust only the conflicting code. Rerun checks and request independent review. This advice does not reopen the settled claim or authorize edits."
 
 
 # Guidance following actual workflow operation; actual returned UUID/state are supplied by Go.
@@ -844,12 +832,18 @@ texts:
   # Original use sites: internal/agent/coding.go:249 (codingOutcome).
   # Fields: none. Supplied by the owning Go caller.
   verification.current_check_missing: >-
-    current declared check missing, denied, incomplete or stale; use check and retain its actual
-    exit0 receipt
+    current declared check missing, denied, incomplete or stale; report the actual reason.
+    Use check when execution is authorized; do not claim a pass without its current exit0 receipt
 
   # Model-facing host-run episode announcement; facts/contract remain host-owned.
   # Original use sites: internal/agent/coding.go:228 (hostCheck).
   # Fields: none. Supplied by the owning Go caller.
+  verification.paired_passed: >-
+    Current paired check passed. When this task's required work is finished, give a normal final
+    answer with no tool call to request independent review. Report changes and actual results;
+    do not call plan to finish or repeat these checks unless later effects made them stale.
+
+  # Host finalization is the existing actual check path, not a model result.
   verification.host_finalization: >2-
     Host finalization: requesting the frozen behavioral acceptance/project-check episode; original
     model answer remains unverified.
@@ -931,9 +925,9 @@ texts:
   # Definition-owned native example; arguments come only from its current Params.
   # Fields: .Name, .Arguments. Source/command placeholders are not guessed values.
   tool.call.template: |-
-    Native call example:
+    Call {{.Name}} with these argument fields directly (do not nest them in name/arguments):
     ```json
-    {"name": {{printf "%q" .Name}}, "arguments": {{.Arguments}}}
+    {{.Arguments}}
     ```
 
   # Refusal for two explicit aliases of the same current field; no precedence is guessed.
@@ -1113,16 +1107,17 @@ texts:
   help.bash: >
     ## help.bash
 
-    Run a concrete command in the captured workspace, e.g. `bash(cmd="python3 -m unittest -v")`.
+    When bash is advertised, use it for commands without a dedicated tool. Use read/find_file/find_dir/grep
+    for inspection, edit/write for source changes, and check for declared verification.
     Timeout/output caps are configured. Nonzero exit is a failure receipt, not a product success.
-    Bash can have opaque effects, so a prior declared-check pass becomes stale. Do not treat raw
+    Shell commands can have opaque effects, so a prior declared-check pass becomes stale. Do not treat raw
     shell output as verified task qualification.
   # Focused help.check documentation/examples; help labels current executable availability.
   # Original use sites: internal/tools/model-guide.md:38 (helpDefinition).
   # Fields: none. Supplied by the owning Go caller.
   help.check: |2
     ## help.check
-    Ordinary coding runs one configured or inspected-project declared check and records its actual current outcome; it needs no PAT. Planned tasks run a paired episode: the frozen acceptance_cmd asserts requested behavior FIRST; cmd runs the configured suite LAST only after acceptance exit0 is durably recorded. Omit arguments only when the CURRENT schema supplies both exact frozen defaults; otherwise use the actual declared literals. The roles may use the same suite if it contains task assertions. Inspect them: two exits0 prove execution, not test adequacy. The acceptance command must exercise a real requested-behavior assertion; a zero-match test selection or generic true does not evidence that behavior. Later file/Bash/workflow effects require a fresh whole episode. Failed/denied episodes are not automatically retried by host finalization.
+    Ordinary coding runs one configured or inspected-project declared check and records its actual current outcome; it needs no PAT. Planned tasks run a paired episode: the frozen acceptance_cmd asserts requested behavior FIRST; cmd runs the configured suite LAST only after acceptance exit0 is durably recorded. Omit arguments only when the CURRENT schema supplies the required defaults (cmd, and acceptance_cmd for a planned task); otherwise use the actual declared literals. The roles may use the same suite if it contains task assertions. Inspect them: two exits0 prove execution, not test adequacy. The acceptance command must exercise a real requested-behavior assertion; a zero-match test selection or generic true does not evidence that behavior. Later source changes, shell commands or modifying workflow effects require a fresh whole episode; inspection alone does not. Failed/denied episodes are not automatically retried by host finalization.
 
   # Focused help.edit documentation/examples; help labels current executable availability.
   # Original use sites: internal/tools/model-guide.md:29 (helpDefinition).
@@ -1292,7 +1287,7 @@ texts:
   help.output_caps: >
 
     Configured output caps: tools.bash.max_bytes={{printf "%d" .BashMaxBytes}},
-    max_lines={{printf "%d" .BashMaxLines}} (Read/Bash/directory tools);
+    max_lines={{printf "%d" .BashMaxLines}} (shared file, directory and shell output settings);
     search.max_bytes={{printf "%d" .SearchMaxBytes}}, max_matches={{printf "%d" .SearchMaxMatches}}.
     Tool-specific schemas above remain authoritative.
   # Model help output framing/current cap guidance; actual configured values are supplied by Go.
@@ -1591,8 +1586,9 @@ texts:
   # Original use sites: internal/tools/bash/bash.go:27 (NewAt).
   # Fields: none. Supplied by the owning Go caller.
   tools.bash.purpose: >2-
-    Runs one bash command and returns combined stdout/stderr. Use for builds, tests, file
-    inspection, and anything without a dedicated tool. Long output is truncated with a marker.
+    Runs one shell command and returns combined stdout/stderr. Use read/find_file/find_dir/grep
+    for inspection, edit/write for changes, and check for declared verification. Use this tool for
+    other commands only when advertised. Long output is truncated with a marker.
   # Model-facing desc prose for the current CheckDefinition registry constructor; executable
   # schema/authority remain Go-owned.
   # Original use sites: internal/agent/coding.go:110 (CheckDefinition).
@@ -1615,7 +1611,7 @@ texts:
     commands before effects: acceptance_cmd runs first, then cmd after acceptance exit0 and a
     durable receipt. Both exits0 form one current episode, not a correctness guarantee. The
     roles may use the same literal if its suite contains the task assertions. Later
-    Bash/file/workflow effects invalidate the episode.
+    source changes, shell commands or modifying workflow effects invalidate the episode; inspection does not.
 
   # Model-facing desc prose for the current Definitions registry constructor; executable
   # schema/authority remain Go-owned.
@@ -1635,7 +1631,7 @@ texts:
   # Fields: none. Supplied by the owning Go caller.
   tools.edit.parameters.expected_hash: >2-
     copy actual read sha256; use exact old OR start_line/end_line, never both; if unsure call
-    help(topic=help.edit)
+    help(topic="edit")
   # Model-facing desc prose for the current Definitions registry constructor; executable
   # schema/authority remain Go-owned.
   # Original use sites: internal/tools/files/files.go:269 (Definitions).
@@ -2177,13 +2173,13 @@ texts:
   # Original use sites: internal/launch/build.go:122 (NewBuild).
   # Fields: none. Supplied by the owning Go caller.
   tools.workflow_block.parameters.acceptance_command: >-
-    explicit Bash behavior assertion; omit preserves existing
+    behavioral assertion command run by check before the project suite; omit preserves existing
 
   # Argument explanation for workflow_block.check_command; executable schema remains Go-owned.
   # Original use sites: internal/launch/build.go:123 (NewBuild).
   # Fields: none. Supplied by the owning Go caller.
   tools.workflow_block.parameters.check_command: >-
-    explicit Bash check; exit0 plus reviewer PASS required; omit preserves existing
+    project suite command run by check after the behavioral assertion; paired exits0 plus reviewer PASS required; omit preserves existing
 
   # Argument explanation for workflow_block.current; executable schema remains Go-owned.
   # Original use sites: internal/launch/build.go:116 (NewBuild).
@@ -2638,7 +2634,7 @@ texts:
     Directory mode includes hidden/ignored/empty directories; offset defaults to 1 and limit to
     tools.bash.max_lines. No recursion in dir mode. Read results with read_outside or descend with
     find_outside. Require an absolute outside root; no final symlinks or paths resolving inside the
-    workspace. These routes add no outside edit/write capability and do not sandbox Bash.
+    workspace. These routes add no outside edit/write capability; shell execution has its own authorization.
 
   # Focused instruction; owning tool/runtime supplies the facts. Fields: none.
   help.read.definition: |
@@ -2675,7 +2671,7 @@ texts:
     Never manufacture failure or disable a passing deliverable for a later causal control.
 
   # Focused instruction; owning tool/runtime supplies the facts. Fields: none.
-  progress.validate: "Use the current check receipt and actual source/assertions; report evidence for independent review."
+  progress.validate: "Use the current passed check receipt and actual source/assertions. Give a normal final answer with no tool call to request independent review; do not repeat planning/start or an unchanged passed check."
 
   # Go source-navigation argument/purpose; executable contract remains in files owner.
   tools.read.parameters.definition: >2-
@@ -2711,13 +2707,21 @@ texts:
     failures and unknowns; report only actual changes and results.
 
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
+  # Stable declaration; the latest receipt supplies the current question and legal values.
+  planning.interface: >-
+    When calling plan, follow its latest question. Send only its requested argument fields directly;
+    do not wrap them in name/arguments. Fields are optional in this stable catalog because
+    each question requires a different subset. The current question validates that subset.
+    Use {} only to open planning when no question exists. Drafting saves intentions;
+    readiness and claim precede execution, actual checks and independent review.
   tools.plan.description: "follow the current planning question"
 
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
   help.plan: |2-
     ## help.plan
-    Answer only the current question and arguments shown above, then wait for its next schema.
-    The host binds IDs. A plan answer saves draft metadata; it runs no code. Inspect source as needed,
+    While drafting, answer the current question and arguments shown above, then use its next receipt.
+    The host binds IDs. Draft answers save metadata; START claims execution and STATUS only reports state.
+    While executing a claimed task, use coding tools; a normal final answer with no tool call requests independent review. Inspect source as needed,
     finish all Task briefs for the current Approach, then request readiness and claim. A real Task claim
     binds its frozen brief, actual paired checks and independent review. For work already implemented,
     use known observations/receipts to draft; after claim, address remaining work and run fresh checks. Preserve failures and stopped
@@ -2852,14 +2856,23 @@ texts:
     explicit START remain required. Prior failures stay recorded; no success is implied.
 
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
+  planning.running: |2-
+    TASK RUNNING: planning is finished for this task. Its current executor uses the frozen brief and
+    advertised coding tools. Once the required work and current paired check are finished, give a
+    normal final answer with no tool call to request independent review. Report actual changes,
+    check results and remaining problems. Do not call plan to finish, repeat a current passed check,
+    or start the next task before qualification. STATUS is optional inspection, not a handoff.
+    If this task belongs to another executor, inspect its status; do not take over its claim.
+
+  # Stopped work retains explicit recovery; a running task uses separate guidance above.
   planning.stopped: |2-
-    This task is running, stopped or cancelled. plan(invoke="STATUS") performs no retry. Use supplied
+    This task is stopped or cancelled. plan(invoke="STATUS") performs no retry. Use supplied
     owning state; inspect only missing or changed facts. Use the existing resume/rework route only when
     authorized; a managed stop never grants a fresh budget.
 
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
   planning.saved: >-
-    Planning selection saved for the next request. Inspect actual receipts and answer only the next advertised question; metadata is not execution or qualification.
+    Selection retained for the next request. Follow the current phase guidance below; this navigation executes no work and grants no qualification.
 
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
   planning.answer.title: >-
@@ -2929,7 +2942,7 @@ texts:
     After implementation, what should the independent reviewer inspect and rerun? This only saves review criteria.
 
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
-  planning.answer.invoke: "Required invoke: choose only this schema's enum values."
+  planning.answer.invoke: "Choose an invoke value offered by the latest planning question."
 
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
   planning.answer.feedback: >-
@@ -2946,7 +2959,7 @@ texts:
   preparation.guided_next: |2-
     Answer only plan's current draft question from actual source/owner facts. Draft answers save
     metadata and run no code. Inspect as needed; finish all Task briefs for this Approach before
-    readiness and claim. The host binds IDs and supplies the next schema; preserve failures and
+    readiness and claim. The host binds IDs and supplies the next question; preserve failures and
     partial effects. An actual Task claim binds its frozen brief and verification.
 
   # Explicit revision guidance. Owning typed receipts select this form; prose never does.
@@ -2975,12 +2988,13 @@ texts:
   decision.discovery.instructions: >2-
     Use human requirements, Checkpoint, current owner facts and correlated calls/results.
     Continue productive work when purposeful inspection, answers or effects advance the request.
-    Repair a rejected call when the actual refusal identifies a call problem; use CurrentToolSchema
-    exactly. Reconsider an unsuccessful approach when repeated legal attempts need more deliberation
+    Repair a rejected call only while PendingRepair identifies an unresolved call problem; use CurrentToolSchema
+    exactly. Earlier refusals and advice are historical when current receipts resolve them. Reconsider an unsuccessful approach when repeated legal attempts need more deliberation
     or a different method. These are distinct directions. Pending PAT repairs do not erase progress.
     Draft answers save metadata; selected PAT execution follows all Approach Task briefs, readiness and claim. Authored replies and
     prior advice are claims; omitted thinking hashes/lengths are provenance. Long thinking alone is
-    not failure. Continue sends no message; advice cannot stop/discard reasoning or grant authority.
+    not failure. A claimed task with current passed checks needs a normal final answer for independent review,
+    not another planning/start call. Continue sends no message; advice cannot stop/discard reasoning or grant authority.
 
   # Choice statements, ordered by the owning Go direction review.
   decision.discovery.continue: "continue productive work"
@@ -3079,8 +3093,9 @@ texts:
     are not executed commands; prior receipts are historical, not present qualification.
     In DRAFT TASKS, plan(invoke="TASK", title="<title>", objective="<outcome>") adds a task;
     plan(invoke="COMPLETE") requests readiness after all approach briefs. At START, plan(invoke="EXECUTE")
-    claims the main model's next task; its frozen brief becomes system instructions. Behavioral command then
-    project check and independent reviewer PASS qualify it; the same suite may serve both roles if it has
+    claims the main model's next task; its frozen brief becomes system instructions. Use check for the behavioral command then
+    project check; give a normal final answer with no tool call to request independent review.
+    Actual check receipts and independent reviewer PASS qualify it; the same suite may serve both roles if it has
     task assertions. Explicit launch dispatches workers. REMEDIATE revises/requeues the same task; fresh
     Ready and start are required. After a verified Task, NEXT returns to claim the next queued Task.
     When all Tasks qualify, compare results with the Approach objective: draft a missing Task with TASK
@@ -3097,7 +3112,8 @@ texts:
     schema. Workers implement frozen tasks, preserve constraints/failures and return results; they
     neither recreate PAT nor delegate their own task. For work already implemented, preserve it, address unmet
     requirements and run fresh checks; do not recreate the defect. Planned execution requires real behavioral/
-    project checks and independent review. Reviewer prose cannot manufacture a pass. Draft/Ready
+    project checks and independent review. After checks, a normal final answer with no tool call
+    requests independent review; no completion tool is needed. Reviewer prose cannot manufacture a pass. Draft/Ready
     state or a launcher exit is not qualification. GraphQL introspection lists graph operations,
     not execution tools. Read help(topic="launch") or help(topic="reference.scope") for details.
 
@@ -3181,11 +3197,9 @@ texts:
   help.schema.graphql.operation: |2-
     # GraphQL operation schema
     {{.Signature}}
-    Native graphql call template: query is document text. Replace placeholders; arguments belong
-    directly to the field unless its signature declares input. Select needed returned fields only.
-    ```json
+    query is GraphQL document text. Replace placeholders; GraphQL arguments belong directly to
+    the field unless its signature declares input. Select needed returned fields only.
     {{.Template}}
-    ```
 
   # Compact reference framing/examples; executable names/arguments are generated from the owning registry/SDL.
   help.schema.graphql.appendKnowledge: |-

@@ -419,3 +419,33 @@ func TestGuidedPlanningReceiptRetainsGraphEffects(t *testing.T) {
 		t.Fatalf("stale goal template instead of approach: %s", receipt.Next)
 	}
 }
+
+// All guided phases advertise one wire contract while owner validation and
+// receipts continue to identify the exact next question.
+func TestPlanningWireDeclarationStable(t *testing.T) {
+	f := newPlanningFixture(t)
+	wire := func() string {
+		reg := tool.NewRegistry(f.d.Prompts)
+		reg.Register(f.definition())
+		defs, err := reg.NativeDefinitions()
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := json.Marshal(defs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	initial := wire()
+	answers := []tool.Args{{}, {"title": "Repair", "outcome": "correct behavior", "rules": "preserve neighbors", "articles": "repair movement", "proof": "regression"}, {"strategy": "repair with regression"}, {"title": "Movement", "objective": "reject invalid direction"}, {"current": "invalid direction accepted", "target": "invalid direction ignored"}, {"acceptance": "assert rejection", "tests": "planned regression", "acceptance_command": "test 1 -eq 1"}, {"objective": "repair owner"}, {"execution": "edit movement validation"}, {"validation": "run regression"}, {"more": false}, {"verify": "review implementation and regression"}, {"invoke": "COMPLETE"}}
+	for _, answer := range answers {
+		f.call(answer)
+		if wire() != initial {
+			t.Fatal("planning changed native declaration", f.definition().Schema())
+		}
+	}
+	if _, repair := tool.ValidateJSON(f.definition(), `{"invoke":"STATUS"}`); repair == "" {
+		t.Fatal("stable advertisement bypassed current question validation")
+	}
+}

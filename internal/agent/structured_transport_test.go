@@ -296,7 +296,7 @@ func TestStructuredMissingEditHashGuidanceReachesNextRequest(t *testing.T) {
 	if !strings.Contains(read, fmt.Sprintf("source.go sha256=%x", sha256.Sum256([]byte(original)))) || !strings.Contains(read, original) {
 		t.Fatal("actual Read/hash lost before recovery request")
 	}
-	for _, needed := range []string{"entire call array refused; no calls ran", "expected_hash", "actual read sha256", "never both", "help(topic=help.edit)"} {
+	for _, needed := range []string{"entire call array refused; no calls ran", "expected_hash", "actual read sha256", "never both", `help(topic="edit")`} {
 		if !strings.Contains(refusal, needed) {
 			t.Errorf("correlated refusal missing %q: %s", needed, refusal)
 		}

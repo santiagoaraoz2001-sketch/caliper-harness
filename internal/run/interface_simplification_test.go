@@ -518,19 +518,16 @@ func TestInterfaceConditionalTemplatesBindLegalCalls(t *testing.T) {
 				t.Fatalf("schema has no current call example: %s", schema)
 			}
 			block, _, _ = strings.Cut(block, "\n```")
-			var example struct {
-				Name      string         `json:"name"`
-				Arguments map[string]any `json:"arguments"`
-			}
-			if err := json.Unmarshal([]byte(block), &example); err != nil || example.Name != "plan" {
+			var example map[string]any
+			if err := json.Unmarshal([]byte(block), &example); err != nil || example == nil {
 				t.Fatalf("bad current template: %s %v", block, err)
 			}
-			for key, value := range example.Arguments {
+			for key, value := range example {
 				if value, ok := value.(string); ok && strings.HasPrefix(value, "<") {
-					example.Arguments[key] = "concrete " + key + " for component evidence"
+					example[key] = "concrete " + key + " for component evidence"
 				}
 			}
-			raw, _ := json.Marshal(example.Arguments)
+			raw, _ := json.Marshal(example)
 			args, repair := tool.ValidateJSON(d, string(raw))
 			if repair != "" {
 				t.Fatal(repair)
@@ -544,12 +541,12 @@ func TestInterfaceConditionalTemplatesBindLegalCalls(t *testing.T) {
 			}
 			if phase == "another" {
 				tasks, err := plan.ApproachTasks(f.d.Store, f.scope.ID)
-				if err != nil || len(tasks) != 2 || example.Arguments["invoke"] != "TASK" {
+				if err != nil || len(tasks) != 2 || example["invoke"] != "TASK" {
 					t.Fatalf("TASK example omitted authored task: %d %v", len(tasks), err)
 				}
 			} else {
 				actual, err := plan.GetTask(f.d.Store, taskID)
-				if err != nil || actual.Title != example.Arguments["value"] || actual.Attempts != 0 {
+				if err != nil || actual.Title != example["value"] || actual.Attempts != 0 {
 					t.Fatalf("EDIT example omitted legal field/value: %+v %v", actual, err)
 				}
 			}

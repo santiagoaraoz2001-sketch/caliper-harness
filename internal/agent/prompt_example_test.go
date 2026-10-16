@@ -7,15 +7,18 @@ import (
 
 	"specific-harness/internal/config"
 	"specific-harness/internal/tool"
-	"specific-harness/internal/tools/bash"
+	"specific-harness/internal/tools/files"
 )
 
 // Exercise the real example given to the model, rather than a second copy.
-func TestSystemPromptMultilineExampleExecutes(t *testing.T) {
+func TestSystemPromptInspectionExampleExecutes(t *testing.T) {
 	reg := tool.NewRegistry()
-	reg.Register(bash.New(config.Defaults().Tools.Bash))
+	workspace := &files.Workspace{Path: t.TempDir(), Caps: config.Defaults().Tools.Bash}
+	for _, def := range workspace.Definitions() {
+		reg.Register(def)
+	}
 	prompt := systemPrompt(reg)
-	var scalar, multiline bool
+	examples := 0
 	for _, rest := range strings.Split(prompt, "\n```tool\n")[1:] {
 		end := strings.Index(rest, "\n```")
 		if end < 0 {
@@ -34,18 +37,16 @@ func TestSystemPromptMultilineExampleExecutes(t *testing.T) {
 		if repair != "" {
 			t.Fatal(repair)
 		}
-		if !strings.Contains(call.Slots["cmd"], "\n") {
-			scalar = true
-			continue
+		if call.Name != "read" || call.Slots["path"] != "." {
+			t.Fatal("generic example demands an execution tool", call)
 		}
-		multiline = true
 		res, err := def.Execute(context.Background(), args)
-		if err != nil || res.Failed || res.Truncated || res.Text != "OK\n" {
-			t.Fatalf("actual multiline prompt example: result=%+v err=%v", res, err)
+		if err != nil || res.Failed || res.Truncated {
+			t.Fatalf("actual inspection example: %+v %v", res, err)
 		}
-		t.Logf("actual parsed cmd=%q; registered Bash output=%q", call.Slots["cmd"], res.Text)
+		examples++
 	}
-	if !scalar || !multiline {
-		t.Fatalf("prompt lacks executable examples: scalar=%v multiline=%v", scalar, multiline)
+	if examples != 1 {
+		t.Fatalf("want one compact executable inspection example, got %d", examples)
 	}
 }

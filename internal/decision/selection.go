@@ -44,17 +44,18 @@ func (s Selection) sameAssets(a Selection) bool {
 
 // Identity distinguishes the admitted selection from resolved assets and device.
 type Identity struct {
-	Model        string    `json:"model"`
-	Runtime      string    `json:"runtime"`
-	Source       string    `json:"source"`
-	Path         string    `json:"path"`
-	Revision     *string   `json:"revision"`
-	Device       string    `json:"device"`
-	NativeDevice string    `json:"native_device"`
-	Architecture string    `json:"architecture"`
-	Parameters   int64     `json:"parameters"`
-	ContextLimit *int      `json:"context_limit"`
-	Selection    Selection `json:"selection"`
+	MPSChunkedAttention *bool     `json:"mps_chunked_attention,omitempty"` // Native backend diagnostic; does not change identity matching.
+	Model               string    `json:"model"`
+	Runtime             string    `json:"runtime"`
+	Source              string    `json:"source"`
+	Path                string    `json:"path"`
+	Revision            *string   `json:"revision"`
+	Device              string    `json:"device"`
+	NativeDevice        string    `json:"native_device"`
+	Architecture        string    `json:"architecture"`
+	Parameters          int64     `json:"parameters"`
+	ContextLimit        *int      `json:"context_limit"`
+	Selection           Selection `json:"selection"`
 }
 type Health struct {
 	Status    string     `json:"status"`

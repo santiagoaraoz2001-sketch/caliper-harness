@@ -146,11 +146,8 @@ func TestGuidedPlanningPublicQuestionSequence(t *testing.T) {
 	}
 	_, example, found := strings.Cut(entry.CallTemplate(), "```json\n")
 	example, _, _ = strings.Cut(example, "\n```")
-	var call struct {
-		Name      string         `json:"name"`
-		Arguments map[string]any `json:"arguments"`
-	}
-	if err := json.Unmarshal([]byte(example), &call); !found || err != nil || call.Name != "plan" || call.Arguments == nil || len(call.Arguments) != 0 {
+	var call map[string]any
+	if err := json.Unmarshal([]byte(example), &call); !found || err != nil || call == nil || len(call) != 0 {
 		t.Fatalf("entry lacks its exact native empty call: %s error=%v", entry.CallTemplate(), err)
 	}
 	f.task()

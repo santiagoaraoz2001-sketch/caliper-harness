@@ -126,8 +126,8 @@ func TestConsistencyNativeHeadersMatchCurrentClaimPhase(t *testing.T) {
 					sort.Strings(names)
 					matched := false
 					for _, message := range body.Messages {
-						if message.Role == "system" && strings.Contains(message.Content, "Selected workflow:") {
-							matched = strings.Contains(message.Content, "legal tools: "+strings.Join(names, ", ")+".")
+						if strings.Contains(message.Content, "Selected workflow:") {
+							matched = matched || strings.Contains(message.Content, "legal tools: "+strings.Join(names, ", ")+".")
 						}
 					}
 					if !matched {

@@ -8,7 +8,7 @@ import (
 )
 
 func preparationTool(name string) bool {
-	return name == "graphql" || name == "prepare_task" || name == "ready_task" || name == "task_start" || strings.HasPrefix(name, "workflow_")
+	return name == "plan" || name == "graphql" || name == "prepare_task" || name == "ready_task" || name == "task_start" || strings.HasPrefix(name, "workflow_")
 }
 
 func (r *Runner) preparationReceipt(name, id, text string, executed bool) string {

@@ -83,6 +83,27 @@ func (r *Runner) refreshWorkflow() error {
 		r.phaseView = r.ProjectPhaseRegistry(r.phaseRegistry)
 		r.Registry = r.phaseView
 	}
+	// Current preparation state belongs at the conversation tail, not in the
+	// stable system prefix. Existing receipts usually already carry it.
+	if r.PlanningActive() && !r.assignedClaim && r.Registry != nil {
+		if def, ok := r.Registry.Lookup("plan"); ok {
+			question := def.Schema()
+			if question != r.preparationQuestion {
+				r.preparationQuestion = question
+				entries := r.Continuation.Entries
+				encoded, _ := json.Marshal(question)
+				inReceipt := false
+				for i := len(entries) - 1; i >= 0 && entries[i].Message.Role != "assistant"; i-- {
+					text := entries[i].Message.Content
+					inReceipt = inReceipt || strings.Contains(text, question) || strings.Contains(text, string(encoded))
+				}
+				if !inReceipt {
+					r.Continuation.Add("guidance", "user", r.workflowHeader+"\n"+question, false)
+					r.Continuation.Invalidate()
+				}
+			}
+		}
+	}
 	// begin owns entry zero; Behavior and legacy system entries are not ours.
 	if entries := r.Continuation.Entries; len(entries) > 0 && entries[0].Kind == "injected" && entries[0].Message.Role == "system" {
 		entries[0].Message.Content = r.basePrompt()
@@ -143,8 +164,11 @@ func (r *Runner) basePrompt() string {
 		}
 	}
 	if r.workflowHeader != "" {
-		base += "\n" + r.workflowHeader
-		if !direct && r.settlement == nil {
+		_, guided := r.Registry.Lookup("plan")
+		if !guided || !r.PlanningActive() || direct || r.settlement != nil {
+			base += "\n" + r.workflowHeader
+		}
+		if !direct && r.settlement == nil && (r.Assigned == nil || !r.PlanningActive()) {
 			base += "\n" + r.Prompts.Text("system.workflow.focused")
 		}
 	}

@@ -204,6 +204,9 @@ func (r *Runner) CheckDefinition(bash tool.Definition, acceptanceCommand ...stri
 		} else {
 			res.Text = "Declared check: " + receipt.Reason + "\n" + res.Text
 		}
+		if err == nil && r.assignedClaim && c.Passed() {
+			res.Text += "\n" + r.Prompts.Text("verification.paired_passed")
+		}
 		return res, err
 	}}
 }

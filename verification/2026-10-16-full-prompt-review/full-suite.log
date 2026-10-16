@@ -1,0 +1,53 @@
+ok  	specific-harness/cmd/specific-harness	37.058s
+--- FAIL: TestSystemPromptMultilineExampleExecutes (0.00s)
+    prompt_example_test.go:31: example names unregistered tool "read"
+--- FAIL: TestStructuredMissingEditHashGuidanceReachesNextRequest (0.01s)
+    structured_transport_test.go:301: correlated refusal missing "help(topic=help.edit)": entire call array refused; no calls ran: edit needs expected_hash (copy actual read sha256; use exact old OR start_line/end_line, never both; if unsure call help(topic="edit")); send corrected structured calls using the advertised arguments
+        Current legal call:
+        Call edit with these argument fields directly (do not nest them in name/arguments):
+        ```json
+        {
+          "expected_hash": "<expected_hash>",
+          "new": "<new>",
+          "path": "<path>"
+        }
+        ```
+FAIL
+FAIL	specific-harness/internal/agent	43.278s
+ok  	specific-harness/internal/auth	2.848s
+ok  	specific-harness/internal/bundle	6.852s
+ok  	specific-harness/internal/config	11.295s
+ok  	specific-harness/internal/decision	2.060s
+ok  	specific-harness/internal/graph	77.699s
+?   	specific-harness/internal/graph/generated	[no test files]
+?   	specific-harness/internal/graph/model	[no test files]
+ok  	specific-harness/internal/hw	4.855s
+ok  	specific-harness/internal/launch	146.466s
+ok  	specific-harness/internal/llm	1.949s
+ok  	specific-harness/internal/memory	8.050s
+ok  	specific-harness/internal/outcome	5.720s
+ok  	specific-harness/internal/plan	55.782s
+--- FAIL: TestExistingWorkGuidancePreservesVerification (0.00s)
+    snake_recovery_test.go:16: handoff lost "fresh"
+FAIL
+FAIL	specific-harness/internal/prompts	7.797s
+ok  	specific-harness/internal/run	295.740s
+ok  	specific-harness/internal/serve	15.189s
+ok  	specific-harness/internal/session	5.483s
+ok  	specific-harness/internal/store	33.163s
+ok  	specific-harness/internal/tool	8.096s
+ok  	specific-harness/internal/tools	4.705s
+ok  	specific-harness/internal/tools/ask	4.463s
+ok  	specific-harness/internal/tools/bash	6.264s
+ok  	specific-harness/internal/tools/fetch	3.435s
+ok  	specific-harness/internal/tools/files	8.571s
+ok  	specific-harness/internal/tools/graph	17.481s
+ok  	specific-harness/internal/tools/judge	7.889s
+?   	specific-harness/internal/tools/process	[no test files]
+ok  	specific-harness/internal/tools/recall	12.074s
+ok  	specific-harness/internal/tools/search	19.700s
+ok  	specific-harness/internal/tui	79.533s
+ok  	specific-harness/internal/tui/slash	1.478s
+?   	specific-harness/internal/tui/thirdparty/textarea	[no test files]
+ok  	specific-harness/internal/watch	7.375s
+FAIL

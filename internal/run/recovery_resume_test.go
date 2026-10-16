@@ -55,7 +55,7 @@ func TestPreparationRecoveryFreshSessionScope(t *testing.T) {
 				t.Errorf("Continue rebuilt same-project/store advice across session IDs: %d", own)
 			}
 			if requests == 0 {
-				currentSchema, refusal, intent := false, false, false
+				currentSchema, refusal, intent, selected := false, false, false, false
 				for _, def := range body.Tools {
 					if def.Function.Name == "plan" {
 						properties, ok := def.Function.Parameters["properties"].(map[string]any)
@@ -64,10 +64,11 @@ func TestPreparationRecoveryFreshSessionScope(t *testing.T) {
 					}
 				}
 				for _, message := range body.Messages {
+					selected = selected || strings.Contains(message.Content, "Selected workflow: root ")
 					refusal = refusal || message.Role == "tool" && message.ToolCallID == "scopefalse" && strings.Contains(message.Content, "plan_title")
 					intent = intent || message.Role == "user" && message.Content == "same project request"
 				}
-				if !currentSchema || !refusal || !intent || !strings.Contains(body.Messages[0].Content, "Selected workflow: root ") {
+				if !currentSchema || !refusal || !intent || !selected {
 					t.Errorf("resumed context/schema lost actual evidence: schema=%t refusal=%t intent=%t", currentSchema, refusal, intent)
 				}
 			}
