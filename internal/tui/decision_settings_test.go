@@ -27,7 +27,7 @@ func TestDecisionOwnedApplyFailureSuccessAndStale(t *testing.T) {
 	for _, mode := range []string{"reject", "success", "stale", "pid-skew", "lost-response"} {
 		t.Run(mode, func(t *testing.T) {
 			m := settingsModel(t)
-			p, err := serve.Start(serve.Recipe{Name: "owner-double", Argv: []string{"sleep", "30"}}, filepath.Join(t.TempDir(), "owner.log"))
+			p, err := serve.Start(serve.Recipe{Name: "owner-double", Argv: napCmd("30")}, filepath.Join(t.TempDir(), "owner.log"))
 			if err != nil {
 				t.Fatal(err)
 			}

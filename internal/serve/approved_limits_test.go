@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -25,7 +26,13 @@ func TestApprovedProbeDeadlineAdmission(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	r := Recipe{Name: "fixture", Kind: KindOpenAI, URL: srv.URL, Argv: []string{"true"}, localPath: "fixture"}
+	self, selfErr := os.Executable()
+	if selfErr != nil {
+		t.Fatal(selfErr)
+	}
+	// The test binary always resolves through LookPath on every platform;
+	// it is never started (the missing log parent refuses first).
+	r := Recipe{Name: "fixture", Kind: KindOpenAI, URL: srv.URL, Argv: []string{self}, localPath: "fixture"}
 	f := reflect.ValueOf(StartContext)
 	args := []reflect.Value{reflect.ValueOf(context.Background()), reflect.ValueOf(r), reflect.ValueOf(filepath.Join(t.TempDir(), "missing", "log"))}
 	if f.Type().IsVariadic() {

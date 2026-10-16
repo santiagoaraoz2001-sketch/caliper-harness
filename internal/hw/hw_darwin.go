@@ -12,7 +12,7 @@ import (
 
 func probeOS(p *Profile) error {
 	if runtime.GOOS != "darwin" {
-		return fmt.Errorf("hardware autodetect does not support %s yet — darwin and linux only", runtime.GOOS)
+		return fmt.Errorf("hardware autodetect does not support %s yet — darwin, linux and windows only", runtime.GOOS)
 	}
 	// hw.memsize arrives as raw little-endian uint64 bytes, not text.
 	mem, err := unix.SysctlRaw("hw.memsize")

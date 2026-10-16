@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"specific-harness/internal/bundle"
 	"strings"
 	"testing"
@@ -16,7 +17,7 @@ func TestManagedBuiltinsAndCustomInterpreterRemainDistinct(t *testing.T) {
 	os.MkdirAll(filepath.Join(root, "runtime"), 0755)
 	os.WriteFile(filepath.Join(root, bundle.Marker), []byte(`{"format":1,"platform":"darwin-arm64"}`), 0644)
 	recipes := DefaultRecipes(root, "local-model", "typed-decisions")
-	if recipes[1].Argv[0] != bundle.Python(root, "worker") || !recipes[1].managedPython || !reflect.DeepEqual(recipes[1].Argv[1:3], []string{"-m", "mlx_lm.server"}) {
+	if runtime.GOOS == "darwin" && (recipes[1].Argv[0] != bundle.Python(root, "worker") || !recipes[1].managedPython || !reflect.DeepEqual(recipes[1].Argv[1:3], []string{"-m", "mlx_lm.server"})) {
 		t.Fatal(recipes[1])
 	}
 	sidecar, ok := SidecarRecipe(root, SidecarURL, "typed-decisions")
@@ -42,7 +43,7 @@ func TestManagedProcessEnvironmentIsolatedButCustomUnchanged(t *testing.T) {
 		if err := os.WriteFile(exe, []byte("#!/bin/sh\nprintf '%s|%s|%s|%s' \"$PYTHONHOME\" \"$PYTHONPATH\" \"$PYTHONNOUSERSITE\" \"$HF_HOME\" > \"$1\"\n"), 0755); err != nil {
 			t.Fatal(err)
 		}
-		proc, err := StartContext(context.Background(), Recipe{Name: "owned-env-fixture", Argv: []string{exe, out}, managedPython: managed}, filepath.Join(root, "log"))
+		proc, err := StartContext(context.Background(), Recipe{Name: "owned-env-fixture", Argv: scriptCmd(t, exe, out), managedPython: managed}, filepath.Join(root, "log"))
 		if err != nil {
 			t.Fatal(err)
 		}

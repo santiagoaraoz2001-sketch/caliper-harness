@@ -166,7 +166,7 @@ func (m *Model) cycleField(f SettingField) {
 	case "device":
 		next = cycleNext(deviceModes, m.settingValue(f))
 	case "runtime":
-		options := []string{llm.RuntimeOpenAI, llm.RuntimeOllama, llm.RuntimeMLX}
+		options := []string{llm.RuntimeOpenAI, llm.RuntimeOllama, llm.RuntimeMLX, llm.RuntimeRulith}
 		if f.Section == "decision" {
 			options = []string{"laya", "system_one"}
 		}

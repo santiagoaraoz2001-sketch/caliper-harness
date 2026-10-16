@@ -11,6 +11,7 @@ import (
 // Assets are metadata candidates, never compatibility or resident proof.
 type Asset struct {
 	Path, ID, Revision, Runtime, Reason string
+	Model                               string // manager-advertised wire model identity, when distinct from catalog ID
 	Format                              string
 	Complete                            bool
 	headerFound                         bool
@@ -210,6 +211,18 @@ func Discover(roots []ModelRoot, explicit []string) ([]Asset, []string) {
 		}
 	}
 	return out, warnings
+}
+
+// AssetModelName preserves the manager-advertised identity for Rulith.
+// Other native recipes receive the literal checkpoint path.
+func AssetModelName(a Asset) string {
+	if a.Runtime == "rulith" {
+		if a.Model != "" {
+			return a.Model
+		}
+		return a.ID
+	}
+	return a.Path
 }
 
 func metadata(path string, out any) error {
