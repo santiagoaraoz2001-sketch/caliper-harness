@@ -33,7 +33,7 @@ func TestD09CancelledNativePreflightDoesNotSpawn(t *testing.T) {
 	// Private path binding drives real preflight; executable is a neutral owned sleep,
 	// not MLX. No weights/native inference occur in this lifecycle control.
 	go func() {
-		p, err := StartContext(ctx, Recipe{Name: "owned-neutral-native-control", Argv: []string{"sleep", "20"}, URL: srv.URL + "/v1", localPath: "component-path"}, filepath.Join(t.TempDir(), "log"))
+		p, err := StartContext(ctx, Recipe{Name: "owned-neutral-native-control", Argv: napCmd("20"), URL: srv.URL + "/v1", localPath: "component-path"}, filepath.Join(t.TempDir(), "log"))
 		done <- result{p, err}
 	}()
 	<-entered
@@ -54,7 +54,7 @@ func TestD09CancelledNativePreflightDoesNotSpawn(t *testing.T) {
 }
 func TestD09ResidentProcessOutlivesActionContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	p, err := StartContext(ctx, Recipe{Name: "owned-neutral-control", Argv: []string{"sleep", "20"}}, filepath.Join(t.TempDir(), "log"))
+	p, err := StartContext(ctx, Recipe{Name: "owned-neutral-control", Argv: napCmd("20")}, filepath.Join(t.TempDir(), "log"))
 	if err != nil {
 		cancel()
 		t.Fatal(err)

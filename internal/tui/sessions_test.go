@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -312,6 +313,18 @@ func TestBaselineHistory(t *testing.T) {
 
 func TestTerminalCommand(t *testing.T) {
 	argv := []string{"/bin/harness", "tui", "--resume", "a b'c"}
+	if runtime.GOOS == "windows" {
+		t.Setenv("WT_SESSION", "")
+		if _, _, err := terminalCommand(argv); err == nil || !strings.Contains(err.Error(), "resume with:") {
+			t.Errorf("no Windows Terminal must refuse with the command: %v", err)
+		}
+		t.Setenv("WT_SESSION", "{any}")
+		bin, args, err := terminalCommand(argv)
+		if err != nil || bin != "wt.exe" || len(args) != 8 || args[0] != "-w" || args[1] != "0" || args[2] != "nt" || args[3] != "-d" || args[4] != cwd() || args[7] != `"a b'c"` {
+			t.Errorf("wt=%q %v %v", bin, args, err)
+		}
+		return
+	}
 	t.Setenv("TERM_PROGRAM", "iTerm.app")
 	bin, args, err := terminalCommand(argv)
 	if err != nil || bin != "osascript" || !strings.Contains(args[1], "iTerm2") || !strings.Contains(args[1], "'a b'\\''c'") {

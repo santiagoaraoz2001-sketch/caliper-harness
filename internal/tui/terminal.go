@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -13,8 +14,8 @@ import (
 var terminalOpen = openTerminalTab
 
 // openTerminalTab launches argv[0] with argv[1:] in a new tab of the
-// user's terminal. macOS only (Terminal/iTerm2 via osascript); anything
-// else refuses loudly instead of guessing.
+// user's terminal: macOS Terminal/iTerm2 via osascript, Windows Terminal
+// via wt.exe. Anything else refuses loudly instead of guessing.
 func openTerminalTab(argv []string) error {
 	bin, args, err := terminalCommand(argv)
 	if err != nil {
@@ -29,6 +30,9 @@ func openTerminalTab(argv []string) error {
 // terminalCommand builds the opener invocation: pure, so tests pin
 // the program routing and the shell quoting.
 func terminalCommand(argv []string) (string, []string, error) {
+	if runtime.GOOS == "windows" {
+		return windowsTerminalCommand(argv)
+	}
 	if runtime.GOOS != "darwin" {
 		return "", nil, fmt.Errorf("new terminal tabs need macOS (Terminal/iTerm2); on %s resume with: %s", runtime.GOOS, strings.Join(argv, " "))
 	}
@@ -43,6 +47,25 @@ func terminalCommand(argv []string) (string, []string, error) {
 	default:
 		return "", nil, fmt.Errorf("terminal %q cannot open tabs; resume with: %s", os.Getenv("TERM_PROGRAM"), strings.Join(argv, " "))
 	}
+}
+
+// windowsTerminalCommand opens argv in a new Windows Terminal tab in the
+// current window and directory. Only a session already inside Windows
+// Terminal (WT_SESSION set) is accepted; anything else refuses with the
+// resume command instead of guessing. WT_SESSION is set by Windows
+// Terminal itself for every tab it hosts.
+func windowsTerminalCommand(argv []string) (string, []string, error) {
+	if os.Getenv("WT_SESSION") == "" {
+		return "", nil, fmt.Errorf("new terminal tabs need Windows Terminal; resume with: %s", strings.Join(argv, " "))
+	}
+	args := []string{"-w", "0", "nt", "-d", cwd()}
+	for _, a := range argv {
+		if strings.ContainsAny(a, " \t") {
+			a = strconv.Quote(a)
+		}
+		args = append(args, a)
+	}
+	return "wt.exe", args, nil
 }
 
 func cwd() string {

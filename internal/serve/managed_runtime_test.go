@@ -42,7 +42,7 @@ func TestManagedProcessEnvironmentIsolatedButCustomUnchanged(t *testing.T) {
 		if err := os.WriteFile(exe, []byte("#!/bin/sh\nprintf '%s|%s|%s|%s' \"$PYTHONHOME\" \"$PYTHONPATH\" \"$PYTHONNOUSERSITE\" \"$HF_HOME\" > \"$1\"\n"), 0755); err != nil {
 			t.Fatal(err)
 		}
-		proc, err := StartContext(context.Background(), Recipe{Name: "owned-env-fixture", Argv: []string{exe, out}, managedPython: managed}, filepath.Join(root, "log"))
+		proc, err := StartContext(context.Background(), Recipe{Name: "owned-env-fixture", Argv: scriptCmd(t, exe, out), managedPython: managed}, filepath.Join(root, "log"))
 		if err != nil {
 			t.Fatal(err)
 		}

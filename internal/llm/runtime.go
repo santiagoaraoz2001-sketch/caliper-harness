@@ -14,6 +14,10 @@ const (
 	RuntimeOpenAI = "openai"
 	RuntimeOllama = "ollama"
 	RuntimeMLX    = "mlx"
+	// RuntimeRulith is an identity, not a dialect: inference uses the
+	// generic OpenAI wire; the name preserves which server family owns
+	// lifecycle (the Rulith manager) in evidence and selection.
+	RuntimeRulith = "rulith"
 )
 
 // WithRuntime chooses an explicit wire contract. Empty means generic OpenAI.
@@ -24,10 +28,10 @@ func (c *Client) runtimeError() error {
 		return fmt.Errorf("params.max_output_tokens cannot be negative, got %d", *c.MaxOutputTokens)
 	}
 	switch c.runtime {
-	case "", RuntimeOpenAI, RuntimeOllama, RuntimeMLX:
+	case "", RuntimeOpenAI, RuntimeOllama, RuntimeMLX, RuntimeRulith:
 		return nil
 	}
-	return fmt.Errorf("model runtime %q is unsupported; choose openai, ollama, or mlx", c.runtime)
+	return fmt.Errorf("model runtime %q is unsupported; choose openai, ollama, mlx, or rulith", c.runtime)
 }
 
 // ParameterStatus describes a requested mapping, not sampler acknowledgement.

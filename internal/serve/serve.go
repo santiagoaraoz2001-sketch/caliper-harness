@@ -26,18 +26,22 @@ import (
 )
 
 // Endpoint kinds. Auto detects the worker shape (ollama, then OpenAI).
+// Rulith is manager-driven (JSON stdio) with an OpenAI inference surface.
 const (
 	KindAuto    = "auto"
 	KindOllama  = "ollama"
 	KindOpenAI  = "openai"
 	KindSidecar = "sidecar"
+	KindRulith  = "rulith"
 )
 
 // Conventional base URLs the status screen always offers.
 const (
-	OllamaURL  = "http://127.0.0.1:11434/v1"
-	MLXURL     = "http://127.0.0.1:8080/v1"
-	SidecarURL = "http://127.0.0.1:8090"
+	OllamaURL   = "http://127.0.0.1:11434/v1"
+	MLXURL      = "http://127.0.0.1:8080/v1"
+	LlamaURL    = "http://127.0.0.1:8080/v1" // llama-server default
+	LMStudioURL = "http://127.0.0.1:1234/v1"
+	SidecarURL  = "http://127.0.0.1:8090"
 )
 
 // ProbeTimeout bounds one endpoint check; ProbeAll runs them together.
@@ -95,6 +99,10 @@ func ProbeContext(ctx context.Context, client *http.Client, e Endpoint) Health {
 	case KindOllama:
 		h := probeOllamaContext(ctx, client, e.URL)
 		h.Kind = KindOllama
+		return h
+	case KindRulith:
+		h := probeRulithContext(ctx, client, e.URL)
+		h.Kind = KindRulith
 		return h
 	case KindSidecar:
 		h := probeSidecarContext(ctx, client, e.URL)
@@ -391,19 +399,15 @@ func SidecarPrompts(r Recipe, c *prompts.Catalog) (Recipe, error) {
 	return r, nil
 }
 
-// DefaultRecipes covers ollama, mlx, and the sidecar on their
-// conventional URLs. model names the mlx checkpoint; blank means the
-// mlx recipe refuses to start until a model is set. harnessDir locates
-// the sidecar script; blank means no sidecar recipe.
+// DefaultRecipes covers only what Caliper itself owns: platform driver
+// recipes (the owned MLX worker on darwin; the Rulith manager handle on
+// windows) plus the decision sidecar. Model servers in general are NOT
+// hardcoded here: they are discovered live (see DiscoverServers),
+// relaunched from their captured command lines, or registered by the
+// user in serve.recipes. harnessDir locates the sidecar script; blank
+// means no sidecar recipe.
 func DefaultRecipes(harnessDir, workerModel, decisionModel string, selected ...decision.Selection) []Recipe {
-	out := []Recipe{
-		{Name: "ollama", Kind: KindOllama, Runtime: "ollama", URL: OllamaURL, Argv: []string{"ollama", "serve"}},
-		{Name: "mlx", Kind: KindOpenAI, Runtime: "mlx", URL: MLXURL, Argv: []string{"mlx_lm.server", "--model", workerModel, "--port", "8080"}},
-	}
-	if bundle.Managed(harnessDir) {
-		out[1].Argv = []string{bundle.Python(harnessDir, "worker"), "-m", "mlx_lm.server", "--model", workerModel, "--port", "8080"}
-		out[1].managedPython = true
-	}
+	out := driverRecipes(harnessDir, workerModel)
 	if r, ok := SidecarRecipe(harnessDir, SidecarURL, decisionModel, selected...); ok {
 		out = append(out, r)
 	}

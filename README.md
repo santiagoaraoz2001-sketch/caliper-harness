@@ -78,6 +78,11 @@ The launcher selects the locally validated self-contained development build
 virtualenvs, or Homebrew needed) and keeps your current project directory.
 See [FIRST-USE.md](FIRST-USE.md) for model prerequisites.
 
+On Windows, run `powershell -ExecutionPolicy Bypass -File .\install-windows.ps1`
+inside the bundle folder once; it installs to `%LOCALAPPDATA%\Caliper`, adds it
+to your PATH, and `caliper` then works in any new terminal. The worker model
+is served by Ollama on Windows. See [FIRST-USE-WINDOWS.md](FIRST-USE-WINDOWS.md).
+
 ### Build from source
 
 Requirements: Go 1.25 with CGO, and `uv` for the managed Python runtimes.
@@ -90,7 +95,9 @@ make build
 
 The Go module is `specific-harness` for compatibility; the public executable
 is `caliper-harness`. `make bundle-macos OUT=...` prepares a fresh
-self-contained app folder.
+self-contained app folder. On Windows, `make bundle-windows OUT=...` does the
+same (it also needs a mingw-w64 `gcc` for the cgo graph store; the bundled
+executable is named `caliper.exe`).
 
 On first run with an unconfigured worker, Setup opens: choose an existing
 model, enter your exact project check (for example `npm test`), review, and

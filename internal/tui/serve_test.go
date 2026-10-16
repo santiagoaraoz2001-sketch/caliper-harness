@@ -210,7 +210,7 @@ func TestRecipeForFresh(t *testing.T) {
 
 func TestDecisionUnprovenOwnerIsNeverStopped(t *testing.T) {
 	m := serveModel(t)
-	old, err := serve.Start(serve.Recipe{Name: "nap", Argv: []string{"sleep", "60"}}, filepath.Join(t.TempDir(), "x.log"))
+	old, err := serve.Start(serve.Recipe{Name: "nap", Argv: napCmd("60")}, filepath.Join(t.TempDir(), "x.log"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,16 +10,21 @@ import (
 func fixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	for _, p := range []string{Marker, "runtime/worker/bin/python3", "runtime/decision/bin/python3", "bin/rg"} {
-		path := filepath.Join(root, p)
-		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	script := []byte("#!/bin/sh\nexit 0\n")
+	files := []struct {
+		path string
+		data []byte
+	}{
+		{filepath.Join(root, Marker), []byte(`{"format":1,"platform":"` + platform() + `"}`)},
+		{Python(root, "worker"), script},
+		{Python(root, "decision"), script},
+		{filepath.Join(root, "bin", rgFileName()), script},
+	}
+	for _, f := range files {
+		if err := os.MkdirAll(filepath.Dir(f.path), 0755); err != nil {
 			t.Fatal(err)
 		}
-		data := []byte("#!/bin/sh\nexit 0\n")
-		if p == Marker {
-			data = []byte(`{"format":1,"platform":"darwin-arm64"}`)
-		}
-		if err := os.WriteFile(path, data, 0755); err != nil {
+		if err := os.WriteFile(f.path, f.data, 0755); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -35,10 +40,10 @@ func TestManagedRootAndMissingAssetsDoNotFallBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	rg, err := ToolAt(root, "rg")
-	if err != nil || rg != filepath.Join(root, "bin/rg") {
+	if err != nil || rg != filepath.Join(root, "bin", rgFileName()) {
 		t.Fatal(rg, err)
 	}
-	if err := os.Remove(filepath.Join(root, "bin/rg")); err != nil {
+	if err := os.Remove(filepath.Join(root, "bin", rgFileName())); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = ToolAt(root, "rg"); err == nil || !strings.Contains(err.Error(), "complete Caliper folder") {

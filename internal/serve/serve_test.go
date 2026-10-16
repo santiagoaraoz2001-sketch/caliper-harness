@@ -207,7 +207,7 @@ func TestStartRefuses(t *testing.T) {
 
 func TestStartStop(t *testing.T) {
 	dir := t.TempDir()
-	p, err := Start(Recipe{Name: "nap", Argv: []string{"sleep", "60"}}, filepath.Join(dir, "serve.log"))
+	p, err := Start(Recipe{Name: "nap", Argv: napCmd("60")}, filepath.Join(dir, "serve.log"))
 	if err != nil {
 		t.Fatalf("start sleep: %v", err)
 	}

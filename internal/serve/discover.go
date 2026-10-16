@@ -72,6 +72,13 @@ func Discover(roots []ModelRoot, explicit []string) ([]Asset, []string) {
 		a := Asset{Path: canonical, ID: id, Revision: rev, Runtime: runtime}
 		if runtime == "ollama" {
 			a.Reason = "native catalog directory; model identities require its server"
+		} else if runtime == "llama" {
+			if st, err := os.Stat(canonical); err == nil && st.Mode().IsRegular() && st.Size() > 0 {
+				a.Complete = true
+				a.Reason = "GGUF weights present; load starts llama-server with this file"
+			} else {
+				a.Reason = "missing/empty GGUF file"
+			}
 		} else {
 			if err := localComplete(canonical); err != nil {
 				a.Reason = err.Error()
@@ -127,31 +134,88 @@ func Discover(roots []ModelRoot, explicit []string) ([]Asset, []string) {
 			continue
 		}
 		if _, err := os.Stat(filepath.Join(root.Path, "config.json")); err == nil {
-			add(root.Path, filepath.Base(root.Path), "", "mlx")
+			add(root.Path, filepath.Base(root.Path), "", checkpointRuntime())
 			continue
 		}
 		for _, entry := range dirs(root.Path) {
 			if !entry.IsDir() {
+				if isGGUF(entry.Name()) {
+					add(filepath.Join(root.Path, entry.Name()), ggufServedName(entry.Name()), "", "llama")
+				}
 				continue
 			}
 			p := filepath.Join(root.Path, entry.Name())
 			if root.Kind == "hf" && strings.HasPrefix(entry.Name(), "models--") {
 				for _, rev := range dirs(filepath.Join(p, "snapshots")) {
 					if rev.IsDir() {
-						add(filepath.Join(p, "snapshots", rev.Name()), strings.ReplaceAll(strings.TrimPrefix(entry.Name(), "models--"), "--", "/"), rev.Name(), "mlx")
+						snap := filepath.Join(p, "snapshots", rev.Name())
+						add(snap, strings.ReplaceAll(strings.TrimPrefix(entry.Name(), "models--"), "--", "/"), rev.Name(), checkpointRuntime())
+						for _, f := range dirs(snap) {
+							if !f.IsDir() && isGGUF(f.Name()) {
+								add(filepath.Join(snap, f.Name()), ggufServedName(f.Name()), rev.Name(), "llama")
+							}
+						}
 					}
 				}
 			} else {
-				add(p, entry.Name(), "", "mlx")
+				add(p, entry.Name(), "", checkpointRuntime())
+				for _, f := range dirs(p) {
+					if !f.IsDir() && isGGUF(f.Name()) {
+						add(filepath.Join(p, f.Name()), ggufServedName(f.Name()), "", "llama")
+					}
+				}
 			}
 		}
 	}
 	for _, p := range explicit {
 		if p != "" {
-			add(p, filepath.Base(p), "", "mlx")
+			if isGGUF(filepath.Base(p)) {
+				add(p, ggufServedName(filepath.Base(p)), "", "llama")
+			} else {
+				add(p, filepath.Base(p), "", checkpointRuntime())
+			}
 		}
 	}
 	return out, warnings
+}
+
+// AssetModelName is the wire identity a load/serve action uses for an
+// asset row: GGUF-backed runtimes serve under the file's base name;
+// checkpoint runtimes take the directory path itself.
+func AssetModelName(a Asset) string {
+	if a.Runtime == "rulith" || a.Runtime == "llama" {
+		return ggufServedName(filepath.Base(a.Path))
+	}
+	return a.Path
+}
+
+func isGGUF(name string) bool {
+	return strings.HasSuffix(strings.ToLower(name), ".gguf")
+}
+
+// ggufServedName strips the extension and any -NNNNN-of-NNNNN shard
+// suffix: the identity /v1/models reports for the file.
+func ggufServedName(filename string) string {
+	name := filename
+	if isGGUF(name) {
+		name = name[:len(name)-len(".gguf")]
+	}
+	// Shard suffix is exactly "-ddddd-of-ddddd" (15 chars).
+	if len(name) > 15 {
+		tail := name[len(name)-15:]
+		digits := func(s string) bool {
+			for _, c := range s {
+				if c < '0' || c > '9' {
+					return false
+				}
+			}
+			return len(s) == 5
+		}
+		if tail[0] == '-' && tail[6:10] == "-of-" && digits(tail[1:6]) && digits(tail[10:15]) {
+			name = name[:len(name)-15]
+		}
+	}
+	return name
 }
 
 func metadata(path string, out any) error {

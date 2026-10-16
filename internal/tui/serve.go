@@ -33,6 +33,9 @@ type ServeRow struct {
 	// available-only rows load installed weights on l.
 	Resident bool
 	Asset    *serve.Asset
+	// Disc is the live-discovered process behind this row, when the
+	// listener scan found one: it carries stop/relaunch identity.
+	Disc *serve.DiscoveredServer
 }
 
 // ServeState is the status screen: the endpoint table, selection,
@@ -42,10 +45,14 @@ type ServeState struct {
 	Sel      int
 	Scroll   int
 	Spawned  map[string]*serve.Proc
-	Loading  string
-	Focus    string
-	Warnings []string
-	cancel   context.CancelFunc
+	// Discovered remembers live-found servers by URL across probe
+	// rounds, so a stopped one stays listed and can relaunch from its
+	// captured command line.
+	Discovered map[string]serve.DiscoveredServer
+	Loading    string
+	Focus      string
+	Warnings   []string
+	cancel     context.CancelFunc
 	// Mem is the hardware profile behind the MEMORY readout; MemErr
 	// names a failed detection (readout shows unknown, not zero).
 	Mem    hw.Profile
@@ -59,6 +66,7 @@ type serveProbedMsg struct {
 	mem         hw.Profile
 	memErr      string
 	warnings    []string
+	discovered  map[string]serve.DiscoveredServer
 	application *decisionApplied
 }
 
@@ -106,15 +114,14 @@ func (m *Model) serveActive() bool {
 }
 
 // serveEndpoints builds the table: the active worker (auto-detected),
-// the conventional alternates, and the decision sidecar.
+// servers remembered from live discovery, recipe endpoints (drivers
+// and user-registered), and the decision sidecar. No product URLs are
+// hardcoded: anything else on this machine arrives via discovery.
 func (m *Model) serveEndpoints() []serve.Endpoint {
 	out := []serve.Endpoint{{Kind: serve.KindAuto, Label: "worker", URL: m.Cfg.Model.Server, Model: m.Cfg.Model.Name}}
-	for _, alt := range []serve.Endpoint{
-		{Kind: serve.KindOllama, Label: "ollama", URL: serve.OllamaURL},
-		{Kind: serve.KindOpenAI, Label: "mlx", URL: serve.MLXURL},
-	} {
-		if alt.URL != m.Cfg.Model.Server {
-			out = append(out, alt)
+	for _, d := range m.Serve.Discovered {
+		if d.URL != m.Cfg.Model.Server && d.URL != m.Cfg.Decision.Server {
+			out = append(out, serve.Endpoint{Kind: d.Kind, Label: d.Kind, URL: d.URL})
 		}
 	}
 	for _, rec := range m.serveRecipes() {
@@ -178,6 +185,32 @@ func (m *Model) probeServeWith(client *http.Client) tea.Cmd {
 	return func() tea.Msg {
 		health := serve.ProbeAll(client, endpoints)
 		assets, warnings := serve.Discover(roots, explicit)
+		// Live discovery: every loopback listener that answers like a
+		// model server joins the table, with its process identity for
+		// stop/relaunch. Nothing here knows product names or ports.
+		discovered := map[string]serve.DiscoveredServer{}
+		if found, derr := serve.DiscoverServers(context.Background(), client); derr != nil {
+			warnings = append(warnings, "server discovery: "+derr.Error())
+		} else {
+			for _, d := range found {
+				discovered[d.URL] = d
+				covered := false
+				for _, e := range endpoints {
+					covered = covered || sameServerPort(e.URL, d.URL)
+				}
+				if !covered {
+					endpoints = append(endpoints, serve.Endpoint{Kind: d.Kind, Label: d.Kind, URL: d.URL})
+					health = append(health, d.Health)
+				}
+			}
+		}
+		if install, ok := serve.LocateRulith(); ok {
+			if ra, err := serve.RulithAssets(context.Background(), install); err == nil {
+				assets = append(assets, ra...)
+			} else {
+				warnings = append(warnings, "rulith catalog: "+err.Error())
+			}
+		}
 		var rows []ServeRow
 		for i, e := range endpoints {
 			r := ServeRow{Ep: e, Health: health[i], Have: true,
@@ -230,7 +263,7 @@ func (m *Model) probeServeWith(client *http.Client) tea.Cmd {
 			a := &assets[i]
 			var rec *serve.Recipe
 			for j := range recipes {
-				if (a.Runtime == "mlx" && recipes[j].Runtime == "mlx" || a.Runtime == "ollama" && recipes[j].Kind == serve.KindOllama) && serve.Loopback(recipes[j].URL) {
+				if ((recipes[j].Runtime != "" && recipes[j].Runtime == a.Runtime) || a.Runtime == "ollama" && recipes[j].Kind == serve.KindOllama) && serve.Loopback(recipes[j].URL) {
 					if rec == nil || recipes[j].URL == worker {
 						rec = &recipes[j]
 					}
@@ -239,11 +272,16 @@ func (m *Model) probeServeWith(client *http.Client) tea.Cmd {
 					}
 				}
 			}
+			if rec == nil && a.Runtime == "llama" {
+				// GGUF loads build their argv at action time; no recipe needed.
+				rows = append(rows, ServeRow{Ep: serve.Endpoint{Kind: serve.KindOpenAI, Label: "llama.cpp", URL: serve.LlamaURL, Model: serve.AssetModelName(*a)}, Asset: a, IsModel: true, Have: true})
+				continue
+			}
 			if rec == nil {
 				warnings = append(warnings, a.Path+": no local native recipe")
 				continue
 			}
-			r := ServeRow{Ep: serve.Endpoint{Kind: rec.Kind, Label: rec.Name, URL: rec.URL, Model: a.Path}, Recipe: rec, Asset: a, IsModel: true, Have: true}
+			r := ServeRow{Ep: serve.Endpoint{Kind: rec.Kind, Label: rec.Name, URL: rec.URL, Model: serve.AssetModelName(*a)}, Recipe: rec, Asset: a, IsModel: true, Have: true}
 			for _, server := range rows {
 				if !server.IsModel && server.Ep.URL == rec.URL {
 					r.Health = server.Health
@@ -256,13 +294,43 @@ func (m *Model) probeServeWith(client *http.Client) tea.Cmd {
 			}
 			rows = append(rows, r)
 		}
+		for i := range rows {
+			for _, d := range discovered {
+				if sameServerPort(rows[i].Ep.URL, d.URL) {
+					found := d
+					rows[i].Disc = &found
+					break
+				}
+			}
+		}
 		mem, err := hw.Detect()
-		msg := serveProbedMsg{rows: rows, mem: mem, warnings: warnings}
+		msg := serveProbedMsg{rows: rows, mem: mem, warnings: warnings, discovered: discovered}
 		if err != nil {
 			msg.memErr = err.Error()
 		}
 		return msg
 	}
+}
+
+// sameServerPort reports whether two URLs name the same loopback
+// listener (paths like /v1 differ between config and probe truth).
+func sameServerPort(a, b string) bool {
+	pa, pb := urlPort(a), urlPort(b)
+	return pa != "" && pa == pb
+}
+
+func urlPort(raw string) string {
+	host := raw
+	if i := strings.Index(host, "://"); i >= 0 {
+		host = host[i+3:]
+	}
+	if i := strings.Index(host, "/"); i >= 0 {
+		host = host[:i]
+	}
+	if i := strings.LastIndex(host, ":"); i >= 0 {
+		return host[i+1:]
+	}
+	return ""
 }
 
 // serveKeyOf identifies a row across probes: server URL plus model
@@ -307,6 +375,12 @@ func (m *Model) onServeProbed(msg serveProbedMsg) {
 	previous := m.Serve.Sel
 	if m.Serve.Sel < len(m.Serve.Rows) {
 		keep = serveKeyOf(m.Serve.Rows[m.Serve.Sel])
+	}
+	if m.Serve.Discovered == nil {
+		m.Serve.Discovered = map[string]serve.DiscoveredServer{}
+	}
+	for url, d := range msg.discovered {
+		m.Serve.Discovered[url] = d
 	}
 	m.Serve.Rows = msg.rows
 	for _, r := range msg.rows {
@@ -426,7 +500,7 @@ func (m *Model) serveUse() {
 		m.alert("err", "the sidecar is not a worker runtime")
 		return
 	}
-	if r.Asset != nil && (r.Asset.Runtime != "mlx" || !r.Asset.Complete) {
+	if r.Asset != nil && (!r.Asset.Complete || r.Asset.Runtime != "mlx" && r.Asset.Runtime != "rulith" && r.Asset.Runtime != "llama") {
 		m.alert("err", r.Asset.Reason)
 		return
 	}
@@ -625,7 +699,7 @@ func (m *Model) serveAction(load bool) tea.Cmd {
 		m.alert("info", "model is not resident (unconfirmed) — l load; select owned server to release an unready child")
 		return nil
 	}
-	if row.Asset != nil && (row.Asset.Runtime != "mlx" || !row.Asset.Complete) {
+	if row.Asset != nil && (!row.Asset.Complete || row.Asset.Runtime != "mlx" && row.Asset.Runtime != "rulith" && row.Asset.Runtime != "llama") {
 		m.alert("err", row.Asset.Reason)
 		return nil
 	}

@@ -4,12 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"specific-harness/internal/tool"
 	"strings"
-	"syscall"
 	"testing"
 )
 
@@ -131,7 +129,7 @@ func TestR19NonUTF8FilenameAndDecoderRefusal(t *testing.T) {
 	t.Run("native-filename", func(t *testing.T) {
 		dir := t.TempDir()
 		name := "bad" + string([]byte{255}) + ".go"
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("HIT\n"), 0600); errors.Is(err, syscall.EILSEQ) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("HIT\n"), 0600); illegalFilename(err) {
 			t.Skip("filesystem refuses non-UTF8 filenames: native rg filename-byte route unexercised")
 		} else if err != nil {
 			t.Fatal(err)
