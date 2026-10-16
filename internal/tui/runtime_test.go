@@ -22,7 +22,7 @@ func TestRuntimeSettingsPickerPersistAndRefusal(t *testing.T) {
 		t.Fatal("runtime not available in Settings")
 	}
 	m.Settings.Sel = sel
-	for _, want := range []string{"ollama", "mlx", "openai"} {
+	for _, want := range []string{"ollama", "mlx", "rulith", "openai"} {
 		out, _, handled := m.settingsKey(tea.KeyMsg{Type: tea.KeyEnter})
 		if !handled {
 			t.Fatal("runtime enter not handled")

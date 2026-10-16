@@ -2,6 +2,7 @@ package serve
 
 import (
 	"net/http"
+	"runtime"
 	"testing"
 )
 
@@ -22,11 +23,16 @@ func TestRuntimeNativeDiscoveryRequiresCompleteModelShape(t *testing.T) {
 }
 func TestRuntimeRecipesExplicitNoNameInference(t *testing.T) {
 	r := DefaultRecipes("", "model", "")
-	if r[0].Runtime != "ollama" || r[1].Runtime != "mlx" {
+	if len(r) == 0 || r[0].Runtime != "ollama" {
 		t.Fatalf("builtins missing explicit metadata: %+v", r)
 	}
-	r = MergeRecipes(r, []Recipe{{Name: "mlx", Kind: KindOpenAI, URL: MLXURL, Argv: []string{"custom"}}})
-	if r[1].Runtime != "" {
+	for _, rec := range r {
+		if runtime.GOOS != "darwin" && rec.Runtime == "mlx" {
+			t.Fatal("MLX exposed off Mac", rec)
+		}
+	}
+	r = MergeRecipes(r, []Recipe{{Name: "ollama", Kind: KindOpenAI, URL: OllamaURL, Argv: []string{"custom"}}})
+	if r[0].Runtime != "" {
 		t.Fatal("same-name user recipe inherited builtin runtime")
 	}
 }

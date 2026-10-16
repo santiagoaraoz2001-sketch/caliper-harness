@@ -207,7 +207,7 @@ func TestStartRefuses(t *testing.T) {
 
 func TestStartStop(t *testing.T) {
 	dir := t.TempDir()
-	p, err := Start(Recipe{Name: "nap", Argv: []string{"sleep", "60"}}, filepath.Join(dir, "serve.log"))
+	p, err := Start(Recipe{Name: "nap", Argv: napCmd("60")}, filepath.Join(dir, "serve.log"))
 	if err != nil {
 		t.Fatalf("start sleep: %v", err)
 	}
@@ -228,18 +228,22 @@ func TestStartStop(t *testing.T) {
 }
 
 func TestRecipes(t *testing.T) {
-	if got := DefaultRecipes("", "m", "typed-decisions"); len(got) != 2 {
-		t.Errorf("no harness dir → %d recipes, want 2", len(got))
+	base := DefaultRecipes("", "m", "typed-decisions")
+	if len(base) == 0 || base[0].Name != "ollama" {
+		t.Fatalf("missing native Ollama recipe: %+v", base)
 	}
-	if got := DefaultRecipes("/h", "m", "english"); len(got) != 3 || !strings.Contains(got[2].Argv[1], "server.py") {
-		t.Errorf("recipes=%+v", got)
-	} else if got[2].Argv[len(got[2].Argv)-1] != "english" {
-		t.Errorf("sidecar recipe must carry the decision model: %+v", got[2])
+	got := DefaultRecipes("/h", "m", "english")
+	if len(got) != len(base)+1 {
+		t.Fatalf("sidecar recipe missing: %+v", got)
 	}
-	extra := []Recipe{{Name: "mlx", Kind: KindOpenAI, URL: MLXURL, Argv: []string{"custom"}}}
-	merged := MergeRecipes(DefaultRecipes("/h", "m", "typed-decisions"), extra)
-	if len(merged) != 3 || merged[1].Argv[0] != "custom" {
-		t.Errorf("merged=%+v", merged)
+	sidecar := got[len(got)-1]
+	if sidecar.Kind != KindSidecar || !strings.Contains(sidecar.Argv[1], "server.py") || sidecar.Argv[len(sidecar.Argv)-1] != "english" {
+		t.Fatalf("sidecar recipe=%+v", sidecar)
+	}
+	extra := []Recipe{{Name: "ollama", Kind: KindOpenAI, URL: OllamaURL, Argv: []string{"custom"}}}
+	merged := MergeRecipes(got, extra)
+	if len(merged) != len(got) || merged[0].Argv[0] != "custom" {
+		t.Fatalf("merged=%+v", merged)
 	}
 }
 

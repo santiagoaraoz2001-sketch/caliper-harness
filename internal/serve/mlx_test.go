@@ -1,3 +1,5 @@
+//go:build darwin
+
 package serve
 
 import (
@@ -61,7 +63,7 @@ func TestD09PrepareNativeShebangAndUnknownWrapper(t *testing.T) {
 }
 func TestD09OwnedReadinessAndSettledStop(t *testing.T) {
 	// This process is a neutral owned sleep, not MLX. HTTP native facts are doubles.
-	p, err := Start(Recipe{Name: "owned-neutral-fixture", Argv: []string{"sleep", "20"}}, filepath.Join(t.TempDir(), "log"))
+	p, err := Start(Recipe{Name: "owned-neutral-fixture", Argv: napCmd("20")}, filepath.Join(t.TempDir(), "log"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +113,7 @@ func TestD09OwnedReadinessAndSettledStop(t *testing.T) {
 }
 
 func TestD09OwnedReadinessCancelsAPIBaseReadback(t *testing.T) {
-	p, err := Start(Recipe{Name: "owned-neutral-fixture", Argv: []string{"sleep", "20"}}, filepath.Join(t.TempDir(), "log"))
+	p, err := Start(Recipe{Name: "owned-neutral-fixture", Argv: napCmd("20")}, filepath.Join(t.TempDir(), "log"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +152,7 @@ func TestD09OwnedReadinessCancelsAPIBaseReadback(t *testing.T) {
 }
 
 func TestD09OwnedReadinessRejectsDeathDuringAPIReadback(t *testing.T) {
-	p, err := Start(Recipe{Name: "owned-neutral-fixture", Argv: []string{"sleep", "20"}}, filepath.Join(t.TempDir(), "log"))
+	p, err := Start(Recipe{Name: "owned-neutral-fixture", Argv: napCmd("20")}, filepath.Join(t.TempDir(), "log"))
 	if err != nil {
 		t.Fatal(err)
 	}

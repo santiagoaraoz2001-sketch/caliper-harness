@@ -34,10 +34,20 @@ func settledRG(t *testing.T) (string, string) {
 	}
 	bin := t.TempDir()
 	marker := filepath.Join(bin, "settled")
-	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
-	script := "#!/bin/sh\n" + quote(real) + " \"$@\"\nstatus=$?\nprintf settled > " + quote(marker) + "\nexit \"$status\"\n"
-	if err := os.WriteFile(filepath.Join(bin, "rg"), []byte(script), 0700); err != nil {
-		t.Fatal(err)
+	if runtime.GOOS == "windows" {
+		// CreateProcess cannot run a bare script; a .cmd shim keeps the
+		// same contract: forward args, settle, then write the marker.
+		// `set /p` writes exactly "settled" with no trailing newline.
+		script := "@echo off\r\n\"" + real + "\" %*\r\nset st=%errorlevel%\r\n<nul set /p _=settled >\"" + marker + "\"\r\nexit /b %st%\r\n"
+		if err := os.WriteFile(filepath.Join(bin, "rg.cmd"), []byte(script), 0700); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
+		script := "#!/bin/sh\n" + quote(real) + " \"$@\"\nstatus=$?\nprintf settled > " + quote(marker) + "\nexit \"$status\"\n"
+		if err := os.WriteFile(filepath.Join(bin, "rg"), []byte(script), 0700); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return real, marker

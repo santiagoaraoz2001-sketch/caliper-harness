@@ -228,7 +228,7 @@ func (n *OutputTokens) UnmarshalYAML(node *yaml.Node) error {
 type ModelConfig struct {
 	PlainRequestTimeoutSeconds int    `yaml:"plain_request_timeout_seconds"`
 	ToolProtocol               string `yaml:"tool_protocol"`
-	// Runtime selects the wire contract: openai (default), ollama, or mlx.
+	// Runtime selects the wire contract: openai (default), ollama, mlx, or rulith.
 	Runtime string `yaml:"runtime"`
 	// Server is the selected runtime base URL.
 	Server string `yaml:"server"`
@@ -706,9 +706,9 @@ func (c Config) Validate() error {
 		return fmt.Errorf("params.repetition_penalty cannot be negative, got %v", c.Params.RepetitionPenalty)
 	}
 	switch c.Model.Runtime {
-	case "", "openai", "ollama", "mlx": // Empty retains the generic contract for programmatic legacy configs.
+	case "", "openai", "ollama", "mlx", "rulith": // Empty retains the generic contract for programmatic legacy configs.
 	default:
-		return fmt.Errorf("model.runtime must be openai, ollama, or mlx, got %q", c.Model.Runtime)
+		return fmt.Errorf("model.runtime must be openai, ollama, mlx, or rulith, got %q", c.Model.Runtime)
 	}
 	if u, err := url.ParseRequestURI(c.Model.Server); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return fmt.Errorf("model.server must be an http(s) URL, got %q", c.Model.Server)
@@ -859,14 +859,14 @@ func (c Config) Validate() error {
 			return fmt.Errorf("serve.recipes[%d] needs a name", i)
 		}
 		switch r.Kind {
-		case "ollama", "openai", "sidecar":
+		case "auto", "ollama", "openai", "sidecar", "rulith":
 		default:
-			return fmt.Errorf("serve.recipes[%d] kind must be ollama, openai, or sidecar, got %q", i, r.Kind)
+			return fmt.Errorf("serve.recipes[%d] kind must be auto, ollama, openai, sidecar, or rulith, got %q", i, r.Kind)
 		}
 		switch r.Runtime {
-		case "", "openai", "ollama", "mlx":
+		case "", "openai", "ollama", "mlx", "rulith":
 		default:
-			return fmt.Errorf("serve.recipes[%d] runtime must be openai, ollama, or mlx, got %q", i, r.Runtime)
+			return fmt.Errorf("serve.recipes[%d] runtime must be openai, ollama, mlx, or rulith, got %q", i, r.Runtime)
 		}
 		if u, err := url.ParseRequestURI(r.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			return fmt.Errorf("serve.recipes[%d] needs an http(s) url", i)

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -176,6 +177,13 @@ func TestPagingRefusalsBeforeSpawn(t *testing.T) {
 	trap := filepath.Join(dir, "rg")
 	if e := os.WriteFile(trap, []byte("#!/bin/sh\nprintf invoked > \"$MARKER\"\nexit 0\n"), 0700); e != nil {
 		t.Fatal(e)
+	}
+	if runtime.GOOS == "windows" {
+		// LookPath finds rg only through PATHEXT; without a .cmd twin the
+		// trap could never fire and this test could not catch a spawn.
+		if e := os.WriteFile(filepath.Join(dir, "rg.cmd"), []byte("@echo invoked >\"%MARKER%\"\r\n"), 0700); e != nil {
+			t.Fatal(e)
+		}
 	}
 	marker := filepath.Join(dir, "called")
 	t.Setenv("PATH", dir)

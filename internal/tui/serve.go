@@ -169,11 +169,14 @@ func (m *Model) serveRecipes() []serve.Recipe {
 
 // probeServe checks every endpoint off the event loop.
 func (m *Model) probeServe() tea.Cmd {
-	return m.probeServeWith(&http.Client{Timeout: time.Duration(m.Cfg.Serve.ProbeTimeoutSeconds) * time.Second})
+	return m.probeServeWithDiscovery(&http.Client{Timeout: time.Duration(m.Cfg.Serve.ProbeTimeoutSeconds) * time.Second}, serve.DiscoverServers)
 }
 
 // probeServeWith is the injectable core: tests fake the transport.
 func (m *Model) probeServeWith(client *http.Client) tea.Cmd {
+	return m.probeServeWithDiscovery(client, nil)
+}
+func (m *Model) probeServeWithDiscovery(client *http.Client, discover func(context.Context, *http.Client) ([]serve.DiscoveredServer, error)) tea.Cmd {
 	endpoints := m.serveEndpoints()
 	recipes := m.serveRecipes()
 	spawned := make(map[string]*serve.Proc, len(m.Serve.Spawned))
@@ -193,9 +196,37 @@ func (m *Model) probeServeWith(client *http.Client) tea.Cmd {
 			explicit = append(explicit, name)
 		}
 	}
+	probeTimeout := time.Duration(m.Cfg.Serve.ProbeTimeoutSeconds) * time.Second
 	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+		defer cancel()
 		health := serve.ProbeAll(client, endpoints)
 		assets, warnings := serve.Discover(roots, explicit)
+		// Live discovery: every loopback listener that answers like a
+		// model server joins the table read-only; discovery grants no ownership.
+		if discover != nil {
+			if found, derr := discover(ctx, client); derr != nil {
+				warnings = append(warnings, "server discovery: "+derr.Error())
+			} else {
+				for _, d := range found {
+					covered := false
+					for _, e := range endpoints {
+						covered = covered || sameServerPort(e.URL, d.URL)
+					}
+					if !covered {
+						endpoints = append(endpoints, serve.Endpoint{Kind: d.Kind, Label: d.Kind, URL: d.URL})
+						health = append(health, d.Health)
+					}
+				}
+			}
+		}
+		if install, ok := serve.LocateRulith(); ok {
+			if ra, err := serve.RulithAssets(ctx, install); err == nil {
+				assets = append(assets, ra...)
+			} else {
+				warnings = append(warnings, "rulith catalog: "+err.Error())
+			}
+		}
 		var rows []ServeRow
 		for i, e := range endpoints {
 			r := ServeRow{Ep: e, Health: health[i], Have: true,
@@ -280,7 +311,7 @@ func (m *Model) probeServeWith(client *http.Client) tea.Cmd {
 			matched := false
 			for j := range recipes {
 				rec := &recipes[j]
-				compatible := asset.Format == "safetensors" && rec.Runtime == "mlx" || asset.Runtime == "ollama" && rec.Kind == serve.KindOllama || asset.Format == "gguf" && rec.Kind == serve.KindOpenAI && rec.Runtime != "mlx" && rec.HasModelPlaceholder()
+				compatible := asset.Runtime == "rulith" && rec.Kind == serve.KindRulith || asset.Format == "safetensors" && rec.Runtime == "mlx" || asset.Runtime == "ollama" && rec.Kind == serve.KindOllama || asset.Format == "gguf" && rec.Kind == serve.KindOpenAI && rec.Runtime != "mlx" && rec.HasModelPlaceholder()
 				if !compatible || !serve.Loopback(rec.URL) {
 					continue
 				}
@@ -290,12 +321,12 @@ func (m *Model) probeServeWith(client *http.Client) tea.Cmd {
 				if a.Runtime == "" {
 					a.Runtime = "openai"
 				}
-				r := ServeRow{Ep: serve.Endpoint{Kind: rec.Kind, Label: rec.Name, URL: rec.URL, Model: a.Path}, Recipe: rec, Asset: &a, IsModel: true, Have: true}
+				r := ServeRow{Ep: serve.Endpoint{Kind: rec.Kind, Label: rec.Name, URL: rec.URL, Model: serve.AssetModelName(a)}, Recipe: rec, Asset: &a, IsModel: true, Have: true}
 				for _, server := range rows {
 					if !server.IsModel && server.Ep.URL == rec.URL {
 						r.Health, r.Ours = server.Health, server.Ours
 						for _, name := range r.Health.Loaded {
-							r.Resident = r.Resident || r.Ours && name == a.Path
+							r.Resident = r.Resident || (r.Ours || rec.Kind == serve.KindRulith) && name == r.Ep.Model
 						}
 						break
 					}
@@ -314,6 +345,9 @@ func (m *Model) probeServeWith(client *http.Client) tea.Cmd {
 		return msg
 	}
 }
+
+// sameServerPort compares complete endpoint identity, not just its port.
+func sameServerPort(a, b string) bool { return serve.SameEndpoint(a, b) }
 
 // serveKeyOf identifies a row across probes: server URL plus model
 // (server rows carry a blank model).
@@ -481,7 +515,7 @@ func (m *Model) serveUse() {
 		m.alert("err", "the sidecar is not a worker runtime")
 		return
 	}
-	if r.Asset != nil && (!r.Asset.LoadCandidate() || r.Asset.Runtime != "mlx" && (r.Recipe == nil || !r.Recipe.HasModelPlaceholder())) {
+	if r.Asset != nil && (!r.Asset.LoadCandidate() || r.Asset.Runtime != "mlx" && r.Asset.Runtime != "rulith" && (r.Recipe == nil || !r.Recipe.HasModelPlaceholder())) {
 		m.alert("err", r.Asset.Reason)
 		return
 	}
@@ -623,7 +657,7 @@ func (m *Model) serveStart() {
 		m.alert("err", fmt.Sprintf("no start recipe for %s", r.Ep.URL))
 		return
 	}
-	if rec.Runtime == "mlx" || rec.Discovered {
+	if rec.Runtime == "mlx" || rec.Kind == serve.KindRulith || rec.Discovered {
 		m.alert("err", "select an existing local model row and l load")
 		return
 	}
@@ -731,16 +765,17 @@ func (m *Model) serveAction(load bool) tea.Cmd {
 		m.alert("info", "model is not resident (unconfirmed) — l load; select owned server to release an unready child")
 		return nil
 	}
-	if row.Asset != nil && (!row.Asset.LoadCandidate() || row.Asset.Runtime != "mlx" && (row.Recipe == nil || !row.Recipe.HasModelPlaceholder())) {
+	if row.Asset != nil && (!row.Asset.LoadCandidate() || row.Asset.Runtime != "mlx" && row.Asset.Runtime != "rulith" && (row.Recipe == nil || !row.Recipe.HasModelPlaceholder())) {
 		m.alert("err", row.Asset.Reason)
 		return nil
 	}
+	nativeRulith := row.Ep.Kind == serve.KindRulith && row.IsModel && row.Asset != nil && row.Asset.Runtime == "rulith"
 	nativeOllama := row.IsModel && row.Asset == nil && (row.Health.Kind == serve.KindOllama || row.Ep.Kind == serve.KindOllama)
-	if !nativeOllama && !load && p.PID() == 0 {
+	if !nativeOllama && !nativeRulith && !load && p.PID() == 0 {
 		m.alert("err", "no unload API or owned runtime to release; external residency stays unchanged")
 		return nil
 	}
-	if load && !nativeOllama && row.Asset == nil {
+	if load && !nativeOllama && !nativeRulith && row.Asset == nil {
 		m.alert("err", "select an installed Ollama model or complete local MLX candidate")
 		return nil
 	}
@@ -760,6 +795,15 @@ func (m *Model) serveAction(load bool) tea.Cmd {
 	return func() tea.Msg {
 		defer cancel()
 		msg := serveLoadMsg{model: row.Ep.Model, url: row.Ep.URL}
+		if nativeRulith {
+			install, ok := serve.LocateRulith()
+			if !ok {
+				msg.err = fmt.Errorf("Rulith installation is unavailable")
+				return msg
+			}
+			_, msg.err = serve.SetRulithResident(ctx, &http.Client{Timeout: probeTimeout}, install, row.Ep.URL, row.Asset.ID, load)
+			return msg
+		}
 		if nativeOllama {
 			_, msg.err = serve.SetOllamaResident(ctx, &http.Client{Timeout: 2 * time.Minute}, row.Ep.URL, row.Ep.Model, load)
 			return msg

@@ -44,7 +44,7 @@ func TestDecisionRecipeOpenSelectionAndOwnership(t *testing.T) {
 	if !reflect.DeepEqual(got[0].Argv, custom.Argv) {
 		t.Fatal("custom interpreter/argv overwritten")
 	}
-	p, err := Start(Recipe{Name: "child", Argv: []string{"sleep", "30"}}, filepath.Join(t.TempDir(), "p.log"))
+	p, err := Start(Recipe{Name: "child", Argv: napCmd("30")}, filepath.Join(t.TempDir(), "p.log"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,14 @@ func TestDecisionRecipeFlagsMatchActualPythonCLI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	help, err := exec.Command("python3", script, "--help").CombinedOutput()
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		python, err = exec.LookPath("python")
+	}
+	if err != nil {
+		t.Skip("python 3 not on PATH — actual CLI flag contract unexercised")
+	}
+	help, err := exec.Command(python, script, "--help").CombinedOutput()
 	if err != nil {
 		t.Fatalf("actual parser help: %s %v", help, err)
 	}

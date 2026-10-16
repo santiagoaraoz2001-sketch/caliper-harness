@@ -75,6 +75,11 @@ The launcher selects the locally validated self-contained development build
 virtualenvs, or Homebrew needed) and keeps your current project directory.
 See [FIRST-USE.md](FIRST-USE.md) for model prerequisites.
 
+Windows packaging is a development candidate, pending native qualification.
+The offline folder uses `start.ps1`; the separately built managed folder includes
+`install-windows.ps1` for PATH installation. Workers use an installed compatible
+server; MLX is Mac-only. See [FIRST-USE-WINDOWS.md](FIRST-USE-WINDOWS.md).
+
 ### Build from source
 
 Requirements: Go 1.25 with CGO, and `uv` for the managed Python runtimes.
@@ -87,7 +92,10 @@ make build
 
 The Go module is `specific-harness` for compatibility; the public executable
 is `caliper-harness`. `make bundle-macos OUT=...` prepares a fresh
-self-contained app folder.
+self-contained app folder. On Windows, `make bundle-windows OUT=...` builds
+an offline developer folder using installed Go, mingw-w64 GCC, Bash and ripgrep.
+Private runtime acquisition is a separate explicit command documented in
+[PORTABILITY.md](PORTABILITY.md); neither Windows packaging mode is natively qualified.
 
 On first run with an unconfigured worker, Setup opens: choose an existing
 model, enter your exact project check (for example `npm test`), review, and

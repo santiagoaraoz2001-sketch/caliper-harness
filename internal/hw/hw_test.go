@@ -51,7 +51,7 @@ func TestMaxSubagents(t *testing.T) {
 }
 
 func TestDetectSmoke(t *testing.T) {
-	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" && runtime.GOOS != "windows" {
 		t.Skipf("unsupported platform %s errors by design", runtime.GOOS)
 	}
 	p, err := Detect()
@@ -81,6 +81,8 @@ func TestNPUFor(t *testing.T) {
 		{"darwin", "amd64", NPUNone},
 		{"linux", "amd64", NPUNone},
 		{"linux", "arm64", NPUNone},
+		{"windows", "amd64", NPUNone},
+		{"windows", "arm64", NPUNone},
 	}
 	for _, tc := range cases {
 		if got := npuFor(tc.os, tc.arch); got != tc.want {
