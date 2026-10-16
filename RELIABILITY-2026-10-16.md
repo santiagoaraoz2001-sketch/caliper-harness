@@ -20,7 +20,8 @@ The correction tiles queries using the native checkpoint's existing CHUNK, retai
 - Actual small native D1 judgment passed on mps:0:0.247s,7.31GB driver memory, hook installed. This is runtime evidence, not decision-quality qualification.
 -47 decision Python regressions pass. Worker continuation16 and server6 tests pass; framing10 pass/10 optional captured-Gemma cases skipped. A first sandbox invocation could not access Metal; isolated unsandboxed component runs passed. No Laguna model was loaded by these tests.
 - Full captured15755-token D1 replay remains unverified: automatic approval rejected it because it could repeat severe memory exhaustion. No workaround/retry was used.
-- Full Go/build/vet and platform closeout results are recorded in ConstructionPlan.md. Target Windows/Linux execution remains unverified without target machines.
+- Full Go run: all packages passed except one stale help-text golden expectation; its exact wording was corrected and the tools package rerun passed. Build/vet/format passed. Windows amd64 components and process test executable cross-compiled; Linux amd64/arm64 components cross-compiled and launcher syntax passed. These do not establish native Windows/Linux application execution.
+- Shared fixes are synchronized to main, codex/windows-conversion and codex/linux-conversion, preserving platform-specific files and the newer remote README changes. The independent windows WIP branch is untouched.
 
 ## Capability rubric for this repair validation
 
