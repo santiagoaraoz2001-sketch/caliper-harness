@@ -503,7 +503,7 @@ func runGraph(args cliArgs) {
 	defer s.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	dj := decision.New(cfg.Decision.Server, cfg.Decision.Model, cfg.Decision.Device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(decision.SelectionFor(cfg.Decision)).WithPrompts(pc)
+	dj := decision.New(cfg.Decision.Server, cfg.Decision.Model, cfg.Decision.Device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(decision.SelectionFor(cfg.Decision)).WithPrompts(pc).WithInputLimit(cfg.Decision.MaxInputTokens)
 	api := graph.NewWithReady(s, version, sessionsDir, func(ctx context.Context, id string) (*plan.Approach, error) {
 		input, err := ask.NewFileInput(os.Stdin)
 		if err != nil {
@@ -778,7 +778,7 @@ func runDecision(args cliArgs) {
 	if err != nil {
 		fatal(err)
 	}
-	c := decision.New(server, cfg.Decision.Model, device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(selection).WithPrompts(pc)
+	c := decision.New(server, cfg.Decision.Model, device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(selection).WithPrompts(pc).WithInputLimit(cfg.Decision.MaxInputTokens)
 	v, err := c.Judge(context.Background(), decision.Request{Context: ctxText, Instructions: instructions, Options: opts})
 	if err != nil {
 		fatal(err)

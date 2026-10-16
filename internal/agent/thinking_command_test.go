@@ -65,7 +65,7 @@ func TestThinkingCapturedCommandSelectedBody(t *testing.T) {
 		t.Fatalf("captured log: %d %v", len(encoded), err)
 	}
 	client, calls, bodies := thinkingSelectedClient(t)
-	if _, err = client.Judge(context.Background(), old); err == nil || !strings.Contains(err.Error(), "8231 exceed limit 8192") || calls.Load() != 0 {
+	if _, err = client.Judge(context.Background(), old); err == nil || !strings.Contains(err.Error(), "exceed limit 8192") || calls.Load() != 0 {
 		t.Fatalf("original selected body admission: %v HTTP=%d", err, calls.Load())
 	}
 	metadata, _, _ := strings.Cut(old.Context, "\nUnit:\n")
@@ -120,7 +120,7 @@ func TestThinkingCapturedCommandSelectedBody(t *testing.T) {
 	if !reflect.DeepEqual(origMap, newMap) || origValues != newValues || !strings.Contains(actual.Instructions, "ConfiguredCommandSameAsCommand=true") {
 		t.Fatal("lossy evidence reconstruction")
 	}
-	t.Logf("original logged7895/selected8231; current selected%d; all factual metadata and exact Unit/Sample reconstructed", len(body))
+	t.Logf("historical logged7895/selected8231 (before deadline metadata); current selected%d; all factual metadata and exact Unit/Sample reconstructed", len(body))
 }
 
 func TestThinkingCommandViewOwnership(t *testing.T) {

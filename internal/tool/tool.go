@@ -92,6 +92,7 @@ type Result struct {
 
 // Definition describes and implements one tool.
 type Definition struct {
+	Opening       bool                                                  // harmless entry/document navigation; unsupported arguments may be disclosed and ignored
 	NormalizeArgs func(context.Context, Args) (Args, error)             // owning path resolution before authorization; no lifecycle authority
 	Prompts       *prompts.Catalog                                      // immutable owning request/run snapshot
 	Bound         bool                                                  // machine-owned scoped expansion; never part of the model schema

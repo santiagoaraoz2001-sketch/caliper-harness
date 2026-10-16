@@ -91,7 +91,7 @@ func New(d Deps, prompt string) (*agent.Runner, []string, error) {
 	reg := tool.NewRegistry(pc)
 	var r *agent.Runner
 	tools.RegisterAt(reg, d.Cfg, d.In, d.Out, d.Ask, w, func() *tool.Registry { return r.Registry })
-	dj := decision.New(d.Cfg.Decision.Server, d.Cfg.Decision.Model, d.Cfg.Decision.Device, time.Duration(d.Cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(decision.SelectionFor(d.Cfg.Decision)).WithPrompts(pc)
+	dj := decision.New(d.Cfg.Decision.Server, d.Cfg.Decision.Model, d.Cfg.Decision.Device, time.Duration(d.Cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(decision.SelectionFor(d.Cfg.Decision)).WithPrompts(pc).WithInputLimit(d.Cfg.Decision.MaxInputTokens)
 	// Execution and decisions share the owning run context.
 	judgeFunc := func(ctx context.Context, r decision.Request) (decision.Verdict, error) { return dj.Judge(ctx, r) }
 	gate := &auth.Gate{Prompts: pc, Mode: d.Cfg.Auth.Mode, In: d.In, Out: d.Out, AskFunc: d.AskYesNo,
@@ -616,7 +616,7 @@ func LaunchDeps(cfg config.Config, s *store.Store, server, model string, maxStep
 	return d, nil
 }
 func launchDeps(cfg config.Config, s *store.Store, server, model string, maxSteps, window int, in io.Reader, out io.Writer, w *files.Workspace, behavior string) launch.Deps {
-	dj := decision.New(cfg.Decision.Server, cfg.Decision.Model, cfg.Decision.Device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(decision.SelectionFor(cfg.Decision)).WithPrompts(cfg.PromptCatalog)
+	dj := decision.New(cfg.Decision.Server, cfg.Decision.Model, cfg.Decision.Device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(decision.SelectionFor(cfg.Decision)).WithPrompts(cfg.PromptCatalog).WithInputLimit(cfg.Decision.MaxInputTokens)
 	return launch.Deps{Prompts: cfg.PromptCatalog,
 		Workspace: w.Path, Store: s, Behavior: behavior,
 		NewModel: func() agent.Model {

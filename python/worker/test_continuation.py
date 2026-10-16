@@ -208,6 +208,33 @@ class LiteralContinuationControls(unittest.TestCase):
         self.assertNotIn(b'"finish_reason": "tool_calls"',h.wfile.getvalue())
         self.assertTrue(generator.contexts[-1]._should_stop)
 
+    def test_captured_failures_expose_settled_recovery_boundary(self):
+        drafts = [
+            'plan><arg_key></arg_key><arg_value>{}</arg_value>',
+            'plan<arg_key>argument_keys></arg_key><arg_value>{}</arg_value><arg_key>argument_values>',
+        ]
+        for draft in drafts:
+            for close, boundary in [('</tool_call>', 'tool_close'), ('', 'stop')]:
+                with self.subTest(draft=draft, boundary=boundary):
+                    native = native_fixture('</think><tool_call>' + draft + close, [], self.actual_glm_parser())
+                    install_continuation_hooks(native)
+                    generator = native.ResponseGenerator(); h = handler(native, generator)
+                    with self.assertLogs(level='ERROR'):
+                        h.handle_completion(h.handle_chat_completions(), [])
+                    detail = rows(h)[-1]['error']
+                    self.assertEqual(detail['native_tool_failure'], dict(
+                        draft=draft, reason=detail['message'], boundary=boundary, call_index=0))
+                    self.assertTrue(generator.contexts[-1]._should_stop)
+
+    def test_length_on_failed_tool_close_does_not_enable_recovery(self):
+        text = '</think><tool_call>plan><arg_key></arg_key><arg_value>{}</arg_value></tool_call>'
+        native = native_fixture(text + 'tail', [len(text)], self.actual_glm_parser())
+        install_continuation_hooks(native)
+        generator = native.ResponseGenerator(); h = handler(native, generator)
+        with self.assertLogs(level='ERROR'):
+            h.handle_completion(h.handle_chat_completions(), [])
+        self.assertNotIn('native_tool_failure', rows(h)[-1]['error'])
+
     def test_actual_laguna_parser_preserves_all_json_array_members(self):
         text = '</think><tool_call>[{"name":"effect","arguments":{"name":"first"}},{"name":"effect","arguments":{"name":"second"}}]</tool_call>'
         native = native_fixture(text,[],self.actual_glm_parser()); install_continuation_hooks(native)
@@ -239,7 +266,8 @@ class LiteralContinuationControls(unittest.TestCase):
         with self.assertLogs(level="ERROR") as log:
             h.handle_completion(h.handle_chat_completions(), [])
         data = rows(h)
-        self.assertEqual(data, [{"error": {"message": "duplicate or empty native GLM argument key", "native_tool_draft": draft}}])
+        self.assertEqual(data[0]["error"]["native_tool_draft"], draft)
+        self.assertEqual(data[0]["error"]["native_tool_failure"]["boundary"], "tool_close")
         self.assertIn(repr(draft), log.output[0])
         self.assertNotIn(b'data: [DONE]', h.wfile.getvalue())
         self.assertTrue(generator.contexts[-1]._should_stop)
@@ -251,7 +279,8 @@ class LiteralContinuationControls(unittest.TestCase):
         generator = native.ResponseGenerator(); h = handler(native, generator)
         with self.assertLogs(level="ERROR"):
             h.handle_completion(h.handle_chat_completions(), [])
-        self.assertEqual(rows(h), [{"error": {"message": "duplicate native JSON argument/key", "native_tool_draft": draft}}])
+        self.assertEqual(rows(h)[0]["error"]["native_tool_draft"], draft)
+        self.assertEqual(rows(h)[0]["error"]["native_tool_failure"]["reason"], "duplicate native JSON argument/key")
         self.assertNotIn(b'data: [DONE]', h.wfile.getvalue())
         self.assertTrue(generator.contexts[-1]._should_stop)
 

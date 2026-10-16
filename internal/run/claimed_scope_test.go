@@ -28,7 +28,7 @@ func TestClaimedTaskScopeNativeCoding(t *testing.T) {
 	for _, variant := range []struct {
 		name                                     string
 		ordinary, frozen, preparation, postclaim bool
-	}{{name: "postclaim", ordinary: true, postclaim: true}, {name: "postclaim-uncertain", ordinary: true, postclaim: true}, {name: "focused"}, {name: "ordinary", ordinary: true}, {name: "frozen", frozen: true}, {name: "preparation", ordinary: true, preparation: true}} {
+	}{{name: "postclaim", ordinary: true, postclaim: true}, {name: "postclaim-uncertain", ordinary: true, postclaim: true}, {name: "focused"}, {name: "browse-other"}, {name: "ordinary", ordinary: true}, {name: "frozen", frozen: true}, {name: "preparation", ordinary: true, preparation: true}} {
 		t.Run(variant.name, func(t *testing.T) {
 			frozen := variant.frozen
 			dir := t.TempDir()
@@ -71,6 +71,9 @@ func TestClaimedTaskScopeNativeCoding(t *testing.T) {
 				t.Fatal(e)
 			}
 			calls := []codingCall{{"task_start", map[string]any{"task": task.ID}}, {"workflow_focus", map[string]any{"ref": task.ID}}, {"read", map[string]any{"path": "facts.txt"}}, {"bash", map[string]any{"cmd": "printf scoped > bash-marker"}}, {"check", map[string]any{"timeout": 2}}}
+			if variant.name == "browse-other" {
+				calls[1].args = map[string]any{"ref": other.ID}
+			}
 			if variant.ordinary {
 				calls = append(calls[:1], calls[2:]...)
 			}
@@ -122,8 +125,8 @@ func TestClaimedTaskScopeNativeCoding(t *testing.T) {
 						}
 					}
 					for _, name := range []string{"bash", "check", "edit", "write"} {
-						if !names[name] {
-							t.Errorf("draft selected task lost ordinary project tool %s", name)
+						if names[name] {
+							t.Errorf("unclaimed selected task exposes effect %s", name)
 						}
 					}
 				}
@@ -227,6 +230,19 @@ func TestClaimedTaskScopeNativeCoding(t *testing.T) {
 						if !names[name] {
 							t.Errorf("claimed next wire lacks %s: %+v", name, names)
 						}
+					}
+				}
+
+				if variant.name == "browse-other" && requests > 1 && !review && !restoring && !settled {
+					if running.Continuation.Workflow.ID != task.ID || running.Continuation.Assignment.TaskID != task.ID {
+						t.Error("browsing replaced active task authority")
+					}
+					found := false
+					for _, m := range body.Messages {
+						found = found || m.Role == "tool" && strings.Contains(m.Content, "not a task handoff") && strings.Contains(m.Content, other.ID) && strings.Contains(m.Content, task.ID)
+					}
+					if !found {
+						t.Error("missing truthful browsing/claim receipt")
 					}
 				}
 				if !review && settled {
@@ -337,6 +353,12 @@ func TestClaimedTaskScopeNativeCoding(t *testing.T) {
 				}
 			}
 			_, _, runErr := r.Run(context.Background(), "observe and check")
+			if variant.name == "browse-other" {
+				untouched, err := plan.GetTask(s, other.ID)
+				if err != nil || untouched.Attempts != 0 || untouched.State != plan.TaskQueued {
+					t.Fatalf("browsing claimed another task: %+v %v", untouched, err)
+				}
+			}
 			actual, e := plan.GetTask(s, task.ID)
 			if e != nil {
 				t.Fatal(e)

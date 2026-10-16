@@ -7,7 +7,7 @@ import (
 
 func TestGuidedPlanningCatalogRolesAndQuestions(t *testing.T) {
 	pc := Builtin()
-	for _, phase := range []string{"entry", "goal", "approach", "task", "another", "select", "select_approach", "observe", "proof", "step_objective", "step_execution", "step_validation", "step_more", "review", "task_complete", "ready", "validated", "plan_complete", "settled", "remediate", "stopped"} {
+	for _, phase := range []string{"entry", "goal", "approach", "task", "another", "select", "select_approach", "observe", "proof", "step_objective", "step_execution", "step_validation", "step_more", "review", "task_drafted", "task_complete", "ready", "validated", "plan_complete", "settled", "remediate", "stopped"} {
 		if !pc.Has("planning."+phase) || strings.TrimSpace(pc.Text("planning."+phase)) == "" {
 			t.Fatal("missing current phase", phase)
 		}
