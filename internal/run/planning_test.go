@@ -81,6 +81,17 @@ func (f *planningFixture) call(args tool.Args) tool.Result {
 	if result.Focus != nil {
 		f.scope = &session.WorkflowScope{Store: result.Focus.Store, Kind: result.Focus.Kind, ID: result.Focus.ID}
 	}
+	// Every successful answer/navigation returns the actual next question,
+	// including its template, without an extra empty plan invocation.
+	var receipt map[string]json.RawMessage
+	if json.Unmarshal([]byte(result.Text), &receipt) == nil {
+		var next string
+		if json.Unmarshal(receipt["next_question"], &next) != nil || next != f.definition().Schema() {
+			f.t.Fatalf("receipt does not contain authoritative next question: %s", result.Text)
+		}
+	} else if !strings.Contains(result.Text, f.definition().Schema()) {
+		f.t.Fatalf("navigation receipt omits next question: %s", result.Text)
+	}
 	return result
 }
 func (f *planningFixture) task() {
@@ -175,11 +186,15 @@ func TestGuidedPlanningRefusesStaleForeignAndIncomplete(t *testing.T) {
 	scope, _ := launch.ScopeNode(f.d.Store, f.scope)
 	f.scope = &session.WorkflowScope{Store: f.d.Store.Identity(), Kind: "approach", ID: scope.Parent}
 	d := f.definition()
-	if d.Params[0].Name != "task" {
+	if d.Params[0].Name != "invoke" || len(d.Params[0].Enum) != 1 || d.Params[0].Enum[0] != "NEXT" {
 		t.Fatal("incomplete task skipped", d.Schema())
 	}
 	if _, gap := tool.ValidateJSON(d, `{"invoke":"COMPLETE"}`); gap == "" {
 		t.Fatal("premature COMPLETE advertised")
+	}
+	f.call(tool.Args{"invoke": "NEXT"})
+	if f.scope.Kind != "task" || f.scope.ID != tid {
+		t.Fatal("incomplete task was not selected")
 	}
 }
 
@@ -379,5 +394,28 @@ func TestGuidedPlanningRevisionEmptyParent(t *testing.T) {
 	actualPlan, _ := plan.GetPlan(f.d.Store, p.ID)
 	if actualPlan.Goal != "B" || actualPlan.State != plan.PlanDraft {
 		t.Fatal("reconciliation invented execution", actualPlan)
+	}
+}
+
+func TestGuidedPlanningReceiptRetainsGraphEffects(t *testing.T) {
+	f := newPlanningFixture(t)
+	entry := f.call(tool.Args{})
+	if !strings.Contains(entry.Text, f.definition().CallTemplate()) {
+		t.Fatal("entry lacks goal answer template")
+	}
+	res := f.call(tool.Args{"title": "Repair", "outcome": "requested behavior", "rules": "preserve neighbors", "articles": "first change", "proof": "observed regression"})
+	var receipt struct {
+		Data    json.RawMessage `json:"data"`
+		Effects json.RawMessage `json:"effects"`
+		Next    string          `json:"next_question"`
+	}
+	if err := json.Unmarshal([]byte(res.Text), &receipt); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(receipt.Data), f.scope.ID) || len(receipt.Effects) == 0 || receipt.Next != f.definition().Schema() {
+		t.Fatalf("lost created ID/effects or wrong next question: %s", res.Text)
+	}
+	if strings.Contains(receipt.Next, `"outcome": "<outcome>"`) || !strings.Contains(receipt.Next, `"strategy": "<strategy>"`) {
+		t.Fatalf("stale goal template instead of approach: %s", receipt.Next)
 	}
 }

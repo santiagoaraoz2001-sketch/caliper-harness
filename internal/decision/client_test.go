@@ -181,6 +181,9 @@ func TestNativeCapacityRefusalIsTypedOnlyForExactAdmission(t *testing.T) {
 		body   string
 		want   bool
 	}{
+		{"configured input capacity", 400, `{"error":"request has 16000 tokens; decision input limit is 15999; shorten context/options"}`, true},
+		{"configured input not exceeded", 400, `{"error":"request has 15999 tokens; decision input limit is 15999; shorten context/options"}`, false},
+		{"configured trailing text", 400, `{"error":"request has 16000 tokens; decision input limit is 15999; shorten context/options extra"}`, false},
 		{"native real capacity", 400, `{"error":"request has 40000 tokens; model context limit is 32768; shorten context/options"}`, true},
 		{"native Laya capacity", 400, `{"error":"complete context does not fit the selected Laya model; shorten context/options"}`, true},
 		{"not actually over capacity", 400, `{"error":"request has 10 tokens; model context limit is 32768; shorten context/options"}`, false},

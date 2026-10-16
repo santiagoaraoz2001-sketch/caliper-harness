@@ -168,7 +168,14 @@ coding:
 decision:
   server: http://127.0.0.1:8090      # decision sidecar (optional)
   style_enforcement: false           # post-task style judge (optional)
+  max_input_tokens: 15999            # complete native input: context + instructions + choices
 ```
+
+The decision sidecar counts complete inputs with its native tokenizer before inference.
+Progress advice can reduce optional evidence to fit this budget; the raw history and
+worker context remain unchanged. Expired requests do not start inference, and busy
+judgments are reported without queueing. An already-running native GPU forward
+cannot be safely interrupted; a result arriving after its deadline is discarded.
 
 Project rules can live in two model-readable places: `behavior.md` for how
 the agent should conduct itself, and the styleguide document in the state
@@ -207,10 +214,11 @@ aggregate percentage is computed. Read the current state honestly:
   qualified end to end on a local model. The most recent live run completed
   its product work and checks (19/19 on the test workload) but settled
   unverified when the model server died under a 100k-token prompt.
-- Known open work: keeping pre-claim coding from ballooning the
-  continuation that planning then re-drafts against; executor-facing
-  unstick verdicts from the supervisor; the style judge has unit evidence
-  but no live run yet.
+- The current candidate separates selected PAT drafting from execution: finish all
+  Task briefs for an Approach, request readiness, then claim. Discovery stays
+  available while drafting. This lifecycle correction has fixture evidence; live
+  qualification remains pending. Supervisor direction and style-judge live
+  qualification remain open work.
 
 Verification campaigns run locally against real models with byte-exact wire
 capture; their (large) artifacts are not part of this repository. The plan

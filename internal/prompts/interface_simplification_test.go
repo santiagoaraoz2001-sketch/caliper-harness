@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestInterfaceSimplificationKeepsEntryCurrentAndDraftCodingUsable(t *testing.T) {
+func TestInterfaceSimplificationKeepsEntryCurrentAndPlanningBoundary(t *testing.T) {
 	pc := Builtin()
 	if got := strings.TrimSpace(pc.Text("planning.entry")); got != "Call plan with {}; returns the first question." {
 		t.Fatalf("entry competes with later questions: %s", got)
@@ -20,8 +20,8 @@ func TestInterfaceSimplificationKeepsEntryCurrentAndDraftCodingUsable(t *testing
 	}
 	for _, key := range []string{"help.plan", "system.task.prepare", "system.workflow.focused", "system.coding.direct", "preparation.guided_next"} {
 		text := strings.ToLower(strings.Join(strings.Fields(pc.Text(key)), " "))
-		if !strings.Contains(text, "coding tools") || !strings.Contains(text, "draft") || !strings.Contains(text, "pre-claim effects") {
-			t.Errorf("%s does not describe ordinary coding during drafts: %s", key, text)
+		if !strings.Contains(text, "all task briefs") || !strings.Contains(text, "readiness") || !strings.Contains(text, "claim") || strings.Contains(text, "pre-claim effects") {
+			t.Errorf("%s does not describe complete Approach drafting before execution: %s", key, text)
 		}
 	}
 	ref := pc.Text("help.reference.pat")

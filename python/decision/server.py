@@ -14,12 +14,32 @@ import json
 import os
 import sys
 import threading
+import time
+import math
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from backends import BadRequest, Selection, load_backend, resolve, validate_judge
 from prompts import load as load_prompts
 
 MODEL = "typed-decisions"
+
+
+class JudgmentBusy(Exception):
+    pass
+
+
+class JudgmentExpired(Exception):
+    pass
+
+
+def check_deadline(body):
+    deadline = body.get("deadline_unix_ms")
+    if deadline is None:
+        return
+    if type(deadline) not in (int, float) or not math.isfinite(deadline) or deadline <= 0:
+        raise BadRequest("deadline_unix_ms must be a positive finite timestamp")
+    if time.time() * 1000 >= deadline:
+        raise JudgmentExpired("judgment deadline expired; no verdict available")
 
 
 class Manager:
@@ -66,7 +86,11 @@ class Manager:
 
     def judge(self, body):
         context, options, instructions = validate_judge(body, self.prompts)
-        with self.judgment_lock:
+        check_deadline(body)
+        if not self.judgment_lock.acquire(blocking=False):
+            raise JudgmentBusy("decision model is busy with an active judgment; request was not queued")
+        try:
+            check_deadline(body)
             with self.state_lock:
                 backend = self.active
             if backend is None:
@@ -83,7 +107,20 @@ class Manager:
             device = body.get("device", "auto")
             if device != "auto" and device != backend.identity["device"]:
                 raise BadRequest(f"active model device is {backend.identity['device']}; activate the requested device first")
-            return backend.judge(context, options, instructions)
+            # Native forwards cannot safely be interrupted mid-kernel. Do not queue
+            # followers, and never return a verdict after its caller budget expired.
+            check_deadline(body)
+            limits = {}
+            if "max_input_tokens" in body:
+                limit = body["max_input_tokens"]
+                if type(limit) is not int or limit <= 0:
+                    raise BadRequest("max_input_tokens must be a positive integer")
+                limits["max_input_tokens"] = limit
+            result = backend.judge(context, options, instructions, **limits)
+            check_deadline(body)
+            return result
+        finally:
+            self.judgment_lock.release()
 
 
 MANAGER = None  # main loads the selected catalog before constructing the owner.
@@ -124,6 +161,10 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(data)
             result = MANAGER.activate(Selection.from_body(body)) if self.path == "/activate" else judge(body)
             self._send(200, result)
+        except JudgmentBusy as error:
+            self._send(503, {"error": str(error)})
+        except JudgmentExpired as error:
+            self._send(408, {"error": str(error)})
         except (BadRequest, ValueError) as error:
             self._send(400, {"error": str(error)})
         except Exception as error:

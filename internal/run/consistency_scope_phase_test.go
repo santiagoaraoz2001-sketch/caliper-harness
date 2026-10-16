@@ -216,9 +216,14 @@ func TestConsistencyWorkflowHeaderUsesFinalRegistry(t *testing.T) {
 						}
 					}
 					for _, name := range []string{"write", "edit", "bash", "check"} {
-						if _, available := view.Lookup(name); !available {
-							t.Fatalf("draft ordinary planning hid %s", name)
+						if _, available := view.Lookup(name); available {
+							t.Fatalf("draft managed planning exposed effect %s", name)
 						}
+					}
+				}
+				for _, name := range []string{"read", "find_file", "find_dir", "grep", "help", "plan", "graphql"} {
+					if _, ok := view.Lookup(name); !ok {
+						t.Fatalf("planning lost discovery/bookkeeping %s", name)
 					}
 				}
 				// Snapshot/resume never turns selected metadata into a claim.

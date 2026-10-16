@@ -431,6 +431,8 @@ type DecisionConfig struct {
 	Device string `yaml:"device"`
 	// TimeoutSeconds caps one judgment round-trip.
 	TimeoutSeconds int `yaml:"timeout_seconds"`
+	// MaxInputTokens includes context, instructions and choices, counted by the native tokenizer.
+	MaxInputTokens int `yaml:"max_input_tokens"`
 	// RiskThreshold grades authorization/readiness and factual-admission gates;
 	// below it the gate asks the human or refuses admission. Advisory supervision
 	// uses the owner's separate fixed 0.5 floor and never grants authority.
@@ -490,7 +492,7 @@ func Defaults() Config {
 		Templates: TemplatesConfig{Path: "templates"},
 		Subagents: SubagentsConfig{Mode: SubagentsConcurrent, MaxSubagents: 0, ContextWindow: 0, MaxResultChars: 2000},
 		Workflows: WorkflowsConfig{MaxRetries: 2, RetryDelaySeconds: 0, VerifyFollowup: true},
-		Decision:  DecisionConfig{Runtime: "laya", Server: "http://127.0.0.1:8090", Model: "typed-decisions", Device: "auto", TimeoutSeconds: 30, RiskThreshold: 0.7, CoherenceMaxChars: 0, JudgmentContextChars: 500, ConfidenceBuckets: []float64{0.5, 0.7, 0.9}},
+		Decision:  DecisionConfig{Runtime: "laya", Server: "http://127.0.0.1:8090", Model: "typed-decisions", Device: "auto", TimeoutSeconds: 30, MaxInputTokens: 15999, RiskThreshold: 0.7, CoherenceMaxChars: 0, JudgmentContextChars: 500, ConfidenceBuckets: []float64{0.5, 0.7, 0.9}},
 		Watch:     WatchConfig{Enabled: true, MaxFileBytes: 131072, StartupMaxBytes: 8388608, StartupMaxFiles: 512, DebounceMs: 200, MaxEvents: 100, DiffLines: 6, FileLines: 200, AttrWindowS: 30},
 		Tabs:      TabsConfig{TitleEvery: 5, TitleTimeoutSeconds: 20},
 	}
@@ -814,6 +816,9 @@ func (c Config) Validate() error {
 	case "auto", "cpu", "gpu":
 	default:
 		return fmt.Errorf("decision.device must be auto, cpu, or gpu, got %q", c.Decision.Device)
+	}
+	if c.Decision.MaxInputTokens <= 0 {
+		return fmt.Errorf("decision.max_input_tokens must be positive, got %d", c.Decision.MaxInputTokens)
 	}
 	if c.Decision.TimeoutSeconds <= 0 {
 		return fmt.Errorf("decision.timeout_seconds must be positive, got %d", c.Decision.TimeoutSeconds)

@@ -94,6 +94,7 @@ class ResponseState:
         self.state = ctx.text_sm.make_state(ctx.initial_state)
         self.previous = ctx.initial_state
         self.tool_text = ""
+        self.failed_boundary = ""
         self.formatter = native.ToolCallFormatter(ctx.tool_parser, tools, True)
         self.tokens, self.raw = [], []
         if prefix is not None:
@@ -103,12 +104,14 @@ class ResponseState:
                 raise ValueError("unfinished response changed native tool parser state")
             self.tokens, self.raw = list(prefix["tokens"]), list(prefix["raw_chunks"])
 
-    def calls(self, replay=False):
+    def calls(self, replay=False, boundary="tool_close"):
+        self.failed_boundary = "" if replay else boundary
         parsed = parsed_native_calls(self.formatter._tool_parser, self.tool_text, self.formatter._tools)
         if not parsed or any(not isinstance(c, dict) or not isinstance(c.get("name"), str)
                              or not isinstance(c.get("arguments"), dict) for c in parsed):
             raise ValueError("native tool parser did not return complete function arguments")
         self.tool_text = ""
+        self.failed_boundary = ""
         if replay:
             self.formatter._idx += len(parsed)
             return []
@@ -271,7 +274,7 @@ def install_continuation_hooks(native):
                 if item.finish_reason == "stop":
                     state.state, _ = native.TextStateMachine.discard(state.state)
                     if state.previous == "tool" and state.tool_text:
-                        calls.extend(state.calls())
+                        calls.extend(state.calls(boundary="stop"))
                 if content or reasoning or calls:
                     send(content, reasoning, calls)
                 if item.finish_reason is not None:
@@ -296,7 +299,16 @@ def install_continuation_hooks(native):
             # A parser refusal is a failed response, not an executable call or
             # an unexplained EOF. Keep its generated draft available for repair.
             native.logging.error("Native response refused: %s; tool draft: %r", error, state.tool_text)
-            row = {"error": {"message": str(error), "native_tool_draft": state.tool_text}}
+            detail = {"message": str(error), "native_tool_draft": state.tool_text}
+            # Only a parser failure at an explicit call close or normal stop
+            # reaches recovery. Length, replay and transport failures retain
+            # their existing continuation/error handling.
+            if state.failed_boundary and item.finish_reason != "length":
+                detail["native_tool_failure"] = {
+                    "draft": state.tool_text, "reason": str(error),
+                    "boundary": state.failed_boundary, "call_index": state.formatter._idx,
+                }
+            row = {"error": detail}
             self.wfile.write(f"data: {json.dumps(row)}\n\n".encode())
             self.wfile.flush()
         finally:

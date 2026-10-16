@@ -177,7 +177,7 @@ func TestInterfaceNativeAndTextNormalizedEffects(t *testing.T) {
 	}
 }
 
-func TestInterfaceDraftCodingRemainsOrdinary(t *testing.T) {
+func TestInterfaceDraftCodingWaitsForClaim(t *testing.T) {
 	for _, kind := range []string{"root", "plan", "approach", "task"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newPlanningFixture(t)
@@ -203,22 +203,22 @@ func TestInterfaceDraftCodingRemainsOrdinary(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, name := range []string{"read", "find_file", "edit", "write", "bash", "check", "plan", "graphql", "help"} {
+			for _, name := range []string{"read", "find_file", "plan", "graphql", "help"} {
 				if _, ok := r.Registry.Lookup(name); !ok {
 					t.Fatalf("draft hid core tool %s", name)
 				}
 			}
 			r.Run(t.Context(), "ordinary project coding while drafting")
 			marker, err := os.ReadFile("marker")
-			if err != nil || string(marker) != "project" {
-				t.Fatalf("draft coding effect=%q %v", marker, err)
+			if !os.IsNotExist(err) {
+				t.Fatalf("draft coding unexpectedly wrote=%q %v", marker, err)
 			}
 			task, err := plan.GetTask(f.d.Store, taskID)
 			if err != nil {
 				t.Fatal(err)
 			}
 			c := r.Continuation.Coding
-			if task.State != plan.TaskQueued || task.Attempts != 0 || task.Qualified() || r.Continuation.Assignment != nil || c == nil || c.Attempt != 0 || c.Receipt == nil || !c.Receipt.Direct || c.Receipt.Acceptance != nil || !c.Passed() {
+			if task.State != plan.TaskQueued || task.Attempts != 0 || task.Qualified() || r.Continuation.Assignment != nil || c != nil && c.Receipt != nil {
 				t.Fatalf("draft project work became Task progress: task=%+v coding=%+v", task, c)
 			}
 		})
@@ -393,11 +393,10 @@ func TestInterfaceDraftAdmissionPreservesSelectedRevisions(t *testing.T) {
 			}
 			r.Run(t.Context(), "ordinary project coding must honor selected scope")
 			marker, readErr := os.ReadFile("marker")
-			permitted := strings.Contains(mode, "sibling")
-			if permitted && (readErr != nil || string(marker) != "ordinary") || !permitted && !os.IsNotExist(readErr) {
+			if !os.IsNotExist(readErr) {
 				t.Fatalf("selected/sibling scope admission mode=%s marker=%q err=%v", mode, marker, readErr)
 			}
-			if !permitted && mode != "revision during approval" && approvals != 0 {
+			if approvals != 0 {
 				t.Fatal("selected revision reached approval")
 			}
 			actual, err := plan.GetTask(f.d.Store, f.scope.ID)

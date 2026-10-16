@@ -21,7 +21,7 @@ MACOSX_DEPLOYMENT_TARGET=14.0 CGO_CFLAGS='-O2 -g -mmacosx-version-min=14.0' CGO_
 lipo "$kuzu_dir/lib/dynamic/darwin/libkuzu.dylib" -thin arm64 -output "$out/lib/libkuzu.dylib"
 cp internal/prompts/prompts.yaml "$out/prompts.yaml"
 cp python/worker/server.py python/worker/framing.py python/worker/continuation.py "$out/python/worker/"
-for name in server.py backends.py prompts.py requirements.txt requirements-system-one.txt; do cp "python/decision/$name" "$out/python/decision/"; done
+for name in server.py backends.py mps_attention.py prompts.py requirements.txt requirements-system-one.txt; do cp "python/decision/$name" "$out/python/decision/"; done
 cp python/macos/verify_runtime.py "$out/python/macos/"
 ./scripts/prepare-macos-runtime.sh "$out"
 # The source example deliberately pins a project-relative path. Bundle defaults

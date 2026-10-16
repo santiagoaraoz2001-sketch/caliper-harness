@@ -85,6 +85,7 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 	case "revision_requeue":
 		invoke("REQUEUE")
 	case "entry":
+		def.Opening = true
 	case "goal":
 		for _, n := range []string{"title", "outcome", "rules", "articles", "proof"} {
 			add(n)
@@ -103,16 +104,26 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 		}
 		def.Example = tool.Args{"invoke": "TASK", "title": "<title>", "objective": "<objective>"}
 	case "select_approach":
-		add("approach")
-		for _, a := range st.Approaches {
-			def.Params[0].Enum = append(def.Params[0].Enum, a.ID)
+		if len(st.Approaches) == 1 {
+			invoke("NEXT")
+		} else {
+			add("approach")
+			for _, a := range st.Approaches {
+				def.Params[0].Enum = append(def.Params[0].Enum, a.ID)
+			}
 		}
 	case "select":
-		add("task")
+		ids := []string{}
 		for _, t := range st.Tasks {
 			if !t.Qualified() {
-				def.Params[0].Enum = append(def.Params[0].Enum, t.ID)
+				ids = append(ids, t.ID)
 			}
+		}
+		if len(ids) == 1 {
+			invoke("NEXT")
+		} else {
+			add("task")
+			def.Params[0].Enum = ids
 		}
 	case "observe":
 		add("current")
@@ -134,14 +145,23 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 		def.Params = append(def.Params, tool.Param{Name: "more", Type: tool.TypeBool, Required: true, Desc: pc.Text("planning.answer.more")})
 	case "review":
 		add("verify")
-	case "task_complete":
+	case "task_complete", "task_drafted":
 		invoke("NEXT")
 	case "ready":
 		invoke("EXECUTE")
 	case "validated":
-		invoke("NEXT_ARTICLE")
+		invoke("NEXT_ARTICLE", "TASK")
+		for _, n := range []string{"title", "objective"} {
+			add(n)
+			def.Params[len(def.Params)-1].Required = false
+		}
+		def.Purpose += "\nApproach objective/strategy: " + st.Approach.Title
+		if st.Approach.State == plan.ApproachComplete {
+			def.Params[0].Enum = []string{"NEXT_ARTICLE"}
+		}
 	case "plan_complete":
 		invoke("COMPLETE")
+		def.Purpose += "\nOriginal plan outcome, scope and proof: " + st.Plan.Goal
 	case "settled":
 		invoke("STATUS")
 	case "remediate":
@@ -157,6 +177,25 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 		invoke("STATUS")
 	default:
 		return def, fmt.Errorf("unsupported planning phase %q", st.Phase)
+	}
+	// A receipt includes current owner facts, not another mutable progress ledger.
+	if st.Plan != nil {
+		facts := map[string]any{"plan": st.Plan.ID, "plan_state": st.Plan.State}
+		if st.Approach != nil {
+			qualified := 0
+			for _, task := range st.Tasks {
+				if task.Qualified() {
+					qualified++
+				}
+			}
+			facts["approach"], facts["approach_state"] = st.Approach.ID, st.Approach.State
+			facts["qualified_tasks"], facts["declared_tasks"] = qualified, len(st.Tasks)
+		}
+		if st.Task != nil {
+			facts["task"], facts["task_state"] = st.Task.ID, st.Task.State
+		}
+		raw, _ := json.Marshal(facts)
+		def.Purpose += "\n" + string(raw)
 	}
 	def.Execute = func(context.Context, tool.Args) (tool.Result, error) {
 		return tool.Result{}, fmt.Errorf("plan requires bound current question")
@@ -198,16 +237,7 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 						return tool.Result{}, e
 					}
 				}
-				if st.Phase == "validated" && st.Approach.State == plan.ApproachRunning {
-					if d.ApproveContract != nil {
-						if e := d.ApproveContract(c, "approach", st.Approach.ID); e != nil {
-							return tool.Result{}, e
-						}
-					}
-					if _, e := plan.TransitionApproach(d.Store, st.Approach.ID, plan.ApproachComplete); e != nil {
-						return tool.Result{}, e
-					}
-				}
+
 				return tool.Result{Focus: target, Text: pc.Text("planning.saved")}, nil
 			}
 			return bound, args, nil
@@ -215,13 +245,21 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 		if st.Phase == "entry" {
 			return navigation(focus("root", ""))
 		}
-		if st.Phase == "task_complete" {
+		if st.Phase == "task_complete" || st.Phase == "task_drafted" {
 			return navigation(focus("approach", st.Approach.ID))
 		}
-		if st.Phase == "validated" {
-			return navigation(focus("plan", st.Plan.ID))
+		if st.Phase == "validated" && get("invoke") == "NEXT_ARTICLE" {
+			if get("title") != "" || get("objective") != "" {
+				return def, nil, fmt.Errorf("NEXT_ARTICLE completes the approach; use TASK to describe a remaining gap")
+			}
+			if st.Approach.State == plan.ApproachComplete {
+				return navigation(focus("plan", st.Plan.ID))
+			}
 		}
 		if st.Phase == "select_approach" {
+			if len(st.Approaches) == 1 {
+				return navigation(focus("approach", st.Approaches[0].ID))
+			}
 			found := false
 			for _, a := range st.Approaches {
 				found = found || a.ID == get("approach")
@@ -232,6 +270,13 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 			return navigation(focus("approach", get("approach")))
 		}
 		if st.Phase == "select" {
+			if get("invoke") == "NEXT" {
+				for _, t := range st.Tasks {
+					if !t.Qualified() {
+						return navigation(focus("task", t.ID))
+					}
+				}
+			}
 			found := false
 			for _, t := range st.Tasks {
 				found = found || t.ID == get("task") && !t.Qualified()
@@ -337,7 +382,17 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 			}
 			query += `created:createApproach(planId:$id,title:$title){id state}}`
 			nextKind = "approach"
-		case "task", "another":
+		case "task", "another", "validated":
+			if st.Phase == "validated" && get("invoke") == "NEXT_ARTICLE" {
+				query = `mutation($id:ID!){`
+				if st.Approach.State == plan.ApproachReady {
+					query += `running:transitionApproach(id:$id,to:"running"){id state} `
+				}
+				query += `completed:transitionApproach(id:$id,to:"complete"){id state}}`
+				vars["id"] = st.Approach.ID
+				nextKind, nextID = "plan", st.Plan.ID
+				break
+			}
 			if st.Phase == "another" && get("invoke") == "COMPLETE" {
 				if get("title") != "" || get("objective") != "" {
 					return def, nil, fmt.Errorf("COMPLETE does not consume another task answer")
@@ -349,7 +404,17 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 			if strings.TrimSpace(get("title")) == "" || strings.TrimSpace(get("objective")) == "" {
 				return def, nil, fmt.Errorf("TASK needs authored title and objective")
 			}
-			query = `mutation($id:ID!,$title:String!,$prompt:String!){created:createTask(approachId:$id,title:$title,prompt:$prompt){id state}}`
+			query = `mutation($id:ID!,$title:String!,$prompt:String!){`
+			if st.Phase == "validated" {
+				if (st.Approach.State != plan.ApproachRunning && st.Approach.State != plan.ApproachReady) || get("invoke") != "TASK" {
+					return def, nil, fmt.Errorf("only an open running approach can draft a remaining gap; reopen settled work through its owning revision route")
+				}
+				if st.Approach.State == plan.ApproachReady {
+					query += `running:transitionApproach(id:$id,to:"running"){id state} `
+				}
+				query += `paused:transitionApproach(id:$id,to:"paused"){id state} `
+			}
+			query += `created:createTask(approachId:$id,title:$title,prompt:$prompt){id state}}`
 			vars = map[string]any{"id": st.Approach.ID, "title": get("title"), "prompt": get("objective")}
 			nextKind = "task"
 		case "plan_complete":
@@ -436,7 +501,7 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 			bound.ResolveWorkflowRef = func(context.Context, tool.Args) (string, error) { return st.Plan.ID, nil }
 		}
 		// Host-created guided drafts retain the actual GraphQL name and arguments.
-		if st.Phase != "revision" && st.Phase != "revision_requeue" && st.Phase != "plan_complete" && !(st.Phase == "another" && get("invoke") == "COMPLETE") {
+		if st.Phase != "revision" && st.Phase != "revision_requeue" && st.Phase != "plan_complete" && st.Phase != "validated" && !(st.Phase == "another" && get("invoke") == "COMPLETE") {
 			bound.Label = "plan"
 		}
 		execute := bound.Execute
@@ -445,6 +510,11 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 				return tool.Result{}, e
 			}
 			if d.ApproveContract != nil {
+				if st.Phase == "validated" && get("invoke") == "NEXT_ARTICLE" {
+					if e := d.ApproveContract(c, "approach", st.Approach.ID); e != nil {
+						return tool.Result{}, e
+					}
+				}
 				if st.Phase == "approach" {
 					if e := d.ApproveContract(c, "plan", st.Plan.ID); e != nil {
 						return tool.Result{}, e
@@ -498,6 +568,40 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 		}
 		return bound, actual, nil
 	}
+	bind := def.Bind
+	def.Bind = func(ctx context.Context, args tool.Args) (tool.Definition, tool.Args, error) {
+		bound, actual, err := bind(ctx, args)
+		if err != nil {
+			return bound, actual, err
+		}
+		execute := bound.Execute
+		bound.Execute = func(ctx context.Context, args tool.Args) (tool.Result, error) {
+			res, err := execute(ctx, args)
+			if err != nil || res.Failed || res.Blocked || res.Truncated {
+				return res, err
+			}
+			nextScope := scope
+			if res.Focus != nil {
+				nextScope = res.Focus
+			}
+			next, nextErr := planningNextAction(d, reg, nextScope, command)
+			if nextErr != nil {
+				// The operation already succeeded. Preserve its receipt and disclose
+				// the navigation failure without implying a rollback or retry.
+				next = "Next planning question unavailable: " + nextErr.Error()
+			}
+			var envelope map[string]json.RawMessage
+			if json.Unmarshal([]byte(res.Text), &envelope) == nil && envelope != nil {
+				envelope["next_question"], _ = json.Marshal(next)
+				raw, _ := json.Marshal(envelope)
+				res.Text = string(raw)
+			} else {
+				res.Text += "\n" + next
+			}
+			return res, nil
+		}
+		return bound, actual, nil
+	}
 	return def, nil
 }
 func planningCommand(reg *tool.Registry) string {
@@ -521,8 +625,8 @@ func planningNextAction(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 	return def.Schema(), nil
 }
 
-// Draft coding is ordinary project work. Read only this selection and its owning
-// ancestors; an unrelated stopped sibling does not block another draft.
+// Ordinary project coding remains available only without a selected PAT scope.
+// Managed PAT execution is admitted by the existing claimed-task assignment.
 func planningProjectCoding(ctx context.Context, d launch.Deps, scope *session.WorkflowScope) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -530,39 +634,13 @@ func planningProjectCoding(ctx context.Context, d launch.Deps, scope *session.Wo
 	if scope == nil {
 		return nil
 	}
-	n, err := launch.ScopeNode(d.Store, scope)
-	if err != nil {
+	// A selected PAT scope is planning until the Runner owns a real task claim.
+	// Claimed execution uses its existing assignment guard before reaching this
+	// ordinary-project fallback; discovery and graph bookkeeping do not call it.
+	if _, err := launch.ScopeNode(d.Store, scope); err != nil {
 		return err
 	}
-	if n.Kind == "root" {
-		return nil
-	}
-	pending, err := plan.PendingRevisions(plan.WithProject(ctx, d.Workspace), d.Store, n.Kind, n.ID)
-	if err != nil {
-		return err
-	}
-	if len(pending) > 0 {
-		return fmt.Errorf("selected work has a pending revision; answer the current plan question before coding")
-	}
-	if n.Closed {
-		return fmt.Errorf("selected work has a completed ancestor; ordinary coding cannot resume settled work")
-	}
-	if n.Kind == "plan" && n.State != plan.PlanDraft && n.State != plan.PlanActive || n.Kind == "approach" && n.State != plan.ApproachDraft && n.State != plan.ApproachReady {
-		return fmt.Errorf("selected %s is %s; inspect its explicit lifecycle action before coding", n.Kind, n.State)
-	}
-	if n.Kind == "task" {
-		if n.State != plan.TaskQueued {
-			return fmt.Errorf("selected task is %s; ordinary coding cannot resume an unclaimed attempt", n.State)
-		}
-		ancestor, err := plan.GetApproach(d.Store, n.Parent)
-		if err != nil {
-			return err
-		}
-		if ancestor.State != plan.ApproachDraft && ancestor.State != plan.ApproachReady && ancestor.State != plan.ApproachRunning {
-			return fmt.Errorf("selected approach is %s; inspect its explicit lifecycle action before coding", ancestor.State)
-		}
-	}
-	return ctx.Err()
+	return fmt.Errorf("selected PAT is planning: finish drafting all tasks for the current approach, request readiness, then claim a task before executing code")
 }
 
 func planningRead(d launch.Deps, scope *session.WorkflowScope) (planningState, error) {
@@ -612,6 +690,7 @@ func planningRead(d launch.Deps, scope *session.WorkflowScope) (planningState, e
 		if json.Unmarshal([]byte(st.Plan.Goal), &goal) == nil && len(goal.Articles) > 0 {
 			for articleIndex, article := range goal.Articles {
 				found := false
+				unresolved := []*plan.Approach{}
 				for _, a := range st.Approaches {
 					var strategy planningStrategy
 					if json.Unmarshal([]byte(a.Title), &strategy) == nil && strategy.Article == article && strategy.ArticleIndex == articleIndex {
@@ -621,10 +700,13 @@ func planningRead(d launch.Deps, scope *session.WorkflowScope) (planningState, e
 							return st, err
 						}
 						if !qualified {
-							st.Phase = "select_approach"
-							return st, nil
+							unresolved = append(unresolved, a)
 						}
 					}
+				}
+				if len(unresolved) > 0 {
+					st.Phase, st.Approaches = "select_approach", unresolved
+					return st, nil
 				}
 				if !found {
 					st.Article = article
@@ -635,15 +717,18 @@ func planningRead(d launch.Deps, scope *session.WorkflowScope) (planningState, e
 			st.Phase = "plan_complete"
 		} else if len(st.Approaches) > 0 {
 			st.Phase = "plan_complete"
-			for _, approach := range st.Approaches {
-				qualified, err := plan.ApproachQualified(d.Store, approach.ID)
+			unresolved := []*plan.Approach{}
+			for _, a := range st.Approaches {
+				qualified, err := plan.ApproachQualified(d.Store, a.ID)
 				if err != nil {
 					return st, err
 				}
 				if !qualified {
-					st.Phase = "select_approach"
-					break
+					unresolved = append(unresolved, a)
 				}
+			}
+			if len(unresolved) > 0 {
+				st.Phase, st.Approaches = "select_approach", unresolved
 			}
 		}
 	case "approach":
@@ -660,9 +745,10 @@ func planningRead(d launch.Deps, scope *session.WorkflowScope) (planningState, e
 			return st, e
 		}
 		switch st.Approach.State {
-		case plan.ApproachReady:
-			st.Phase = "ready"
-		case plan.ApproachRunning:
+		case plan.ApproachReady, plan.ApproachRunning:
+			if len(st.Tasks) == 0 {
+				return st, fmt.Errorf("approach %s is %s but has no tasks; cannot qualify completion", st.Approach.ID, st.Approach.State)
+			}
 			st.Phase = "validated"
 			for _, task := range st.Tasks {
 				if !task.Qualified() {
@@ -718,6 +804,10 @@ func planningRead(d launch.Deps, scope *session.WorkflowScope) (planningState, e
 		if e != nil {
 			return st, e
 		}
+		st.Tasks, e = plan.ApproachTasks(d.Store, st.Approach.ID)
+		if e != nil {
+			return st, e
+		}
 		t := st.Task
 		switch {
 		case t.Qualified():
@@ -757,7 +847,7 @@ func planningRead(d launch.Deps, scope *session.WorkflowScope) (planningState, e
 			} else if t.Verify == "" {
 				st.Phase = "review"
 			} else {
-				st.Phase = "task_complete"
+				st.Phase = "task_drafted"
 			}
 		}
 	}
