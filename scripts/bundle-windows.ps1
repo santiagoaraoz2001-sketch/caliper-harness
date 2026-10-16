@@ -33,7 +33,7 @@ try {
     Copy-Item -LiteralPath 'internal/prompts/prompts.yaml' -Destination (Join-Path $out 'prompts.yaml')
     Copy-Item -Path 'templates/*.tmpl' -Destination (Join-Path $out 'templates')
     Copy-Item -LiteralPath 'internal/prompts/prompts.yaml' -Destination (Join-Path $out 'templates/prompts.yaml')
-    foreach ($file in @('server.py', 'backends.py', 'prompts.py', 'requirements.txt', 'requirements-system-one.txt')) {
+    foreach ($file in @('server.py', 'backends.py', 'mps_attention.py', 'prompts.py', 'requirements.txt', 'requirements-system-one.txt')) {
         Copy-Item -LiteralPath (Join-Path 'python/decision' $file) -Destination (Join-Path $out 'python/decision')
     }
     Copy-Item -LiteralPath 'LICENSE', 'FIRST-USE.md' -Destination $out
