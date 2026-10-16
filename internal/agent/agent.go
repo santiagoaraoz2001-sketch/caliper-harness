@@ -212,11 +212,15 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 	execute := r.assignmentExec(exec)
 	var settled, failed, blocked, incomplete int
 	checkAttempt, usedSteps := -1, 0
+	var checkTask string
+	var checkTaskAttempt int
 	startedAt := time.Now()
 	exec = func(ctx context.Context, def tool.Definition, args tool.Args) (tool.Result, error) {
 		res, err := execute(ctx, def, args)
 		if def.Name == "check" && r.Continuation.Coding != nil {
 			checkAttempt = r.Continuation.Coding.Revision
+			checkTask = r.Continuation.Coding.TaskID
+			checkTaskAttempt = r.Continuation.Coding.Attempt
 		}
 		if def.Name == "bash" {
 			switch {
@@ -413,7 +417,8 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 			c := r.Continuation.Coding
 			if (!r.PlanningActive() || r.assignedClaim) && strings.TrimSpace(text) != "" && strings.TrimSpace(r.CheckCommand) != "" &&
 				r.Session != nil && sessErr == nil && r.codingErr == nil && ctx.Err() == nil &&
-				r.withinStepBudget(usedSteps) && c != nil && !c.Passed() && checkAttempt != c.Revision {
+				r.withinStepBudget(usedSteps) && c != nil && !c.Passed() &&
+				(checkTask != c.TaskID || checkTaskAttempt != c.Attempt || checkAttempt != c.Revision) {
 				usedSteps++ // Host work consumes the same remaining step budget.
 				obs, hostErr := r.hostCheck(ctx, exec, func(kind, text string) error { log(kind, text); return sessErr })
 				if obs != "" {
