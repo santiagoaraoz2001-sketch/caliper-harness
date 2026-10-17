@@ -195,13 +195,9 @@ func (r *Runner) Compact(ctx context.Context, c session.Continuation) (next sess
 		for _, call := range e.Message.ToolCalls {
 			fmt.Fprintf(&b, "[model tool proposal unverified id=%s name=%s]\n%s\n", call.ID, call.Name, call.Arguments)
 		}
-		for _, field := range []struct{ name, text string }{
-			{"reasoning", e.Message.Reasoning}, {"reasoning_content", e.Message.ReasoningContent}, {"thinking", e.Message.Thinking},
-		} {
-			if field.text != "" {
-				fmt.Fprintf(&b, "[model reasoning field=%s; unverified]\n%s\n", field.name, field.text)
-			}
-		}
+		// Model thinking is never compaction material: summaries are clean
+		// factual documents built from requests, visible text, proposals
+		// and recorded observations only.
 	}
 	for i, e := range c.Entries {
 		if i < ks && !keep[i] {
@@ -239,7 +235,12 @@ func (r *Runner) Compact(ctx context.Context, c session.Continuation) (next sess
 	var reply string
 	var u llm.Usage
 	var rawReply llm.Reply
-	if model, ok := r.Model.(ToolModel); ok {
+	// Summaries are clean documents: the summary call never thinks.
+	summaryModel := r.Model
+	if client, ok := r.Model.(*llm.Client); ok {
+		summaryModel = client.WithoutThinking()
+	}
+	if model, ok := summaryModel.(ToolModel); ok {
 		// Reuse streaming inactivity/cancellation without advertising tools.
 		watcher := *r
 		watcher.Continuation = c
@@ -261,7 +262,7 @@ func (r *Runner) Compact(ctx context.Context, c session.Continuation) (next sess
 			err = fmt.Errorf("compaction returned unrequested tool calls — context intact")
 		}
 	} else {
-		reply, rawReply.Served, u, err = r.Model.Chat(ctx, msgs)
+		reply, rawReply.Served, u, err = summaryModel.Chat(ctx, msgs)
 		rawReply.Message = llm.Message{Role: "assistant", Content: reply}
 		rawReply.Usage = u
 	}
@@ -292,6 +293,9 @@ func (r *Runner) Compact(ctx context.Context, c session.Continuation) (next sess
 	if strings.TrimSpace(reply) == "" {
 		return c, "", false, fmt.Errorf("compaction summary came back empty — context intact")
 	}
+	// Size is never stated to the model. The limit is capacity admission
+	// below: a summary that does not fit with retained context, or does
+	// not reduce it, is rejected with an explicit error — never trimmed.
 	summary := r.Prompts.Text("continuation.summary_prefix") + reply
 	out := c
 	out.Entries = nil

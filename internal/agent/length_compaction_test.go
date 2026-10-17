@@ -43,7 +43,9 @@ func TestLengthAtContextPressureCompactsAndContinuesFromFactualSummary(t *testin
 			writeContinuationChunk(w, map[string]any{"reasoning": thought}, "length", map[string]any{"tokens": []int{11}, "raw_chunks": []string{thought}, "initial_state": "reasoning", "prompt_sha256": strings.Repeat("a", 64), "tool_index": 0, "pending_tool_draft": "effect<arg_key>name</arg_key><arg_value>must-not-run"}, 400, 550)
 		case 3:
 			summaries++
-			if len(body.Messages) != 2 || !strings.Contains(body.Messages[1].Content, "unfinished unverified code reasoning") || !strings.Contains(body.Messages[1].Content, "must-not-run") || !strings.Contains(body.Messages[1].Content, "unverified") || len(body.Prefix) != 0 {
+			// Founder contract: the draft's visible proposal reaches the compactor
+			// as unverified material, but its thinking never does.
+			if len(body.Messages) != 2 || strings.Contains(body.Messages[1].Content, "unfinished unverified code reasoning") || !strings.Contains(body.Messages[1].Content, "must-not-run") || !strings.Contains(body.Messages[1].Content, "unverified") || len(body.Prefix) != 0 {
 				t.Errorf("actual compactor did not receive nonexecuting original drafts: %+v", body)
 			}
 			writeContinuationChunk(w, map[string]any{"content": summary}, "stop", nil, 600, 20)

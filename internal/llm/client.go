@@ -73,6 +73,21 @@ func New(server, model string) *Client {
 	}
 }
 
+// WithoutThinking returns a copy of the client that explicitly disables
+// thinking on the wire. Maintenance calls (compaction summaries) use it:
+// they must produce a clean document, not spend the output budget on
+// reasoning. The original client is unchanged.
+func (c *Client) WithoutThinking() *Client {
+	off := false
+	return &Client{
+		baseURL: c.baseURL, model: c.model, http: c.http, runtime: c.runtime,
+		toolProtocol: c.toolProtocol, idleTimeout: c.idleTimeout,
+		Temperature: c.Temperature, TopK: c.TopK,
+		RepetitionPenalty: c.RepetitionPenalty, Thinking: &off,
+		MaxOutputTokens: c.MaxOutputTokens,
+	}
+}
+
 // WithPlainTimeout changes HTTP total only; captured/idle-guarded calls bypass it.
 func (c *Client) WithPlainTimeout(timeout time.Duration) *Client {
 	c.http.Timeout = timeout

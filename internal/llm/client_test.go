@@ -194,6 +194,26 @@ func TestChatSendsParams(t *testing.T) {
 	}
 }
 
+func TestWithoutThinkingSendsExplicitFalseAndLeavesOriginal(t *testing.T) {
+	st := &stubTransport{t: t, status: 200,
+		body: `{"model":"m","choices":[{"message":{"content":"hi"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`}
+	c := &Client{baseURL: "http://x", model: "m", http: &http.Client{Transport: st}}
+	c.WithRuntime(RuntimeMLX).WithParams(Params{Temperature: 0.7, Thinking: true})
+	if _, _, _, err := c.WithoutThinking().Chat(context.Background(), []Message{{Role: "user", Content: "hi"}}); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(st.seenBody, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["chat_template_kwargs"].(map[string]any)["enable_thinking"] != false {
+		t.Errorf("summary client must send enable_thinking=false: %v", got)
+	}
+	if c.Thinking == nil || !*c.Thinking {
+		t.Fatal("WithoutThinking mutated the original client")
+	}
+}
+
 func TestChatOmitsUnsetParams(t *testing.T) {
 	st := &stubTransport{t: t, status: 200,
 		body: `{"model":"m","choices":[{"message":{"content":"hi"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`}

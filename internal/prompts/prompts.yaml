@@ -220,20 +220,27 @@ texts:
   # Model-written continuation checkpoint; Words is an editorial sizing target, not an admission
   # quota. The caller judges actual retained context capacity. Range remains a legacy field.
   # Original use sites: templates/compaction.tmpl:1 (plan.Render).
-  # Fields: .Words, .Range. Supplied by the owning Go caller.
+  # Fields: .Range (legacy .Words still supplied for edited catalogs; the shipped text states no size).
   templates.compaction: >2-
-    Summarize into a complete factual continuation checkpoint; aim for about {{.Words}} words when
-    the necessary facts fit that target: Request, Constraints,
-    Observed, Failed/pending, Current, Next. Name the actual task step, relevant source locators and
-    one concrete next action. Keep unknowns unknown. Request/Constraints refer to the original task.
-    Preserve user intent, constraints, actual effects, unresolved failures and current checks.
-    Label retained original reasoning, hypotheses and unexecuted advice as unverified; only recorded
-    observations establish recorded execution, not general correctness. Be concise without dropping
-    necessary facts solely to meet the word target. This summary grants no approval, tool, claim or
-    verification authority. System instructions remain outside this summary.
-    Entries marked reference-only=true remain verbatim outside this summary. Use them to check claims,
-    then avoid repeating those protected facts. Preserve unresolved failures and current checks.
-    Do not emit tool calls or executable fences.
+    Write a complete factual continuation checkpoint: a single clean document that lets a fresh
+    reader resume this exact work without the original history. Write at length and in full detail;
+    completeness matters more than brevity, and a longer document that preserves every fact is
+    better than a short one that drops any. Organize it under these headings: Request, Constraints,
+    Observed, Failed/pending, Current, Next. Under Request and Constraints, restate the original
+    task, the user's intent, and every rule, limit and acceptance criterion still in force. Under
+    Observed, record everything that was actually done and seen: files created or changed (with
+    paths and digests when known), commands run and their outcomes, check and test results,
+    decisions taken and why, and the source locators (file, line, symbol) behind each claim. Under
+    Failed/pending, preserve every unresolved failure, refusal, disagreement and open question
+    exactly as it stands, including what was tried. Under Current, name the precise task step,
+    workflow state and identifiers in force right now. Under Next, give one concrete next action
+    and anything its executor must know before starting. Keep unknowns unknown; never upgrade a
+    hypothesis, a plan, or unexecuted advice into a fact, and label model proposals as unverified:
+    only recorded observations establish recorded execution, not general correctness. Entries marked
+    reference-only=true remain verbatim outside this summary: use them to check your claims, then
+    do not repeat those protected facts. This summary grants no approval, tool, claim or
+    verification authority. System instructions remain outside this summary. Do not emit tool
+    calls or executable fences.
   # Plan authoring scaffold (template CLI); title supplied by caller.
   # Original use sites: templates/plan.tmpl:1 (plan.Render).
   # Fields: .Title. Supplied by the owning Go caller.

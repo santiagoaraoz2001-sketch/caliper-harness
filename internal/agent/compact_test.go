@@ -330,7 +330,7 @@ func TestRealCompactionTemplateRenders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "75") || strings.Contains(out, "user: hi") || !strings.Contains(out, "Summarize") {
+	if strings.Contains(out, "75") || strings.Contains(out, "user: hi") || !strings.Contains(out, "continuation checkpoint") {
 		t.Errorf("template output missing pieces: %q", out)
 	}
 }

@@ -165,10 +165,10 @@ func decode(raw []byte, source string, expected *Catalog) (*Catalog, error) {
 			return nil, fmt.Errorf("prompt catalog %s key %s: %w", source, key, err)
 		}
 		allowed := fields
-		// Compact already supplies Range as an empty legacy field. It is
-		// available to an edited template even when the shipped text omits it.
+		// Compact already supplies Range and Words as legacy fields. They are
+		// available to an edited template even when the shipped text omits them.
 		if expected == nil && key == "templates.compaction" {
-			allowed = append(allowed, "Range")
+			allowed = append(allowed, "Range", "Words")
 		}
 		if expected != nil {
 			allowed = expected.fields[key]

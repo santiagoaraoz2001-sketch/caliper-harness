@@ -257,9 +257,10 @@ func TestCompactionAdmitsCapacityFittingSummaryBeyondEditorialTarget(t *testing.
 			t.Fatalf("protected intent/system/receipt entry%d changed", index)
 		}
 	}
+	// Founder contract: model thinking is never compaction material.
 	for _, field := range []string{"reasoning original", "reasoning_content original", "thinking original"} {
-		if !strings.Contains(m.seen[0][1].Content, field) {
-			t.Fatalf("summary source omitted original reasoning field %q", field)
+		if strings.Contains(m.seen[0][1].Content, field) {
+			t.Fatalf("summary source included original reasoning field %q", field)
 		}
 	}
 }
@@ -353,9 +354,15 @@ func TestCompactionSummarizesOversizedUnfinishedModelDraftWithoutEffects(t *test
 		t.Fatalf("oversized unprotected partial could not compact: ran=%t calls=%d err=%v", ran, len(m.seen), err)
 	}
 	input := m.seen[0][1].Content
-	for _, value := range []string{"NONEXECUTING unfinished tool proposal", "Partial original reasoning.", strings.Repeat("r", 9000), "Partial original thinking.", "model text; unverified"} {
+	for _, value := range []string{"NONEXECUTING unfinished tool proposal", "model text; unverified"} {
 		if !strings.Contains(input, value) {
 			t.Fatal("pending draft was omitted or treated as executed", value[:min(80, len(value))])
+		}
+	}
+	// Founder contract: the draft's thinking is never compaction material.
+	for _, excluded := range []string{"Partial original reasoning.", strings.Repeat("r", 9000), "Partial original thinking."} {
+		if strings.Contains(input, excluded) {
+			t.Fatal("pending draft thinking leaked into compaction material", excluded[:min(80, len(excluded))])
 		}
 	}
 	for _, e := range next.Entries {
