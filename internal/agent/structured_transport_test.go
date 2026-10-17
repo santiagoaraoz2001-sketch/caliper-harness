@@ -281,7 +281,7 @@ func TestStructuredMissingEditHashGuidanceReachesNextRequest(t *testing.T) {
 	if _, _, err := r.Run(context.Background(), "Inspect source; request no publication"); err != nil {
 		t.Fatal(err)
 	}
-	if len(requests) != 4 || strings.Join(dispatched, ",") != "read,help" {
+	if len(requests) != 4 || strings.Join(dispatched, ",") != "read,edit,help" {
 		t.Fatalf("requests=%d actual dispatch=%v", len(requests), dispatched)
 	}
 	var read, refusal, help string
@@ -296,7 +296,7 @@ func TestStructuredMissingEditHashGuidanceReachesNextRequest(t *testing.T) {
 	if !strings.Contains(read, fmt.Sprintf("source.go sha256=%x", sha256.Sum256([]byte(original)))) || !strings.Contains(read, original) {
 		t.Fatal("actual Read/hash lost before recovery request")
 	}
-	for _, needed := range []string{"entire call array refused; no calls ran", "expected_hash", "actual read sha256", "never both", `help(topic="edit")`} {
+	for _, needed := range []string{"mixes exact-span and line-range routes", "omit old for a line range", "omit start_line/end_line for an exact span"} {
 		if !strings.Contains(refusal, needed) {
 			t.Errorf("correlated refusal missing %q: %s", needed, refusal)
 		}

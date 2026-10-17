@@ -291,7 +291,7 @@ func (w *Workspace) Definitions() []tool.Definition {
 	path := tool.Param{Name: "path", Type: tool.TypeString, Required: true, Desc: pc.Text("tools.shared.parameters.workspace_file_path")}
 	defs := []tool.Definition{
 		{Name: "read", Desc: pc.Text("tools.read.description"), Purpose: pc.Text("tools.read.purpose"), Params: []tool.Param{path, {Name: "offset", Type: tool.TypeInt, Default: "1", Desc: pc.Text("tools.read.parameters.offset")}, {Name: "limit", Type: tool.TypeInt, Default: fmt.Sprint(w.Caps.MaxLines), Desc: pc.Format("tools.read.parameters.limit", w.Caps.MaxLines)}}},
-		{Name: "edit", Desc: pc.Text("tools.edit.description"), Purpose: pc.Text("tools.edit.purpose"), Params: []tool.Param{path, {Name: "old", Type: tool.TypeString, Desc: pc.Text("tools.edit.parameters.old")}, {Name: "start_line", Type: tool.TypeInt, Desc: pc.Text("tools.edit.parameters.start_line")}, {Name: "end_line", Type: tool.TypeInt, Desc: pc.Text("tools.edit.parameters.end_line")}, {Name: "new", Type: tool.TypeString, Required: true, AllowEmpty: true, Desc: pc.Text("tools.edit.parameters.new")}, {Name: "expected_hash", Type: tool.TypeString, Required: true, Desc: pc.Text("tools.edit.parameters.expected_hash")}}},
+		{Name: "edit", Desc: pc.Text("tools.edit.description"), Purpose: pc.Text("tools.edit.purpose"), Params: []tool.Param{path, {Name: "old", Type: tool.TypeString, Desc: pc.Text("tools.edit.parameters.old")}, {Name: "start_line", Type: tool.TypeInt, Desc: pc.Text("tools.edit.parameters.start_line")}, {Name: "end_line", Type: tool.TypeInt, Desc: pc.Text("tools.edit.parameters.end_line")}, {Name: "new", Type: tool.TypeString, Required: true, AllowEmpty: true, Desc: pc.Text("tools.edit.parameters.new")}, {Name: "expected_hash", Type: tool.TypeString, Desc: pc.Text("tools.edit.parameters.expected_hash")}}},
 		{Name: "write", Desc: pc.Text("tools.write.description"), Purpose: pc.Text("tools.write.purpose"), Params: []tool.Param{path, {Name: "content", Type: tool.TypeString, Required: true, AllowEmpty: true, Desc: pc.Text("tools.write.parameters.content")}, {Name: "expected_hash", Type: tool.TypeString, Desc: pc.Text("tools.write.parameters.expected_hash")}}},
 	}
 	defs[0].Params[0].Desc = pc.Text("tools.read.parameters.path")
@@ -409,7 +409,8 @@ func (w *Workspace) execute(ctx context.Context, name string, a tool.Args, cover
 		b, info, e = w.bytes(ctx, r, p)
 		hash = digest(b)
 	}
-	if c, ok := coverage[p]; ok && (e != nil || c.hash != hash || c.version != w.publications[p]) {
+	issued, issuedOK := coverage[p]
+	if issuedOK && (e != nil || issued.hash != hash || issued.version != w.publications[p]) {
 		delete(coverage, p)
 	}
 	expected, _ := a["expected_hash"].(string)
@@ -461,7 +462,16 @@ func (w *Workspace) execute(ctx context.Context, name string, a tool.Args, cover
 		}
 		return tool.Result{Text: text + tail, Truncated: truncated, NoMatches: shown == 0 && total > 0}, nil
 	}
-	if !create && expected != digest(b) {
+	// An exact-span edit whose old text matches uniquely (enforced below)
+	// does not need expected_hash: uniqueness already pins the base content.
+	hashOptional := name == "edit" && expected == ""
+	if !create && !hashOptional && expected != digest(b) {
+		// Discriminate a mistyped hash (file unchanged since the issued
+		// read) from a genuinely changed file: the first must not send
+		// the model back to reread content it already has.
+		if issuedOK && issued.hash == digest(b) && expected != issued.hash {
+			return tool.Result{}, fmt.Errorf("%s: %s", p, prompts.Select(w.Prompts).Format("guidance.files.mistyped_hash", digest(b)))
+		}
 		return tool.Result{}, fmt.Errorf("%s changed; %s", p, prompts.Select(w.Prompts).Text("guidance.files.changed_hash"))
 	}
 	content, _ := a["content"].(string)
@@ -483,6 +493,9 @@ func (w *Workspace) execute(ctx context.Context, name string, a tool.Args, cover
 			}
 			if !hasFirst || !hasLast || !startOK || !endOK {
 				return tool.Result{}, fmt.Errorf("line-range edit needs both integer start_line and end_line; %s", prompts.Select(w.Prompts).Text("guidance.files.incomplete_range"))
+			}
+			if expected == "" {
+				return tool.Result{}, fmt.Errorf("line-range edit needs expected_hash from the current read; %s", prompts.Select(w.Prompts).Text("guidance.files.changed_hash"))
 			}
 			if start < 1 || end < start || end > int64(len(lines)) {
 				return tool.Result{}, fmt.Errorf("range %d-%d outside source lines 1-%d; read metadata is not source and does not count toward line numbering", start, end, len(lines))

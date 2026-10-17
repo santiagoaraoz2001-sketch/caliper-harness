@@ -471,7 +471,18 @@ func (r *Runner) progressJudgment(ctx context.Context, input any, req decision.R
 			return req, decision.Verdict{}, err
 		}
 		req.Context = string(raw)
-		if err := log("judgment-input", req.Context); err != nil {
+		// The stored copy is capped like stored verdict contexts: the full
+		// packet (up to the decision input token ceiling) would otherwise
+		// be duplicated into the session store on every judgment. The
+		// judge still receives the complete request; raw evidence stays
+		// in the session's own reply history.
+		stored := req.Context
+		if r.JudgmentContextChars > 0 {
+			if runes := []rune(stored); len(runes) > r.JudgmentContextChars {
+				stored = string(runes[:r.JudgmentContextChars]) + fmt.Sprintf("…[%d bytes total, sha256=%x; stored copy truncated]", len(raw), sha256.Sum256(raw))
+			}
+		}
+		if err := log("judgment-input", stored); err != nil {
 			return req, decision.Verdict{}, err
 		}
 		v, err := r.Judge(ctx, req)

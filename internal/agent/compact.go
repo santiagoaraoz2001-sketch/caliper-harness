@@ -27,15 +27,38 @@ type Compaction struct {
 	Step          float64
 	Max           float64
 	WordsPerToken float64
+	// Absolute fires compaction when the larger of the calibrated estimate
+	// and the server-measured prompt reaches this many tokens, regardless
+	// of the window percent. Estimates under-read real occupancy, so the
+	// percent trigger alone fires too late on large windows.
+	Absolute int
 }
 
 var compactionRecordFailure = errors.New("compaction recording failed")
 
-// shouldCompact compares the supplied context estimate with the YAML trigger.
-// Callers use the last request's calibration; this is not current token occupancy.
+// contextOccupancy is the larger of the calibrated estimate and the
+// server-measured prompt of the last processed request: the estimate
+// under-reads real occupancy (schemas, templating), so maintenance
+// decisions trust the server whenever it reported a count.
+func (r *Runner) contextOccupancy(estimate int) int {
+	if r.Continuation.Measured && r.Continuation.Prompt > estimate {
+		return r.Continuation.Prompt
+	}
+	return estimate
+}
+
+// shouldCompact compares the supplied occupancy (larger of the calibrated
+// estimate and the server-measured prompt) with the YAML triggers: the
+// emergency window percent and, when set, an absolute token ceiling so a
+// large window cannot defer maintenance until the model degrades.
 func shouldCompact(lastPrompt, window int, have bool, c Compaction) bool {
-	return have && window > 0 && c.Trigger > 0 &&
-		float64(lastPrompt) >= c.Trigger/100*float64(window)
+	if !have || window <= 0 || c.Trigger <= 0 {
+		return false
+	}
+	if c.Absolute > 0 && lastPrompt >= c.Absolute {
+		return true
+	}
+	return float64(lastPrompt) >= c.Trigger/100*float64(window)
 }
 
 // summaryBudget returns the summary token budget for the nth compaction

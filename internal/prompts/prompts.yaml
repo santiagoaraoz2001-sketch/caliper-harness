@@ -1630,8 +1630,8 @@ texts:
   # Original use sites: internal/tools/files/files.go:269 (Definitions).
   # Fields: none. Supplied by the owning Go caller.
   tools.edit.parameters.expected_hash: >2-
-    copy actual read sha256; use exact old OR start_line/end_line, never both; if unsure call
-    help(topic="edit")
+    copy actual read sha256; optional when old matches exactly once, required for a line range;
+    use exact old OR start_line/end_line, never both; if unsure call help(topic="edit")
   # Model-facing desc prose for the current Definitions registry constructor; executable
   # schema/authority remain Go-owned.
   # Original use sites: internal/tools/files/files.go:269 (Definitions).
@@ -2483,7 +2483,13 @@ texts:
 
   # Corrective advice for internal/tools/files/files.go:415; no authority or effects implied.
   # Fields: none. Supplied by the owning Go caller.
-  guidance.files.changed_hash: "read again for expected_hash"
+  guidance.files.changed_hash: "the file changed since your read; read again for the current expected_hash"
+
+  # Corrective advice for internal/tools/files/files.go:415; no authority or effects implied.
+  # Fields: Hash (current sha256). Supplied by the owning Go caller.
+  guidance.files.mistyped_hash: >2-
+    the file is unchanged since your read; the hash you sent does not match the one issued.
+    Retry with expected_hash={{printf "%s" .Hash}}; no reread is needed
 
   # Corrective advice for internal/tools/files/files.go:432; no authority or effects implied.
   # Fields: none. Supplied by the owning Go caller.

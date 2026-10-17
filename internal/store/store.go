@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -396,17 +397,34 @@ func (s *database) writer() {
 		setTimeout(conn, ctx)
 		if req.update != nil {
 			err := transactContext(conn, ctx, req.update)
+			if isAllocationFailure(err) && ctx.Err() == nil {
+				// Buffer-pool exhaustion can be transient (pages pinned by
+				// concurrent readers); the serialized writer retries once.
+				time.Sleep(100 * time.Millisecond)
+				setTimeout(conn, ctx)
+				err = transactContext(conn, ctx, req.update)
+			}
 			conn.SetTimeout(0)
 			req.done <- err
 			continue
 		}
 		res, err := run(conn, req.query, req.params)
+		if err != nil && isAllocationFailure(err) && ctx.Err() == nil {
+			time.Sleep(100 * time.Millisecond)
+			setTimeout(conn, ctx)
+			res, err = run(conn, req.query, req.params)
+		}
 		if err == nil {
 			res.Close()
 		}
 		conn.SetTimeout(0)
 		req.done <- err
 	}
+}
+
+// isAllocationFailure matches Kuzu's buffer-manager exhaustion error.
+func isAllocationFailure(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "Unable to allocate memory")
 }
 
 // run executes one statement, preparing first when params are given.

@@ -13,7 +13,7 @@ func TestStoreBufferPoolYAML(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, _ := os.ReadFile(path)
-	if !strings.Contains(string(body), "buffer_pool_bytes: 268435456") {
+	if !strings.Contains(string(body), "buffer_pool_bytes: 1073741824") {
 		t.Fatalf("approved default missing: %s", body)
 	}
 	for _, value := range []string{"0", "4096", "67108864", "268435456"} {

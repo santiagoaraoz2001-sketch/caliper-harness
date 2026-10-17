@@ -689,6 +689,7 @@ func loadBehavior(cfg config.Config) (shaped, note string, err error) {
 func compactionFromConfig(cfg config.Config) agent.Compaction {
 	return agent.Compaction{
 		Trigger:       cfg.Context.Trigger,
+		Absolute:      cfg.Context.CompactionAbsoluteTokens,
 		Keep:          cfg.Context.Keep,
 		Summary:       cfg.Context.Summary,
 		Step:          cfg.Context.SummaryStep,

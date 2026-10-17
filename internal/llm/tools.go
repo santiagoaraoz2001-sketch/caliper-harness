@@ -5,8 +5,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -170,6 +172,14 @@ func (r activeReader) Read(b []byte) (int, error) {
 	}
 	return n, e
 }
+
+// isTimeoutError reports client/deadline timeouts, which must surface
+// as-is rather than being replayed by the transport retry below.
+func isTimeoutError(err error) bool {
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
+}
+
 func (c *Client) do(req *http.Request, capture *Reply) (*http.Response, error) {
 	client := c.http
 	if capture != nil || req.Context().Value(idleKey{}) != nil {
@@ -178,6 +188,16 @@ func (c *Client) do(req *http.Request, capture *Reply) (*http.Response, error) {
 		client = &copy
 	}
 	resp, err := client.Do(req)
+	if err != nil && resp == nil && req.GetBody != nil && req.Context().Err() == nil && !isTimeoutError(err) {
+		// One retry for a transport failure before any response bytes
+		// (server restart / dropped keep-alive): the request never
+		// started generation, so replaying the identical body is safe.
+		if body, bodyErr := req.GetBody(); bodyErr == nil {
+			retry := req.Clone(req.Context())
+			retry.Body = body
+			resp, err = client.Do(retry)
+		}
+	}
 	if err == nil {
 		if g, ok := req.Context().Value(idleKey{}).(*idleGuard); ok {
 			idle := c.idleTimeout

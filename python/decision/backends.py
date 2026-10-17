@@ -213,6 +213,28 @@ def complete_usage(raw, maximum, expected=None):
 MAX_JUDGMENT_TOKENS = 15999  # Complete native input, including instructions and options.
 
 
+def release_device_cache():
+    """Return cached device allocations after one judgment.
+
+    A long-lived sidecar otherwise grows resident memory across thousands
+    of small judgments (observed at 158 GB after ~22h), starving co-resident
+    model servers on unified-memory machines. Maintenance only: a release
+    failure must never replace the verdict, so callers log and continue.
+    """
+    try:
+        import torch
+    except Exception:
+        return
+    mps = getattr(torch, "mps", None)
+    if mps is not None and mps.is_available():
+        mps.synchronize()
+        mps.empty_cache()
+    cuda = getattr(torch, "cuda", None)
+    if cuda is not None and cuda.is_available():
+        cuda.synchronize()
+        cuda.empty_cache()
+
+
 class Backend:
     def __init__(self, selection, model, identity, choice=None):
         self.selection, self.model, self.identity, self.choice = selection, model, identity, choice

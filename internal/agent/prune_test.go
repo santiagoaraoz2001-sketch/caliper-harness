@@ -94,7 +94,7 @@ func TestPruneOutputsOldestFirst(t *testing.T) {
 	if basis >= contentSize([]llm.Message{{Content: old1 + old2 + strings.Repeat("r", 50001)}}) {
 		t.Errorf("basis=%d, old bodies did not shrink", basis)
 	}
-	if !strings.Contains(report, "2 tool output(s)") {
+	if !strings.Contains(report, "2 tool output/reasoning body(ies)") {
 		t.Errorf("report=%q", report)
 	}
 }

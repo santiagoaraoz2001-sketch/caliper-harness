@@ -85,6 +85,20 @@ class BackendDouble:
                 "model": self.selection.model, "device": "cpu"}
 
 
+class CacheReleaseTest(unittest.TestCase):
+    def test_judgment_releases_device_cache_once(self):
+        calls = []
+        original = server.release_device_cache
+        server.release_device_cache = lambda: calls.append(1)
+        try:
+            manager = server.Manager(BackendDouble)
+            manager.activate(Selection(model="good"))
+            manager.judge(body(model="good"))
+        finally:
+            server.release_device_cache = original
+        self.assertEqual(len(calls), 1)  # one Manager.judge; activation readiness uses the backend directly
+
+
 class ActivationControls(unittest.TestCase):
     def test_health_unloaded_and_open_selection_admission(self):
         manager = server.Manager(BackendDouble)

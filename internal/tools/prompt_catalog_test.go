@@ -173,7 +173,7 @@ func TestPromptCatalogSelectedGuidanceKeepsFactualRefusals(t *testing.T) {
 		args         tool.Args
 	}{
 		{"existing", "sample.go exists;", ds[2], tool.Args{"path": "sample.go", "content": "new"}},
-		{"hash", "sample.go changed;", ds[1], tool.Args{"path": "sample.go", "expected_hash": "wrong", "old": "two", "new": "new"}},
+		{"hash", "sample.go:", ds[1], tool.Args{"path": "sample.go", "expected_hash": "wrong", "old": "two", "new": "new"}},
 		{"routes", "edit mixes exact-span and line-range routes;", ds[1], tool.Args{"path": "sample.go", "expected_hash": hash, "old": "two", "start_line": int64(2), "end_line": int64(2), "new": "new"}},
 		{"range", "lines 2-2 not returned by current read;", ds[1], tool.Args{"path": "sample.go", "expected_hash": hash, "start_line": int64(2), "end_line": int64(2), "new": "new"}},
 		{"missing-old", "old matched 0 times;", ds[1], tool.Args{"path": "sample.go", "expected_hash": hash, "old": "absent", "new": "new"}},

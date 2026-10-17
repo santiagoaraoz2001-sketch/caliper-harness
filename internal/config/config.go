@@ -117,11 +117,14 @@ type ContextConfig struct {
 	// Emergency compaction keeps latest Keep percent and targets Summary percent,
 	// growing by SummaryStep up to SummaryMax. Targets guide concise model writing;
 	// admission requires a smaller complete continuation that fits the window.
-	Trigger     float64 `yaml:"compaction_trigger"`
-	Keep        float64 `yaml:"compaction_keep"`
-	Summary     float64 `yaml:"compaction_summary"`
-	SummaryStep float64 `yaml:"compaction_summary_step"`
-	SummaryMax  float64 `yaml:"compaction_summary_max"`
+	Trigger float64 `yaml:"compaction_trigger"`
+	// CompactionAbsoluteTokens additionally fires compaction at this many
+	// measured/estimated tokens regardless of window percent; 0 disables.
+	CompactionAbsoluteTokens int     `yaml:"compaction_absolute_tokens"`
+	Keep                     float64 `yaml:"compaction_keep"`
+	Summary                  float64 `yaml:"compaction_summary"`
+	SummaryStep              float64 `yaml:"compaction_summary_step"`
+	SummaryMax               float64 `yaml:"compaction_summary_max"`
 	// SummaryWordsPerToken sizes the summary writing target from its token target.
 	// A wording ratio, not a measured count or hard summary quota.
 	SummaryWordsPerToken float64 `yaml:"summary_words_per_token"`
@@ -460,15 +463,16 @@ func Defaults() Config {
 		UI:               UIConfig{MaxFileEntries: 500, MaxFileViewLines: 2000, MaxRunIDs: 20, MaxDecisionRows: 100, MaxAlerts: 50, MaxLegacyMessages: 100},
 		Serve:            ServeConfig{ProbeTimeoutSeconds: 3},
 		Context: ContextConfig{
-			Window:                 0,
-			Trigger:                90,
-			Keep:                   40,
-			Summary:                10,
-			SummaryStep:            1,
-			SummaryMax:             20,
-			SummaryWordsPerToken:   0.75,
-			OutputPruneAfterTokens: 50000,
-			InflightOutputs:        0,
+			Window:                   0,
+			Trigger:                  90,
+			CompactionAbsoluteTokens: 65536,
+			Keep:                     40,
+			Summary:                  10,
+			SummaryStep:              1,
+			SummaryMax:               20,
+			SummaryWordsPerToken:     0.75,
+			OutputPruneAfterTokens:   50000,
+			InflightOutputs:          0,
 		},
 		Schemas:   SchemaConfig{InflightCap: 0, KeepLatest: 3},
 		Retention: RetentionConfig{SessionMonths: 3},
@@ -487,7 +491,7 @@ func Defaults() Config {
 			Fetch:  FetchConfig{TimeoutSeconds: 30, MaxBytes: 262144},
 		},
 		Agent:     AgentConfig{MaxSteps: 0, LoopRepeat: 3, LoopStall: 5, ThinkingLoop: ThinkingLoopConfig{16, 8, 256, 4096, 8192}},
-		Store:     StoreConfig{Path: "data/kuzu", BufferPoolBytes: 256 * 1024 * 1024},
+		Store:     StoreConfig{Path: "data/kuzu", BufferPoolBytes: 1024 * 1024 * 1024},
 		Sessions:  SessionsConfig{Path: "data/sessions"},
 		Templates: TemplatesConfig{Path: "templates"},
 		Subagents: SubagentsConfig{Mode: SubagentsConcurrent, MaxSubagents: 0, ContextWindow: 0, MaxResultChars: 2000},
@@ -634,6 +638,9 @@ func (c Config) Validate() error {
 	}
 	if c.Context.Window < 0 {
 		return fmt.Errorf("context.window cannot be negative, got %d", c.Context.Window)
+	}
+	if c.Context.CompactionAbsoluteTokens < 0 {
+		return fmt.Errorf("context.compaction_absolute_tokens must be at least 0, got %d", c.Context.CompactionAbsoluteTokens)
 	}
 	if c.Context.OutputPruneAfterTokens < 0 {
 		return fmt.Errorf("context.output_prune_after_tokens cannot be negative, got %d", c.Context.OutputPruneAfterTokens)

@@ -6,6 +6,7 @@
 context:
   window: 0                 # model context, tokens; 0 = autodetect from hardware
   compaction_trigger: 90    # emergency window % for automatic model-written summaries; 0 disables automatic summaries
+  compaction_absolute_tokens: 65536 # also compact at this many measured/estimated tokens regardless of window %; 0 disables
   compaction_keep: 40       # latest transcript % kept verbatim at compaction
   compaction_summary: 10    # concise summary target %; full retained context governs admission
   compaction_summary_step: 1   # writing target grows per successive compaction
@@ -87,7 +88,7 @@ agent:
 
 store:
   path: data/kuzu          # Kuzu database directory (created on first open)
-  buffer_pool_bytes: 268435456 # 256 MiB; 0=Kuzu auto, otherwise >=4096; not an RSS cap
+  buffer_pool_bytes: 1073741824 # 1 GiB; 0=Kuzu auto, otherwise >=4096; not an RSS cap
   # Apply policy changes in a fresh process after all database owners close.
 
 sessions:

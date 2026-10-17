@@ -757,7 +757,7 @@ steps:
 				contextEvent(r.Continuation)
 			}
 		}
-		if shouldCompact(basis, r.MaxTokens, true, r.Compaction) {
+		if shouldCompact(r.contextOccupancy(basis), r.MaxTokens, true, r.Compaction) {
 			nt, sum, ran, err := compactModel(r.Continuation)
 			if err != nil {
 				if errors.Is(err, userCommentInterrupt) && ctx.Err() == nil {
@@ -846,6 +846,12 @@ steps:
 					return finish(outcome.Failed, archiveErr.Error(), "", archiveErr)
 				}
 				r.progressCheckpoint(step-1, startedAt)
+				// A length terminal burned a full output budget with no settled
+				// receipt: count it toward the consecutive-unproductive-turn
+				// stuck trigger so repeated thinking burns get judged advice.
+				if watch != nil {
+					watch.consecutiveFailures++
+				}
 				advice, judgeErr := r.reviewDiscovery(ctx, watch, func(kind, text string) error { log(kind, text); return sessErr }, native.Message)
 				if judgeErr != nil {
 					return finish(outcome.Failed, judgeErr.Error(), "", judgeErr)

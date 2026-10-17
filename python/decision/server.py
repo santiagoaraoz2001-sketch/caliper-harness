@@ -18,7 +18,7 @@ import time
 import math
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from backends import BadRequest, Selection, load_backend, resolve, validate_judge
+from backends import BadRequest, Selection, load_backend, release_device_cache, resolve, validate_judge
 from prompts import load as load_prompts
 
 MODEL = "typed-decisions"
@@ -120,6 +120,10 @@ class Manager:
             check_deadline(body)
             return result
         finally:
+            try:
+                release_device_cache()
+            except Exception:
+                pass  # maintenance only; a released-or-not verdict stands
             self.judgment_lock.release()
 
 

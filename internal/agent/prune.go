@@ -18,8 +18,9 @@ type Prune struct {
 	SchemasKeep int
 }
 
-// prune replaces only old consumed tool-output bodies. Calls, reasoning, user
-// history and schemas remain exact. Age counts all later message context,
+// prune replaces old consumed tool-output bodies and settled reasoning
+// with stubs. Calls, visible text, user history and schemas remain exact.
+// Age counts all later message context,
 // including reasoning and later schema messages, using admission's calibration.
 // Leading tool definitions contribute to occupancy, not to an output's age.
 // Original sizes govern this pass, so one replacement cannot age another result.
@@ -37,7 +38,19 @@ func (r *Runner) prune(c *session.Continuation) (int, string) {
 		e := &c.Entries[i]
 		size += e.Message.Size()
 		messages++
-		if e.Kind != "output" || e.Message.Role == "system" || keep[i] || age <= r.Prune.OutputsAgeTokens {
+		if keep[i] || age <= r.Prune.OutputsAgeTokens {
+			continue
+		}
+		// Settled reasoning was consumed when produced; only its text still
+		// rents context. Stub it without touching the reply's calls or text.
+		if e.Message.Reasoning != "" {
+			stub := fmt.Sprintf("[pruned reasoning (%d bytes; age %d estimated context tokens); full reasoning in raw session history]", len(e.Message.Reasoning), age)
+			if len(stub) < len(e.Message.Reasoning) {
+				e.Message.Reasoning = stub
+				n++
+			}
+		}
+		if e.Kind != "output" || e.Message.Role == "system" {
 			continue
 		}
 		old := len(e.Message.Content)
@@ -53,7 +66,7 @@ func (r *Runner) prune(c *session.Continuation) (int, string) {
 		return c.Estimate(), ""
 	}
 	c.Invalidate()
-	return c.Estimate(), fmt.Sprintf("pruned %d tool output(s) older than %d estimated context tokens; protected entries exempt; raw history retained", n, r.Prune.OutputsAgeTokens)
+	return c.Estimate(), fmt.Sprintf("pruned %d tool output/reasoning body(ies) older than %d estimated context tokens; protected entries exempt; raw history retained", n, r.Prune.OutputsAgeTokens)
 }
 
 // Kept as a caller-compatible no-op: duplicate discovery exchanges, including
