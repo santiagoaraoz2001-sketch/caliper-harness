@@ -74,6 +74,24 @@ func summaryBudget(c Compaction, window, n int) int {
 	return 1
 }
 
+// keepBudgetTokens is the verbatim-retention budget for one compaction:
+// Keep percent of the window, additionally capped so retained context plus
+// the summary target fit under the Absolute ceiling when one is configured.
+// Without the cap, an absolute trigger below the Keep budget would leave
+// the compactor nothing to summarize.
+func keepBudgetTokens(c Compaction, window, n int) float64 {
+	budget := c.Keep / 100 * float64(window)
+	if c.Absolute > 0 {
+		if capped := float64(c.Absolute - summaryBudget(c, window, n)); capped < budget {
+			budget = capped
+		}
+	}
+	if budget < 0 {
+		budget = 0
+	}
+	return budget
+}
+
 // keepStart returns the first kept index: the latest messages whose
 // apportioned content estimate fits Keep percent of the window. Both the
 // candidate total and character-share boundary are estimates; the last
@@ -82,6 +100,10 @@ func summaryBudget(c Compaction, window, n int) int {
 // protection separately retains user intent, unread/current receipts and other
 // obligations. An oversized unprotected latest draft may be summarized.
 func keepStart(msgs []llm.Message, totalTokens int, keepPct float64, window int) int {
+	return keepStartBudget(msgs, totalTokens, keepPct/100*float64(window))
+}
+
+func keepStartBudget(msgs []llm.Message, totalTokens int, budget float64) int {
 	prefix := 0
 	for prefix < len(msgs) && msgs[prefix].Role == "system" {
 		prefix++
@@ -90,7 +112,6 @@ func keepStart(msgs []llm.Message, totalTokens int, keepPct float64, window int)
 	for _, m := range msgs {
 		totalChars += m.Size()
 	}
-	budget := keepPct / 100 * float64(window)
 	acc := 0.0
 	start := len(msgs)
 	for i := len(msgs) - 1; i >= prefix; i-- {
@@ -145,7 +166,7 @@ func (r *Runner) Compact(ctx context.Context, c session.Continuation) (next sess
 			keep[i] = true
 		}
 	}
-	ks := keepStart(c.Messages(), c.Estimate(), r.Compaction.Keep, r.MaxTokens)
+	ks := keepStartBudget(c.Messages(), c.Estimate(), keepBudgetTokens(r.Compaction, r.MaxTokens, c.Compactions))
 	for i := 0; i < len(c.Entries); {
 		end := c.GroupEnd(i)
 		if i < ks && end > ks {

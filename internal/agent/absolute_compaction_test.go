@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -26,6 +27,34 @@ func TestShouldCompactAbsoluteCeiling(t *testing.T) {
 	}
 	if shouldCompact(70000, 262144, true, Compaction{Trigger: 0, Absolute: 65536}) {
 		t.Fatal("Trigger 0 disables automatic summaries entirely")
+	}
+}
+
+// Regression for the 2026-10-17 live stop: at 93,141 tokens on a 262,144
+// window the absolute ceiling fired but Keep=40% (104,858 tokens) retained
+// everything, so compaction found no summary material and the length path
+// stopped the task. The keep budget must shrink under the ceiling so
+// compaction always has material whenever the ceiling fires.
+func TestCompactRunsWhenAbsoluteFiresBelowKeepPercent(t *testing.T) {
+	c := Compaction{Trigger: 90, Keep: 40, Summary: 10, Step: 1, Max: 20, WordsPerToken: 0.5, Absolute: 65536}
+	if got := keepBudgetTokens(c, 262144, 0); got != 65536-26214 {
+		t.Fatalf("keep budget: got %v, want %v", got, 65536-26214)
+	}
+	if got := keepBudgetTokens(testCompaction(), 262144, 0); got != 40.0/100*262144 {
+		t.Fatalf("percent-only keep budget changed: %v", got)
+	}
+	model := &scriptModel{replies: []string{"factual summary"}}
+	r := Runner{Judge: acceptCompaction, Threshold: .7, Model: model, MaxTokens: 262144,
+		TemplatesDir: testTemplateDir(t), Compaction: c}
+	msgs := []llm.Message{{Role: "system", Content: "sys"}}
+	for i := 0; i < 10; i++ {
+		msgs = append(msgs, llm.Message{Role: "user", Content: strings.Repeat("old ", 2000)})
+		msgs = append(msgs, llm.Message{Role: "assistant", Content: strings.Repeat("done ", 2000)})
+	}
+	msgs = append(msgs, llm.Message{Role: "user", Content: "fresh"})
+	_, _, ran, err := testCompact(&r, context.Background(), msgs, 93141, 0)
+	if err != nil || !ran {
+		t.Fatalf("compaction at 93k with 65k ceiling: ran=%t err=%v", ran, err)
 	}
 }
 

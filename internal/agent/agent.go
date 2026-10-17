@@ -888,7 +888,16 @@ steps:
 						return finish(status, "unfinished-response context compaction: "+compactErr.Error(), "", compactErr)
 					}
 					if !ran {
-						return finish(outcome.Stopped, "unfinished response reached context cleanup threshold but no model-written compaction could be published; raw draft retained", "", nil)
+						// Nothing was eligible to summarize. That is maintenance
+						// information, not a dead end: unless the retained draft
+						// genuinely reaches the window, start a fresh response
+						// from it (deferred boundary advice delivers there).
+						if overBudget(nextInput, r.MaxTokens, true) {
+							return finish(outcome.Stopped, "unfinished response reached context cleanup threshold but no model-written compaction could be published; raw draft retained", "", nil)
+						}
+						log("note", "unfinished response retained as unverified history without compaction; starting a fresh response")
+						step-- // Response handover grants no new execution step.
+						continue steps
 					}
 					if publishErr := publishCompact(nt, sum); publishErr != nil {
 						return finish(outcome.Failed, publishErr.Error(), "", publishErr)
