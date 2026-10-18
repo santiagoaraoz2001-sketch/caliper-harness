@@ -146,6 +146,10 @@ every command.
   in an embedded Kuzu store behind a schema-first GraphQL API
   (`schema/v1.graphqls`); the model reads and writes it through the same API
   you can query with `caliper-harness graph`.
+  `tools.graphql.max_result_bytes` defaults to 1 MiB (1,048,576 bytes), shared
+  by result serialization and source admission. Source admission conservatively
+  estimates four bytes per character, so selected text may hit the guard before
+  its serialized response reaches 1 MiB. Existing YAML overrides remain in effect.
 - **Decision sidecar** (`python/decision/`) — a small typed-choice judge
   (for example LiquidAI/d1-3B on MPS). It classifies progress at triggers,
   judges plan coherence at readiness, and can gate risky tool calls. Every

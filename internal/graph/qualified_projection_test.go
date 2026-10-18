@@ -91,7 +91,10 @@ func TestQualifiedProjectionNativeArchive(t *testing.T) {
 			}
 			t.Logf("qualified query %d bytes", len(out))
 		}
-		if out, err := api.ExecBounded(context.Background(), fmt.Sprintf(`{task(id:%q){attemptLog}}`, task.ID), "", nil, config.Defaults().Tools.GraphQL); err == nil {
+		// Preserve the original explicit-budget control as the default expands.
+		limits := config.Defaults().Tools.GraphQL
+		limits.MaxResultBytes = 65536
+		if out, err := api.ExecBounded(context.Background(), fmt.Sprintf(`{task(id:%q){attemptLog}}`, task.ID), "", nil, limits); err == nil {
 			t.Fatalf("raw archive cap bypassed: %d bytes", len(out))
 		}
 	}

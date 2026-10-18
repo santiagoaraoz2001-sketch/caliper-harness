@@ -235,7 +235,11 @@ func TestEvidenceBudgetsNarrowingAliasesAndUse(t *testing.T) {
 	}
 	for _, fields := range []string{`records { text }`, `records { message { thinking } }`} {
 		q := `{ sessionEvidence(sessionId:"prior",offset:0,limit:1,callId:"failed-call") { groups { ` + fields + ` } } }`
-		if raw, err := a.ExecBounded(t.Context(), q, "", nil, config.Defaults().Tools.GraphQL); err == nil {
+		// This fixture exceeds the explicitly configured historical 64 KiB cap,
+		// not the expanded default. Keep proving overrides and failed-read retention.
+		limits := config.Defaults().Tools.GraphQL
+		limits.MaxResultBytes = 65536
+		if raw, err := a.ExecBounded(t.Context(), q, "", nil, limits); err == nil {
 			t.Fatalf("oversized selected body admitted: %s", raw)
 		}
 		st, _ := os.Stat(path)

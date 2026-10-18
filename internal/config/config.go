@@ -251,8 +251,11 @@ type GraphQLConfig struct {
 	MaxRequestBytes int `yaml:"max_request_bytes"`
 	MaxSelections   int `yaml:"max_selections"`
 	MaxRows         int `yaml:"max_rows"`
-	MaxResultBytes  int `yaml:"max_result_bytes"`
-	TimeoutSeconds  int `yaml:"timeout_seconds"`
+
+	// Shared result/source budget; source admission conservatively charges four
+	// bytes per character. Keep enough headroom for complete guided PAT briefs.
+	MaxResultBytes int `yaml:"max_result_bytes"`
+	TimeoutSeconds int `yaml:"timeout_seconds"`
 }
 
 func (g GraphQLConfig) Validate() error {
@@ -483,7 +486,7 @@ func Defaults() Config {
 		// MLX default: the Mac-native server. vLLM users point at :8000/v1.
 		Model: ModelConfig{PlainRequestTimeoutSeconds: 300, ToolProtocol: "structured", Runtime: "openai", Server: "http://127.0.0.1:8080/v1"},
 		Tools: ToolsConfig{
-			GraphQL: GraphQLConfig{MaxRequestBytes: 65536, MaxSelections: 1024, MaxRows: 256, MaxResultBytes: 65536, TimeoutSeconds: 30},
+			GraphQL: GraphQLConfig{MaxRequestBytes: 65536, MaxSelections: 1024, MaxRows: 256, MaxResultBytes: 1048576, TimeoutSeconds: 30},
 			Bash: BashConfig{
 				DefaultTimeout: 30, MaxTimeout: 600, MaxBytes: 65536, MaxLines: 2000,
 			},

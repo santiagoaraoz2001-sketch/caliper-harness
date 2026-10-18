@@ -64,7 +64,7 @@ tools:
     max_request_bytes: 65536
     max_selections: 1024
     max_rows: 256
-    max_result_bytes: 65536
+    max_result_bytes: 1048576 # 1 MiB; also covers the conservative 4-byte/character source estimate
     timeout_seconds: 30
   bash:
     default_timeout: 30     # seconds when the call omits timeout
