@@ -136,7 +136,8 @@ func New(d Deps, prompt string) (*agent.Runner, []string, error) {
 	}
 	notes = append(notes, "note: "+notice)
 	r = &agent.Runner{Prompts: pc,
-		Model: client, Registry: reg, CodingRequired: true, Workspace: w.Path, CheckCommand: d.Cfg.Coding.CheckCommand,
+		WorkspaceExcludes: workspaceExcludes(d.Cfg, d.Store),
+		Model:             client, Registry: reg, CodingRequired: true, Workspace: w.Path, CheckCommand: d.Cfg.Coding.CheckCommand,
 		Exec:     gate.Wrap(agent.Direct),
 		MaxSteps: d.MaxSteps, MaxRunSeconds: int(d.Cfg.Agent.MaxRunSeconds), Out: d.ReplyOut,
 		SessionID: d.SessionID,
@@ -618,7 +619,8 @@ func LaunchDeps(cfg config.Config, s *store.Store, server, model string, maxStep
 func launchDeps(cfg config.Config, s *store.Store, server, model string, maxSteps, window int, in io.Reader, out io.Writer, w *files.Workspace, behavior string) launch.Deps {
 	dj := decision.New(cfg.Decision.Server, cfg.Decision.Model, cfg.Decision.Device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(decision.SelectionFor(cfg.Decision)).WithPrompts(cfg.PromptCatalog).WithInputLimit(cfg.Decision.MaxInputTokens)
 	return launch.Deps{Prompts: cfg.PromptCatalog,
-		Workspace: w.Path, Store: s, Behavior: behavior,
+		WorkspaceExcludes: workspaceExcludes(cfg, s),
+		Workspace:         w.Path, Store: s, Behavior: behavior,
 		NewModel: func() agent.Model {
 			return llm.New(server, model).WithPlainTimeout(time.Duration(cfg.Model.PlainRequestTimeoutSeconds) * time.Second).WithRuntime(cfg.Model.Runtime).WithToolProtocol(cfg.Model.ToolProtocol).WithParams(ModelParams(cfg.Params))
 		},
@@ -741,4 +743,13 @@ func bindLaunchAuth(cfg config.Config, d launch.Deps, gate *auth.Gate, sink agen
 		return nil
 	}
 	return d
+}
+
+// Exclude only our live bookkeeping from project-content observations.
+func workspaceExcludes(cfg config.Config, s *store.Store) []string {
+	paths := []string{cfg.Sessions.Path}
+	if s != nil && s.Identity() != "" {
+		paths = append(paths, s.Identity(), s.Identity()+".wal", s.Identity()+".lock")
+	}
+	return paths
 }

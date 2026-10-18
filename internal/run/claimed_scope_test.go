@@ -39,7 +39,9 @@ func TestClaimedTaskScopeNativeCoding(t *testing.T) {
 			cfg.Auth.Mode = config.AuthYOLO
 			cfg.Recall.TopN = 0
 			cfg.Templates.Path = assignedTemplates()
-			cfg.Coding.CheckCommand = `test "$(cat facts.txt)" = observed; printf check >> check-marker`
+			// Keep test instrumentation outside the project inventory being reviewed.
+			checkMarker := filepath.Join(t.TempDir(), "check-marker")
+			cfg.Coding.CheckCommand = fmt.Sprintf(`test "$(cat facts.txt)" = observed; printf check >> %q`, checkMarker)
 			confidence := 0.99
 
 			bindDecisionFixture(t, &cfg, func(q decision.Request) int {
@@ -370,7 +372,7 @@ func TestClaimedTaskScopeNativeCoding(t *testing.T) {
 				if actual.Attempts != 0 {
 					t.Fatalf("initial invalid array claimed task: %+v", actual)
 				}
-				for _, path := range []string{"check-marker", "bash-marker"} {
+				for _, path := range []string{checkMarker, "bash-marker"} {
 					if _, e = os.Stat(path); !os.IsNotExist(e) {
 						t.Fatalf("invalid initial array published %s", path)
 					}
@@ -381,7 +383,7 @@ func TestClaimedTaskScopeNativeCoding(t *testing.T) {
 				t.Fatalf("actual task=%+v outcome=%+v err=%v", actual, r.Outcome, runErr)
 			}
 			marker, _ := os.ReadFile("bash-marker")
-			checked, _ := os.ReadFile("check-marker")
+			checked, _ := os.ReadFile(checkMarker)
 			if string(marker) != "scoped" || string(checked) != "checkcheck" {
 				t.Fatalf("real effects bash=%q check=%q", marker, checked)
 			}

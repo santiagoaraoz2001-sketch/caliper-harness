@@ -123,9 +123,13 @@ type Runner struct {
 	// right after the base prompt. Shaped by ShapeBehavior.
 	Behavior     string
 	BehaviorNote string // disclosed through the ordinary session note channel
-	// TaskSystem is supplied only by a current owning worker claim. It is a
+	// TaskSystem is supplied by the owning worker or reviewer role. It is a
 	// separate protected system entry, never restored as assignment authority.
 	TaskSystem string
+	// FinalFeedback repairs a normal final in this same run; empty accepts it.
+	FinalFeedback func(string) string
+	// WorkspaceExcludes contains exact harness-owned state paths.
+	WorkspaceExcludes []string
 	// Memories, when non-empty, injects as a user-role message right
 	// after the prompt. Recalled by memory.Recall in main.
 	Memories string
@@ -397,6 +401,20 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 			if len(unresolved) > 0 {
 				status = unresolvedStatus
 				reason = "required workflow unresolved: " + strings.Join(unresolved, "; ")
+			}
+		}
+		if normalFinal && status == outcome.Completed && err == nil && sessErr == nil && ctx.Err() == nil && r.FinalFeedback != nil {
+			if feedback := r.FinalFeedback(text); feedback != "" {
+				if r.withinStepBudget(usedSteps) {
+					log("evidence", feedback)
+					if sessErr == nil {
+						add("evidence", "user", feedback, false)
+						return text, transcript, repairFinal
+					}
+					status, reason, err = outcome.Failed, sessErr.Error(), sessErr
+				} else {
+					status, reason = outcome.Stopped, "review verdict pending; step budget exhausted"
+				}
 			}
 		}
 		planningFinal := normalFinal && status == outcome.Completed && r.Assigned != nil && r.PlanningActive() && !r.assignedClaim

@@ -30,16 +30,17 @@ import (
 // Deps wires a launch: state, factories, steps, templates, parent window,
 // plus the execution and retry policies.
 type Deps struct {
-	Prompts       *prompts.Catalog
-	Behavior      string // loaded/capped once per builder, shared by workers and reviewers
-	BehaviorNote  string // caller-visible truncation note; not model instructions
-	Workspace     string // captured physical cwd for Bash and check receipts
-	Store         *store.Store
-	NewModel      func() agent.Model
-	NewRegistry   func() *tool.Registry
-	MaxSteps      int
-	MaxRunSeconds int
-	TemplatesDir  string
+	Prompts           *prompts.Catalog
+	Behavior          string // loaded/capped once per builder, shared by workers and reviewers
+	BehaviorNote      string // caller-visible truncation note; not model instructions
+	WorkspaceExcludes []string
+	Workspace         string // captured physical cwd for Bash and check receipts
+	Store             *store.Store
+	NewModel          func() agent.Model
+	NewRegistry       func() *tool.Registry
+	MaxSteps          int
+	MaxRunSeconds     int
+	TemplatesDir      string
 	// ParentWindow is the resolved parent window; subagent window 0 inherits it.
 	ParentWindow int
 	Sub          config.SubagentsConfig
@@ -469,7 +470,8 @@ func childGate(d Deps, next agent.Exec) agent.Exec {
 // task-bound persistence and per-call authorization before running it.
 func roleRunner(d Deps, window int) *agent.Runner {
 	return &agent.Runner{Prompts: d.Prompts,
-		Model: d.NewModel(), Registry: d.NewRegistry(), Exec: agent.Direct,
+		WorkspaceExcludes: d.WorkspaceExcludes,
+		Model:             d.NewModel(), Registry: d.NewRegistry(), Exec: agent.Direct,
 		MaxSteps: d.MaxSteps, MaxRunSeconds: d.MaxRunSeconds, Out: io.Discard, MaxTokens: window,
 		Judge: d.Judge, Threshold: d.Threshold,
 		LoopRepeat: d.LoopRepeat, LoopStall: d.LoopStall,
@@ -631,14 +633,16 @@ func verifyPass(ctx context.Context, d Deps, results []Result, indices []int, wi
 }
 
 // isFail reads the reviewer's one-line verdict: FAIL leads.
-func reviewVerdict(out string) outcome.Verification {
+func reviewToken(out string) string {
 	first := strings.TrimSpace(strings.SplitN(strings.TrimSpace(out), "\n", 2)[0])
 	fields := strings.Fields(first)
 	if len(fields) == 0 {
-		return outcome.Unverified
+		return ""
 	}
-	token := strings.ToUpper(strings.SplitN(fields[0], ":", 2)[0])
-	switch token {
+	return strings.ToUpper(strings.SplitN(fields[0], ":", 2)[0])
+}
+func reviewVerdict(out string) outcome.Verification {
+	switch reviewToken(out) {
 	case "PASS":
 		return outcome.Passed
 	case "FAIL":

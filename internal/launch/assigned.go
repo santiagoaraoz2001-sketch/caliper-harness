@@ -365,14 +365,47 @@ func runReviewer(ctx context.Context, d Deps, prompt string, window int, r *Resu
 	}
 	check := sub.CheckDefinition(bash)
 	sub.Registry.Register(check)
+	sub.Registry.Restrict([]string{"read", "read_outside", "find_outside", "grep", "find_file", "find_dir", "help", "bash", "check"})
+	sub.TaskSystem = d.Prompts.Format("agent.reviewer_role", t.Title, t.Prompt, t.Target, t.Acceptance)
+	sub.FinalFeedback = func(text string) string {
+		switch reviewToken(text) {
+		case "PASS", "FAIL", "UNVERIFIED":
+			return ""
+		}
+		return d.Prompts.Text("continuation.review_verdict")
+	}
+	var roleViolation error
 	effects := sub.CodingExec(agent.Direct)
 	sub.Exec = childGate(d, func(ctx context.Context, def tool.Definition, args tool.Args) (tool.Result, error) {
 		if err := plan.PausePendingRevision(plan.WithProject(ctx, d.Workspace), d.Store, t.ID, r.Attempts); err != nil {
 			return tool.Result{}, err
 		}
-		return effects(ctx, def, args)
+		if def.Name != "bash" && def.Name != "check" {
+			return effects(ctx, def, args)
+		}
+		before, beforeErr := sub.WorkspaceFingerprint(ctx)
+		res, execErr := agent.Direct(ctx, def, args)
+		after, afterErr := sub.WorkspaceFingerprint(ctx)
+		if beforeErr != nil || afterErr != nil || before != after {
+			if beforeErr != nil || afterErr != nil {
+				roleViolation = fmt.Errorf("reviewer project-content observation unavailable: before=%v after=%v", beforeErr, afterErr)
+			} else {
+				roleViolation = fmt.Errorf("reviewer shell modified project contents; return findings instead of modifying the task")
+			}
+			sub.Continuation.Coding.Invalidate(roleViolation.Error())
+			res.Failed = true
+			execErr = errors.Join(execErr, roleViolation, sub.Session.Append(context.WithoutCancel(ctx), t.ID, "role_violation", roleViolation.Error()))
+		}
+		return res, execErr
 	})
 	out, messages, err := sub.Run(ctx, prompt)
+	if roleViolation != nil {
+		sub.Continuation.Coding.Invalidate(roleViolation.Error())
+		if sub.Outcome.Status != outcome.Cancelled && sub.Outcome.Status != outcome.Stopped {
+			sub.Outcome = outcome.Outcome{Status: outcome.Failed, Reason: roleViolation.Error()}
+		}
+		err = errors.Join(err, roleViolation)
+	}
 	if sub.Continuation.Coding != nil {
 		*c = *sub.Continuation.Coding
 	}

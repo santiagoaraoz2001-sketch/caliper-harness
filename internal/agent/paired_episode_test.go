@@ -134,7 +134,7 @@ func TestPairedEpisodeApprovalCurrentnessAndDurability(t *testing.T) {
 				}
 				c = clone.Coding
 				r.Continuation.Coding = c
-				_, e = r.CodingExec(agent.Direct)(context.Background(), bash.NewAt(config.Defaults().Tools.Bash, dir), tool.Args{"cmd": "printf LATER", "timeout": int64(1)})
+				_, e = r.CodingExec(agent.Direct)(context.Background(), bash.NewAt(config.Defaults().Tools.Bash, dir), tool.Args{"cmd": "printf LATER > changed.txt", "timeout": int64(1)})
 				if e != nil || c.Passed() || c.Receipt.Status != "stale" {
 					t.Fatalf("later opaque effect kept pair current %v %+v", e, c)
 				}

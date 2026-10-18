@@ -217,7 +217,9 @@ func TestChildHelpSeesLateAssignedCheck(t *testing.T) {
 	cfg.Recall.TopN = 0
 	cfg.Behavior.Path = ""
 	cfg.Templates.Path = assignedTemplates()
-	command := `test "$(cat artifact)" = actual; printf checked >> checks`
+	// This is test instrumentation, not a project file that the reviewer may edit.
+	checkMarker := filepath.Join(t.TempDir(), "checks")
+	command := fmt.Sprintf(`test "$(cat artifact)" = actual; printf checked >> %q`, checkMarker)
 	task := assignedFixtureTask(t, s, command, `test "$(cat artifact)" = actual`)
 	bindDecisionFixture(t, &cfg, nil)
 	worker, reviewer := 0, 0
@@ -286,7 +288,7 @@ func TestChildHelpSeesLateAssignedCheck(t *testing.T) {
 	if e != nil || !actual.Qualified() || actual.Attempts != 1 {
 		t.Fatalf("owning qualification %+v %v", actual, e)
 	}
-	checked, e := os.ReadFile("checks")
+	checked, e := os.ReadFile(checkMarker)
 	if e != nil || string(checked) != "checkedchecked" || worker != 2 || reviewer != 3 {
 		t.Fatalf("actual check/review worker%d reviewer%d checks%q error%v", worker, reviewer, checked, e)
 	}

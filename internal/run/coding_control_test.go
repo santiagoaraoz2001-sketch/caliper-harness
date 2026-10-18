@@ -197,7 +197,7 @@ func TestCodingChecksRefuseAndInvalidateTruthfully(t *testing.T) {
 				cfg.Coding.CheckCommand = "exit 9"
 				want = outcome.Failed
 			case "later bash":
-				calls = append(calls, codingCall{"bash", map[string]any{"cmd": "true"}})
+				calls = append(calls, codingCall{"bash", map[string]any{"cmd": "printf changed > changed-source"}})
 			case "later launch", "later workflow_resume":
 				calls = append(calls, codingCall{strings.TrimPrefix(scenario, "later "), map[string]any{"approach": "owned"}})
 				view = "full"

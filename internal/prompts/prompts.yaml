@@ -281,7 +281,7 @@ texts:
     regression; for a new deliverable, inspect assertions of its requested behavior. Compare them with the
     request/target; authored current/sketch and suite exit0 alone do not establish coverage or correctness.
     Perform Verify actions with the advertised inspection tools, then use check for the
-    acceptance-first/project-last episode. Later potentially modifying actions require a fresh whole episode. Do not modify artifacts/checks/gates. Mark denied/unexecuted checks
+    acceptance-first/project-last episode. Reuse a current passed episode. Inspection that leaves project contents unchanged preserves it; changed or unobserved contents make it stale. Do not modify artifacts/checks/gates. Mark denied/unexecuted checks
     as missing evidence; do not treat superseded failures as current. Already-correct work needs proof,
     not mandatory edits. Verify is instructions, not a tool.
     For each finding, give the observed cause and consequence under its first applicable category:
@@ -1117,14 +1117,14 @@ texts:
     When bash is advertised, use it for commands without a dedicated tool. Use read/find_file/find_dir/grep
     for inspection, edit/write for source changes, and check for declared verification.
     Timeout/output caps are configured. Nonzero exit is a failure receipt, not a product success.
-    Shell commands can have opaque effects, so a prior declared-check pass becomes stale. Do not treat raw
+    Shell inspection preserves a prior declared-check pass when project contents are observed unchanged. Changed or unobserved contents make it stale. Do not treat raw
     shell output as verified task qualification.
   # Focused help.check documentation/examples; help labels current executable availability.
   # Original use sites: internal/tools/model-guide.md:38 (helpDefinition).
   # Fields: none. Supplied by the owning Go caller.
   help.check: |2
     ## help.check
-    Ordinary coding runs one configured or inspected-project declared check and records its actual current outcome; it needs no PAT. Planned tasks run a paired episode: the frozen acceptance_cmd asserts requested behavior FIRST; cmd runs the configured suite LAST only after acceptance exit0 is durably recorded. Omit arguments only when the CURRENT schema supplies the required defaults (cmd, and acceptance_cmd for a planned task); otherwise use the actual declared literals. The roles may use the same suite if it contains task assertions. Inspect them: two exits0 prove execution, not test adequacy. The acceptance command must exercise a real requested-behavior assertion; a zero-match test selection or generic true does not evidence that behavior. Later source changes, shell commands or modifying workflow effects require a fresh whole episode; inspection alone does not. Failed/denied episodes are not automatically retried by host finalization.
+    Ordinary coding runs one configured or inspected-project declared check and records its actual current outcome; it needs no PAT. Planned tasks run a paired episode: the frozen acceptance_cmd asserts requested behavior FIRST; cmd runs the configured suite LAST only after acceptance exit0 is durably recorded. Omit arguments only when the CURRENT schema supplies the required defaults (cmd, and acceptance_cmd for a planned task); otherwise use the actual declared literals. The roles may use the same suite if it contains task assertions. Inspect them: two exits0 prove execution, not test adequacy. The acceptance command must exercise a real requested-behavior assertion; a zero-match test selection or generic true does not evidence that behavior. Later source changes or modifying workflow effects require a fresh whole episode. Shell inspection preserves it when project contents are observed unchanged; changed or unobserved contents make it stale. Failed/denied episodes are not automatically retried by host finalization.
 
   # Focused help.edit documentation/examples; help labels current executable availability.
   # Original use sites: internal/tools/model-guide.md:29 (helpDefinition).
@@ -1618,7 +1618,7 @@ texts:
     commands before effects: acceptance_cmd runs first, then cmd after acceptance exit0 and a
     durable receipt. Both exits0 form one current episode, not a correctness guarantee. The
     roles may use the same literal if its suite contains the task assertions. Later
-    source changes, shell commands or modifying workflow effects invalidate the episode; inspection does not.
+    source changes or modifying workflow effects invalidate the episode. Shell inspection preserves it when project contents are observed unchanged; changed or unobserved contents make it stale.
 
   # Model-facing desc prose for the current Definitions registry constructor; executable
   # schema/authority remain Go-owned.
@@ -3238,4 +3238,23 @@ texts:
 
   # Advisory progress wording; internal/agent progress touchpoints. Fields: none.
   continuation.progress.next_action_prefix: "\nCheckpoint next action (advisory): "
+
+
+  # Protected current-task role for independent review; broader requests are context.
+  # Fields: title, frozen task request, target, acceptance.
+  agent.reviewer_role: |
+    You are reviewing this task only: {{.Title}}
+    Frozen request: {{.Request}}
+    Target: {{.Target}}
+    Acceptance: {{.Acceptance}}
+    Inspect the implementation and existing check receipts. Use read/search and non-editing bash
+    commands as needed; use check if current verification is missing. Do not edit source, tests,
+    or task state, and do not implement sibling tasks. Report defects to the orchestrator.
+    Start your final answer with PASS, FAIL, or UNVERIFIED and the supporting evidence.
+    The orchestrator owns remediation and task handoff after your verdict.
+  # Feedback after a complete reviewer answer omits its verdict; same run and evidence.
+  continuation.review_verdict: |
+    Your review is missing its verdict. Using the evidence already gathered, start your final
+    answer with PASS, FAIL, or UNVERIFIED and explain why. Do not restart planning, repeat current
+    passing checks, edit files, or execute another task.
 

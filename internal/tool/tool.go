@@ -203,3 +203,15 @@ func (r *Registry) View(names []string) *Registry {
 	}
 	return v
 }
+
+// Restrict narrows this role's existing view in place so help closures see the
+// same availability as dispatch. Unlike View it cannot widen a prior view.
+func (r *Registry) Restrict(names []string) {
+	allowed := map[string]bool{}
+	for _, name := range names {
+		if r.allowed == nil || r.allowed[name] {
+			allowed[name] = true
+		}
+	}
+	r.allowed = allowed
+}

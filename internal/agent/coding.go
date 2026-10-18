@@ -67,13 +67,26 @@ func (r *Runner) CodingExec(next Exec) Exec {
 		if c == nil {
 			return next(ctx, d, a)
 		}
-		if d.Name == "bash" || d.Name == "launch" || d.Name == "workflow_resume" {
-			c.Invalidate("opaque Bash or child workflow admitted")
+		if d.Name == "launch" || d.Name == "workflow_resume" {
+			c.Invalidate("child workflow admitted")
 			if e := r.codingRecord(ctx); e != nil {
 				return tool.Result{}, e
 			}
 		}
+		var before string
+		var beforeErr error
+		if d.Name == "bash" {
+			before, beforeErr = r.WorkspaceFingerprint(ctx)
+		}
 		res, e := next(ctx, d, a)
+		if d.Name == "bash" {
+			after, afterErr := r.WorkspaceFingerprint(ctx)
+			if beforeErr != nil || afterErr != nil || before != after {
+				c.Invalidate("shell changed project contents or content observation was unavailable")
+				e = errors.Join(e, r.codingRecord(ctx))
+			}
+		}
+
 		if d.Name == "edit" || d.Name == "write" {
 			r.observeFile(res, e)
 		}
@@ -346,4 +359,9 @@ func (r *Runner) completionEvidence() string {
 		text += fmt.Sprintf(" Declared check source=%s cmd=%s cwd=%s status=%s exit=%s current=%t; coverage/requested-task correctness unverified.", evidenceQuote(c.Source), evidenceQuote(c.Receipt.Command), evidenceQuote(c.Receipt.Cwd), evidenceQuote(c.Receipt.Status), exit, c.Passed())
 	}
 	return text
+}
+
+// WorkspaceFingerprint observes the same project scope for workers and reviewers.
+func (r *Runner) WorkspaceFingerprint(ctx context.Context) (string, error) {
+	return projectFingerprint(ctx, r.Workspace, r.WorkspaceExcludes)
 }

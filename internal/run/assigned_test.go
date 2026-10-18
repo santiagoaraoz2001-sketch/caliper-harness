@@ -1104,7 +1104,13 @@ func TestAssignedReviewReceivesOriginalBriefAndHostEvidence(t *testing.T) {
 		}
 		delta := map[string]any{"content": falseReport}
 		reason := "stop"
-		first := body.Messages[1].Content
+		first := ""
+		for _, message := range body.Messages {
+			if message.Role == "user" && strings.HasPrefix(message.Content, "Review ") {
+				first = message.Content
+				break
+			}
+		}
 		if strings.HasPrefix(first, "Review ") {
 			if review == "" {
 				review = first

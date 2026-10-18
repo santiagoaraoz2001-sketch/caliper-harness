@@ -30,7 +30,7 @@ type outcomeModel struct {
 
 func (m *outcomeModel) Chat(_ context.Context, tx []llm.Message) (string, string, llm.Usage, error) {
 	m.calls++
-	if strings.HasPrefix(tx[len(tx)-1].Content, "Review ") {
+	if strings.HasPrefix(fixtureRoleRequest(tx), "Review ") {
 		return m.review, "component", llm.Usage{}, m.reviewErr
 	}
 	m.workers++
@@ -63,7 +63,7 @@ func TestReviewCauseSurvivesFreshReviewerCheck(t *testing.T) {
 		name, final, cause string
 		verification       outcome.Verification
 	}{
-		{"marker-before-PASS", "R26_BEHAVIOR_α\nPASS: actual check", "review did not return an explicit PASS or FAIL", outcome.Unverified},
+		{"marker-before-PASS", "R26_BEHAVIOR_α\nPASS: actual check", "review verdict pending; step budget exhausted", outcome.Unverified},
 		{"FAIL", "FAIL: observed unmet acceptance", "model reported " + string(outcome.Rejected), outcome.Rejected},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -79,7 +79,11 @@ func TestReviewCauseSurvivesFreshReviewerCheck(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if m.calls != 3 || x.Qualified() || x.Verification != tc.verification || x.Review != tc.final || !strings.Contains(x.VerificationReason, tc.cause) {
+			wantCalls := 3
+			if tc.name == "marker-before-PASS" {
+				wantCalls = 1 + d.MaxSteps
+			}
+			if m.calls != wantCalls || x.Qualified() || x.Verification != tc.verification || x.Review != tc.final || !strings.Contains(x.VerificationReason, tc.cause) {
 				t.Fatalf("computed review cause lost: calls=%d task=%+v", m.calls, x)
 			}
 			var records []attemptRecord
