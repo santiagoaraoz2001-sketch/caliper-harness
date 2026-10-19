@@ -35,7 +35,8 @@ texts:
     help() for the overview, or help(topic="guide") for the full guide. Topics are not extra tools.
     When GraphQL is available, record useful weak spots or opportunities noticed during the current
     Approach with noticed; see schema.graphql.noticed. State the evidence and uncertainty briefly,
-    then continue the assigned work. A note neither expands scope nor proves a defect.
+    then continue the assigned work. Record useful worker observations the same way, retaining attribution.
+    A note neither expands scope nor proves a defect.
 
   # System role: complete structured-call array validation/serial result rules.
   # Original use sites: internal/agent/context.go:115 (basePrompt).
@@ -238,7 +239,8 @@ texts:
     paths and digests when known), commands run and their outcomes, check and test results,
     decisions taken and why, and the source locators (file, line, symbol) behind each claim. Under
     Failed/pending, preserve every unresolved failure, refusal, disagreement and open question
-    exactly as it stands, including what was tried. Under Current, name the precise task step,
+    exactly as it stands, including what was tried. Preserve relevant Noticed observations and their
+    IDs as authored observations, not verified defects. Under Current, name the precise task step,
     workflow state and identifiers in force right now. Under Next, give one concrete next action
     and anything its executor must know before starting. Keep unknowns unknown; never upgrade a
     hypothesis, a plan, or unexecuted advice into a fact, and label model proposals as unverified:
@@ -325,6 +327,8 @@ texts:
     constraints and this frozen task; report comments, failures and missing decisions through the
     orchestrator. Give a normal final answer with no tool call to request independent review;
     there is no worker COMPLETE/FINISH tool call, and your report is not a success receipt.
+    If you notice a useful weak spot or opportunity, report its source, consequence
+    and uncertainty to the orchestrator for Noticed. Do not invent a finding or expand the task.
     Inspect source/tests. For a reported defect still unfixed, run its distinguishing regression before repair. For work
     already implemented, reuse known source and receipts; do not recreate the defect. Report missing
     pre-change evidence honestly and address only unmet requirements. For a new deliverable, implement
@@ -3167,7 +3171,10 @@ texts:
     project checks and independent review. After checks, a normal final answer with no tool call
     requests independent review; no completion tool is needed. Reviewer prose cannot manufacture a pass. Draft/Ready
     state or a launcher exit is not qualification. GraphQL introspection lists graph operations,
-    not execution tools. Read help(topic="launch") or help(topic="reference.scope") for details.
+    not execution tools. Workers without GraphQL report useful observations with their
+    evidence and uncertainty; the orchestrator records them with noticed for the actual Approach.
+    Reviewers remain read-only and report review findings through their existing verdict.
+    Read help(topic="launch") or help(topic="reference.scope") for details.
 
   help.reference.scope: |2
     ## Reference: capability and current scope
@@ -3180,6 +3187,9 @@ texts:
     ## Reference: tool navigation, authorization and recovery
     Use find_file/find_dir to locate source, grep to locate a symbol/caller, then read a relevant range. help(topic="read.definition") and help(topic="read.outline") explain read's current navigation arguments; they are documentation aliases, not extra tools. Inspect current bytes/hash and required coverage before editing. Keep actual next_offset with the same query after a capped page.
     GraphQL query is document text, with parentheses and required arguments on parameterized fields. For an unnamed query omit operation_name; for query Inspect { ... } use operation_name="Inspect". variables is one JSON-object string. A selected reference query is query { knowledge(key:"harness/reference/pat",limit:1) { key body } }. Read selected fields and actual IDs. Updates to authored knowledge require the actual head as expectedPreviousId; never guess it. Startup owns the harness/reference namespace and preserves its version history.
+    Record an Approach weak spot or opportunity with noticed; help(topic="schema.graphql.noticed")
+    gives its signature and example. Use notices to recall that Approach's notes. Include evidence and
+    uncertainty, retain the returned ID, then continue the task. Notes do not change scope or qualify work.
     Authorization follows the configured YOLO/all/risky policy and actual arguments. Reading documentation grants no tool, claim or approval. A denial, unknown verdict or missing prerequisite remains explicit. Correct refused arguments with the current schema; ask only for a required user decision. Automatic progress supervision: Continue/confidence below 0.5 sends no nudge and leaves the coding model unchanged.
     After errors, partial mutations, response interruption or resume, retain and use the settled call/result receipts already in context. Inspect only a missing fact or state that may have changed externally. A historical PASS grants no current verification authority. Cancellation does not authorize restart. Recover through the existing explicit workflow and rerun the required current checks after later effects.
 

@@ -208,7 +208,9 @@ that Approach's notes. They are ordinary project knowledge: saved across
 sessions, with author and timestamp, and editable through existing versioned
 knowledge operations. They do not create tasks or change verification status.
 The model is instructed to record useful observations briefly and continue
-its assigned work. `help(topic="schema.graphql.noticed")` provides the call
+its assigned work. Delegated workers report observations to the orchestrator, which records
+them with their attribution; reviewers keep their existing read-only verdict flow.
+`help(topic="schema.graphql.noticed")` provides the call
 template and examples.
 
 ## Design principles
