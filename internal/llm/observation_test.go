@@ -33,7 +33,8 @@ func TestRequestObserverOnceAcrossPlainStreamToolsAndClone(t *testing.T) {
 				t.Fatalf("%d observations", len(measurements))
 			}
 			v := measurements[0]
-			if v.Failed || v.Served != "actual-served" || v.Requested != "fake-1" || v.Seconds <= 0 || !v.Usage.Reported || v.Usage.Out != 4 {
+			// An in-memory transport can finish within one platform clock tick.
+			if v.Failed || v.Served != "actual-served" || v.Requested != "fake-1" || v.Seconds < 0 || !v.Usage.Reported || v.Usage.Out != 4 {
 				t.Fatalf("bad measurement: %+v", v)
 			}
 		})
