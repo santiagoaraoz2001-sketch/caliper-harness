@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
@@ -105,10 +106,80 @@ func (s *startupDisplay) line(state, label, message string) {
 	}
 }
 
+// parseYes reports whether a typed answer accepts a yes/no question.
+// Anything that is not an explicit yes — including just pressing Enter —
+// is a no, so downloads never start by accident.
+func parseYes(answer string) bool {
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "y", "yes":
+		return true
+	}
+	return false
+}
+
+func (s *startupDisplay) askYesNo(question string) bool {
+	fmt.Fprintf(os.Stderr, "  ? %s [y/N] ", question)
+	answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	return parseYes(answer)
+}
+
+// summarizeFailures names the first few broken files so the warning says
+// what is actually wrong without flooding the startup screen.
+func summarizeFailures(failures []bundle.Failure) string {
+	names := make([]string, 0, 3)
+	for i, failure := range failures {
+		if i == 3 {
+			break
+		}
+		names = append(names, failure.String())
+	}
+	summary := fmt.Sprintf("%d installed file(s) missing or changed: %s", len(failures), strings.Join(names, ", "))
+	if len(failures) > len(names) {
+		summary += fmt.Sprintf(" · and %d more", len(failures)-len(names))
+	}
+	return summary
+}
+
+// verifyInstall runs the install verification chain: every file recorded
+// in MANIFEST.sha256 is hashed, and when only downloadable dependencies
+// are broken the user is asked before anything is fetched.
+func (s *startupDisplay) verifyInstall(root string) bool {
+	s.begin("Install", "Verifying every installed file (SHA-256)")
+	_, failures, err := bundle.VerifyManifest(root)
+	if err != nil {
+		s.finish("error", err.Error())
+		return false
+	}
+	if len(failures) == 0 {
+		s.finish("ok", "Installation verified against MANIFEST.sha256")
+		return true
+	}
+	s.finish("warn", summarizeFailures(failures))
+	repairable, unrepairable := bundle.ClassifyFailures(failures)
+	if len(unrepairable) > 0 {
+		s.line("error", "Install", summarizeFailures(unrepairable)+" · these cannot be downloaded; replace the complete Caliper folder")
+		return false
+	}
+	if !s.askYesNo(fmt.Sprintf("Download the pinned dependencies and repair %d file(s) now?", len(repairable))) {
+		s.line("error", "Install", "Repair declined · the broken dependencies are required to launch")
+		return false
+	}
+	s.begin("Dependencies", "Downloading the pinned dependencies")
+	if err := bundle.Repair(root, failures, func(text string) { s.detail(text) }); err != nil {
+		s.finish("error", err.Error())
+		return false
+	}
+	s.finish("ok", "Dependencies downloaded · installation repaired and verified")
+	return true
+}
+
 func (s *startupDisplay) dependencies() bool {
 	root := bundle.Root()
 	if root != "" {
-		s.begin("Bundled runtimes", "Checking the private Mac runtime")
+		if !s.verifyInstall(root) {
+			return false
+		}
+		s.begin("Bundled runtimes", "Checking the private runtime")
 		if err := bundle.Check(root); err != nil {
 			s.finish("error", err.Error())
 			return false

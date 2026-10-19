@@ -1,5 +1,7 @@
 # Builder-only dependency acquisition into a new private development bundle.
-# Users receive the finished runtime; first launch never runs uv/pip.
+# Users receive the finished runtime; a healthy launch never runs uv/pip.
+# Only a startup verification failure, with an explicit yes from the user,
+# re-downloads these pinned dependencies (internal/bundle Repair).
 #Requires -Version 5.1
 param([Parameter(Mandatory = $true)][string]$App, [switch]$AllowDownloads)
 $ErrorActionPreference = 'Stop'

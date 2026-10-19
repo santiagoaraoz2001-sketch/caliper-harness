@@ -1,6 +1,8 @@
 #!/bin/bash
 # Builder-only dependency acquisition into a new private development bundle.
-# Users receive the finished runtime; first launch never runs uv/pip.
+# Users receive the finished runtime; a healthy launch never runs uv/pip.
+# Only a startup verification failure, with an explicit yes from the user,
+# re-downloads these pinned dependencies (internal/bundle Repair).
 set -euo pipefail
 [[ $(uname -s) == Darwin && $(uname -m) == arm64 ]] || { echo 'Mac arm64 builder required' >&2; exit 1; }
 [[ $# == 1 ]] || { echo 'usage: prepare-macos-runtime.sh APPLICATION_DIRECTORY' >&2; exit 2; }

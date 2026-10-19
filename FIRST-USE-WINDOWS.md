@@ -2,7 +2,7 @@
 
 This application folder is a development build. The managed builder requires a relocation import check before completion. No native Windows application or installer qualification was performed in the Mac review; native linking, DLL dependencies, terminal behavior and model operations remain unverified.
 
-Keep the folder intact: `caliper.exe`, any `*.dll` beside it, `bin\`, `runtime\`, `prompts.yaml`, `templates\`, `python\`, `notices\` and `MANIFEST.sha256` belong together. Verify the supplied files in PowerShell from that folder with `Get-Content .\MANIFEST.sha256 | ForEach-Object { $h, $p = $_ -split '  '; (Get-FileHash -Algorithm SHA256 $p).Hash.ToLower() -eq $h }`. Go and a C compiler are builder tools; they are not needed to run the supplied executable.
+Keep the folder intact: `caliper.exe`, any `*.dll` beside it, `bin\`, `runtime\`, `prompts.yaml`, `templates\`, `python\`, `notices\` and `MANIFEST.sha256` belong together. Verify the supplied files in PowerShell from that folder with `Get-Content .\MANIFEST.sha256 | ForEach-Object { $h, $p = $_ -split '  '; (Get-FileHash -Algorithm SHA256 $p).Hash.ToLower() -eq $h }`. Go and a C compiler are builder tools; they are not needed to run the supplied executable. In the managed bundle this verification is also automatic: every startup re-hashes all files against `MANIFEST.sha256`, and if only downloadable dependencies (the private Python runtime or bundled ripgrep) are missing or changed, Caliper warns, names them, and asks a yes/no question before downloading the pinned replacements and re-verifying. Answering no (or pressing Enter) refuses the launch; damage to anything else still requires replacing the complete folder.
 
 ## Install so `caliper` works in every terminal
 
