@@ -107,7 +107,7 @@ func TestInterfaceProgressRefusedCallGroundingAndSilence(t *testing.T) {
 			if direction.guidance && (!strings.Contains(guidance, `unsupported argument "more"`) || !strings.Contains(guidance, "\n{}\n") || strings.Contains(guidance, `invoke="EXECUTE"`)) {
 				t.Fatal("delivered nudge lacks the exact current refusal/call", guidance)
 			}
-			if direction.name == "reconsider" && (!strings.Contains(guidance, "Deliberate") || !strings.Contains(guidance, "different grounded method")) {
+			if direction.name == "reconsider" && (!strings.Contains(guidance, "specific missing fact") || !strings.Contains(guidance, "different grounded method")) {
 				t.Fatal("reconsider delivered another execution demand", guidance)
 			}
 			refused, unchangedThought := 0, false

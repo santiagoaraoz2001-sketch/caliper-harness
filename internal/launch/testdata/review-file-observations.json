@@ -1,0 +1,59 @@
+[
+  {
+    "role": "assistant",
+    "tool_calls": [
+      {
+        "function": {
+          "arguments": "{\"path\": \"/captured-workspace/test/game.test.js\", \"old\": \"assert.deepStrictEqual(game.getState().snake[0], [head[0], head[1] - 1]);\\n  });\\n\\n  test('pause stops the simulation and resume restarts it', () => {\", \"new\": \"assert.deepStrictEqual(game.getState().snake[0], [head[0], head[1] - 1]);\\n  });\\n\\n  test('setDirection ignores non-cardinal inputs without overwriting a queued valid direction', () => {\\n    const game = new SnakeGame(BOARD, BOARD);\\n    game.start();\\n    const head = game.getState().snake[0];\\n    game.setDirection(0, -1); // queue a valid direction: up\\n    assert.deepStrictEqual(game.nextDirection, [0, -1]);\\n    // Non-cardinal, non-finite, and non-unit inputs must be ignored.\\n    game.setDirection(0.5, 0.5);\\n    game.setDirection(NaN, 0);\\n    game.setDirection(Infinity, 0);\\n    game.setDirection(2, 0);\\n    assert.deepStrictEqual(game.nextDirection, [0, -1], 'queued valid direction must not be overwritten');\\n    game.step();\\n    const s = game.getState();\\n    assert.strictEqual(s.state, 'playing');\\n    assert.deepStrictEqual(s.snake[0], [head[0], head[1] - 1], 'snake must move up on the cardinal grid');\\n  });\\n\\n  test('pause stops the simulation and resume restarts it', () => {\"}",
+          "name": "edit"
+        },
+        "id": "50e22384-221c-45dc-8195-3208bce59f32",
+        "type": "function"
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "content": "tool result (truncated):\n\"test/game.test.js\" changed exact-span (246\u2192264 file lines) old_sha256=a66e456dbaced7cec925e37a798b5d2d2d7197180acced5f419721edac028db2 sha256=43d035ac93360e0fedb137e8621276745172427cd0f82916452fe86732ced552 replacement_final_LF=false file_final_LF=false\n- assert.deepStrictEqual(game.getState().snake[0], [head[0], head[1] - 1]);\n+ assert.deepStrictEqual(game.getState().snake[0], [head[0], head[1] - 1]);\n-   });\n+   });\n- \n+ \n-   test('pause stops the simulation and resume restarts it', () => {\n\\ No final LF\n+   test('setDirection ignores non-cardinal inputs without overwriting a queued valid direction', () => {\n+     const game = new SnakeGame(BOARD, BOARD);\n+     game.start();\n+     const head = game.getState().snake[0];\n+     game.setDirection(0, -1); // queue a valid direction: up\n+     assert.deepStrictEqual(game.nextDirection, [0, -1]);\n+     // Non-cardinal, non-finite, and non-unit inputs must be ignored.\n+     game.setDirection(0.5, 0.5);\n+     game.setDirection(NaN, 0);\n[preview omitted]",
+    "tool_call_id": "50e22384-221c-45dc-8195-3208bce59f32",
+    "name": "edit"
+  },
+  {
+    "role": "assistant",
+    "tool_calls": [
+      {
+        "function": {
+          "arguments": "{\"path\": \"/captured-workspace/game.js\", \"old\": \"if (Math.abs(dx) + Math.abs(dy) !== 1) return;\", \"new\": \"if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;\\n    if (!((Math.abs(dx) === 1 && dy === 0) || (dx === 0 && Math.abs(dy) === 1)) return;\", \"expected_hash\": \"14dc0ceff45ea4342ab611b249116585eb096e2b14b1875c1c18174e9b7ec860\"}",
+          "name": "edit"
+        },
+        "id": "48bd648e-be1c-4a61-9af9-7472b0f23ca3",
+        "type": "function"
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "content": "tool result:\n\"game.js\" changed exact-span (218\u2192219 file lines) old_sha256=14dc0ceff45ea4342ab611b249116585eb096e2b14b1875c1c18174e9b7ec860 sha256=351ec181031163bedcf135c687a0a4c874a5a90190f281fc94fff0768dc82d33 replacement_final_LF=false file_final_LF=false\n- if (Math.abs(dx) + Math.abs(dy) !== 1) return;\n\\ No final LF\n+ if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;\n+     if (!((Math.abs(dx) === 1 && dy === 0) || (dx === 0 && Math.abs(dy) === 1)) return;\n\\ No final LF\n",
+    "tool_call_id": "48bd648e-be1c-4a61-9af9-7472b0f23ca3",
+    "name": "edit"
+  },
+  {
+    "role": "assistant",
+    "tool_calls": [
+      {
+        "function": {
+          "arguments": "{\"new\": \"if (!((Math.abs(dx) === 1 && dy === 0) || (dx === 0 && Math.abs(dy) === 1))) return;\", \"old\": \"if (!((Math.abs(dx) === 1 && dy === 0) || (dx === 0 && Math.abs(dy) === 1)) return;\", \"path\": \"/captured-workspace/game.js\", \"expected_hash\": \"351ec181031163bedcf135c687a0a4c874a5a90190f281fc94fff0768dc82d33\"}",
+          "name": "edit"
+        },
+        "id": "b9decf65-5697-480d-87c2-831957ffcc34",
+        "type": "function"
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "content": "tool result:\n\"game.js\" changed exact-span (219\u2192219 file lines) old_sha256=351ec181031163bedcf135c687a0a4c874a5a90190f281fc94fff0768dc82d33 sha256=2d2b0ac1d954aa9e4e29a9050c78a0e0737203bd2784adf231186b3b09fd90fe replacement_final_LF=false file_final_LF=false\n- if (!((Math.abs(dx) === 1 && dy === 0) || (dx === 0 && Math.abs(dy) === 1)) return;\n\\ No final LF\n+ if (!((Math.abs(dx) === 1 && dy === 0) || (dx === 0 && Math.abs(dy) === 1))) return;\n\\ No final LF\n",
+    "tool_call_id": "b9decf65-5697-480d-87c2-831957ffcc34",
+    "name": "edit"
+  }
+]

@@ -69,8 +69,8 @@ func (r *Runner) begin(prompt string) {
 
 // refreshWorkflow owns one immutable view per request; snapshots omit its header.
 func (r *Runner) refreshWorkflow() error {
-	if r.WorkflowView != nil && r.Continuation.Workflow != nil {
-		reg, header, err := r.WorkflowView(r.Continuation.Workflow)
+	if scope := r.PlanningScope(); r.WorkflowView != nil && scope != nil {
+		reg, header, err := r.WorkflowView(scope)
 		if err != nil {
 			return err
 		}
@@ -85,7 +85,7 @@ func (r *Runner) refreshWorkflow() error {
 	}
 	// Current preparation state belongs at the conversation tail, not in the
 	// stable system prefix. Existing receipts usually already carry it.
-	if r.PlanningActive() && !r.assignedClaim && r.Registry != nil {
+	if r.PlanningActive() && (!r.assignedClaim || r.settlement != nil) && r.Registry != nil {
 		if def, ok := r.Registry.Lookup("plan"); ok {
 			question := def.Schema()
 			if question != r.preparationQuestion {

@@ -560,7 +560,8 @@ func verifyPass(ctx context.Context, d Deps, results []Result, indices []int, wi
 					"Sketch": brief.Sketch, "Tests": brief.Tests, "Acceptance": brief.Acceptance,
 					"Workspace": d.Workspace, "CheckCommand": brief.CheckCommand, "AcceptanceCommand": brief.AcceptanceCommand,
 					"ExecutionRequest": r.ExecutionRequest, "ExecutionEvidence": r.ExecutionEvidence,
-					"CheckReceipt": string(checkFacts),
+					"CheckReceipt":     string(checkFacts),
+					"FileObservations": reviewFileObservations(r.Transcript, d.Prompts),
 				})
 				if err != nil {
 					r.VerificationReason = err.Error()

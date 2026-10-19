@@ -132,9 +132,10 @@ func TestAssignedCommentNextWireAndReceiptFailure(t *testing.T) {
 					t.Fatalf("failed delivery leaked request: calls%d %v", mainCalls, err)
 				}
 			} else {
-				if err != nil || r.Outcome.Status != outcome.Completed {
+				if err != nil {
 					t.Fatalf("run %+v %v", r.Outcome, err)
 				}
+				assertQualifiedTaskWithOpenParents(t, r, s)
 				if mainCalls < 4 || strings.Count(nextTexts[2], text) != 1 {
 					t.Fatalf("next actual request lacks unique authored note: %v", nextTexts)
 				}

@@ -257,6 +257,10 @@ func (r *Runner) progressEvidence(ctx context.Context, w *watcher) (progressPack
 			}
 		}
 	}
+	if r.Reviewing {
+		packet.Checkpoint.Phase, packet.Checkpoint.PATStep = "REVIEW", "independent-review"
+		packet.Checkpoint.NextAction = r.Prompts.Text("progress.review")
+	}
 	packet.OriginalUserIntent, packet.CurrentUserRequest, packet.DeliveredUserComments, packet.DeliveredTaskComments = r.deliveredUserContext()
 	if w != nil {
 		for _, message := range w.recentReplies {
@@ -416,7 +420,7 @@ func (r *Runner) progressAdvice(ctx context.Context, w *watcher, packet progress
 	if advice != "" {
 		if packet.PreflightRefusal != "" && packet.CurrentToolSchema != "" {
 			advice += "\n" + r.Prompts.Format("continuation.progress.current_call", packet.PreflightRefusal, packet.CurrentToolSchema)
-		} else if r.PlanningActive() && packet.Checkpoint.NextAction != "" {
+		} else if (r.PlanningActive() || r.Reviewing) && packet.Checkpoint.NextAction != "" {
 			advice += r.Prompts.Text("continuation.progress.next_action_prefix") + packet.Checkpoint.NextAction
 		}
 	}

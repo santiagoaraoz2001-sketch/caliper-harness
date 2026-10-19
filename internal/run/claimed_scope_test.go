@@ -379,8 +379,18 @@ func TestClaimedTaskScopeNativeCoding(t *testing.T) {
 				}
 				return
 			}
-			if runErr != nil || r.Outcome.Status != outcome.Completed || !actual.Qualified() {
-				t.Fatalf("actual task=%+v outcome=%+v err=%v", actual, r.Outcome, runErr)
+			// This script validates the claimed Task but never answers the parent
+			// handoff questions. A qualified Task cannot complete its whole Plan.
+			parent, parentErr := plan.TaskApproach(s, actual.ID)
+			if parentErr != nil {
+				t.Fatal(parentErr)
+			}
+			owner, ownerErr := plan.ApproachPlan(s, parent.ID)
+			if ownerErr != nil {
+				t.Fatal(ownerErr)
+			}
+			if runErr != nil || r.Outcome.Status != outcome.Stopped || !actual.Qualified() || parent.State != plan.ApproachRunning || owner.State != plan.PlanActive {
+				t.Fatalf("task=%s qualified=%t approach=%s plan=%s outcome=%+v err=%v", actual.ID, actual.Qualified(), parent.State, owner.State, r.Outcome, runErr)
 			}
 			marker, _ := os.ReadFile("bash-marker")
 			checked, _ := os.ReadFile(checkMarker)

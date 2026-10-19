@@ -366,6 +366,7 @@ func runReviewer(ctx context.Context, d Deps, prompt string, window int, r *Resu
 	check := sub.CheckDefinition(bash)
 	sub.Registry.Register(check)
 	sub.Registry.Restrict([]string{"read", "read_outside", "find_outside", "grep", "find_file", "find_dir", "help", "bash", "check"})
+	sub.Reviewing = true
 	sub.TaskSystem = d.Prompts.Format("agent.reviewer_role", t.Title, t.Prompt, t.Target, t.Acceptance)
 	sub.FinalFeedback = func(text string) string {
 		switch reviewToken(text) {

@@ -103,7 +103,9 @@ texts:
   # Fields: none. Supplied by the owning Go caller.
   system.task.settled: >2-
      Use the settlement receipt. For rejected work, explicitly requeue this task, obtain Ready and
-    claim again before correcting it. For qualified work, select the next intended task.
+    claim again before correcting it. For qualified work, follow the current plan question: NEXT returns
+    to the Approach; NEXT_ARTICLE closes a satisfied Approach; COMPLETE closes the satisfied Plan.
+    A verified Task does not complete its parents. Preserve completed work and its receipts.
 # System role: host authority and protected system instructions in text mode.
   # Original use sites: internal/agent/context.go:117 (basePrompt).
   # Fields: none. Supplied by the owning Go caller.
@@ -222,10 +224,11 @@ texts:
   # Original use sites: templates/compaction.tmpl:1 (plan.Render).
   # Fields: .Range (legacy .Words still supplied for edited catalogs; the shipped text states no size).
   templates.compaction: >2-
+    Preserve necessary detail: completeness matters more than brevity.
     Write a complete factual continuation checkpoint: a single clean document that lets a fresh
-    reader resume this exact work without the original history. Write at length and in full detail;
-    completeness matters more than brevity, and a longer document that preserves every fact is
-    better than a short one that drops any. Organize it under these headings: Request, Constraints,
+    reader resume this exact work without the original history. You are the summarizer, not the
+    worker or reviewer. Do not answer the task or issue a new PASS/FAIL verdict. A pending review
+    stays pending even when its checks passed. Organize the checkpoint under Request, Constraints,
     Observed, Failed/pending, Current, Next. Under Request and Constraints, restate the original
     task, the user's intent, and every rule, limit and acceptance criterion still in force. Under
     Observed, record everything that was actually done and seen: files created or changed (with
@@ -255,11 +258,11 @@ texts:
   # Original use sites: templates/review.tmpl:1 (plan.Render).
   # Fields: .Title, .Workspace, .AcceptanceCommand, .CheckCommand, .ExecutionRequest, .TaskPrompt,
   # .TaskCurrent, .Target, .Sketch, .Tests, .Prompt, .Acceptance, .ExecutionEvidence, .CheckReceipt,
-  # .Current, .PlanGoal, .ApproachTitle. Supplied by the owning Go caller.
+  # .Current, .PlanGoal, .ApproachTitle, .FileObservations. Supplied by the owning Go caller.
   templates.review: |
     Review {{.Title}}.
-    plan outcome/rules/articles/proof: {{.PlanGoal}}
-    approach article/strategy: {{.ApproachTitle}}
+    parent Plan context (reference, not additional review tasks): {{.PlanGoal}}
+    Approach context: {{.ApproachTitle}}
     workspace: {{.Workspace}} (relative paths resolve here)
     acceptance_command: {{.AcceptanceCommand}} (behavior assertion, first)
     check_command: {{.CheckCommand}} (configured suite, last)
@@ -272,6 +275,10 @@ texts:
     Verify instructions: {{.Prompt}}
     acceptance: {{.Acceptance}}
     host worker execution evidence: {{.ExecutionEvidence}}
+    retained file-tool observations: {{.FileObservations}}
+    These are recorded results, including failures, not edit proposals. Previews may be partial,
+    earlier work may be retained, and compacted receipts may be absent. They do not inventory shell
+    changes. Use their paths, hashes and changed source to resolve scope; do not guess a baseline.
     current typed check facts: {{.CheckReceipt}}
     worker report (unverified): {{.Current}}
 
@@ -280,12 +287,15 @@ texts:
     Inspect the responsible runtime source. For a reported defect, inspect its distinguishing
     regression; for a new deliverable, inspect assertions of its requested behavior. Compare them with the
     request/target; authored current/sketch and suite exit0 alone do not establish coverage or correctness.
-    Perform Verify actions with the advertised inspection tools, then use check for the
-    acceptance-first/project-last episode. Reuse a current passed episode. Inspection that leaves project contents unchanged preserves it; changed or unobserved contents make it stale. Do not modify artifacts/checks/gates. Mark denied/unexecuted checks
+    Perform the frozen Verify actions. Reuse the current passed acceptance-first/project-last
+    episode; use check if it is missing or stale. Inspection that leaves project contents unchanged preserves it; changed or unobserved contents make it stale. Do not modify artifacts/checks/gates. Mark denied/unexecuted checks
     as missing evidence; do not treat superseded failures as current. Already-correct work needs proof,
     not mandatory edits. Verify is instructions, not a tool.
     For each finding, give the observed cause and consequence under its first applicable category:
     CHECK_FAILED, BEHAVIOR_MISMATCH, INTEGRATION_MISMATCH, SCOPE_MISMATCH, EVIDENCE_MISSING.
+    Review this Task against its frozen acceptance. Unfinished sibling work is not a defect in
+    this Task unless an observed change breaks it. If scope evidence is missing, inspect the
+    specific missing fact or report the uncertainty; do not repeatedly speculate about it.
     Do not count one cause twice or impose unsupported personal conventions.
     Use the applicable advertised tools and wait for settled receipts. Start the final with PASS for observed acceptance,
     FAIL for an evidenced unmet condition, or UNVERIFIED for insufficient proof. Include required
@@ -373,7 +383,10 @@ texts:
     Reject contradictions, invented success and missing facts needed for the next action. Authored
     claims and guidance are not execution facts. Digests/call IDs refer to omitted history; they do
     not prove its content, relevance or completeness. Accept a useful factual checkpoint of the
-    supplied evidence, rather than a transcript retelling.
+    supplied evidence, rather than a transcript retelling. A summary is not a new task answer or
+    review: a PASS/FAIL conclusion needs an existing completed review receipt. Passed checks or
+    unfinished reviewer reasoning cannot establish that receipt. Preserve pending review and
+    the next action instead of upgrading them to qualification.
   # Native typed-choice fallback instruction; Go judge owner should supply this explicitly.
   # Original use sites: python/decision/backends.py:88 (validate_judge).
   # Fields: none. Supplied by the owning Go caller.
@@ -407,8 +420,10 @@ texts:
     Choose between three directions from human requirements and actual current receipts.
     Continue productive work when it gains relevant information, answers or effects. Repair a
     rejected call only while PendingRepair identifies an unresolved call problem; use CurrentToolSchema,
-    not an earlier planning example. Reconsider an unsuccessful approach when repeated legal
-    attempts or explanations need further deliberation or a different method. Cadence and long
+    not an earlier planning example. Reconsider when legal attempts or explanations keep returning
+    to the same unresolved point without new evidence: inspect the specific missing fact or conclude
+    from established evidence, rather than repeat the argument. Follow Checkpoint role; reviewers
+    inspect their frozen Task and give a verdict, never implement sibling work. Cadence and long
     thinking alone are not failure. Draft answers save metadata. In selected PAT, finish all Approach Task briefs before readiness and claim;
     discovery stays available during drafting. Advice grants no approval, claim or verification; Continue sends no message.
 
@@ -698,8 +713,8 @@ texts:
   # Original use sites: internal/agent/agent.go:447 (Run).
   # Fields: none. Supplied by the owning Go caller.
   continuation.no_claim_final: |2-
-    Selected planned work is not yet qualified. Answer the current draft question or its advertised
-    START action. The host binds IDs, readiness, main-task claim and independent review; explicit launch
+    The selected Plan is not complete. Follow the current plan question, including parent closure
+    after verified Tasks. Do not redraft or re-execute completed work. The host binds IDs, readiness, main-task claim and independent review; explicit launch
     is the worker alternative. Keep existing lineage and receipts; missing evidence stays unknown.
 
   # Legacy catalog key retained for edited-file compatibility; current recovery does not append it.
@@ -763,7 +778,7 @@ texts:
   # User-context guidance after actual owning check/review qualification.
   # Original use sites: internal/agent/agent.go:438 (Run).
   # Fields: none. Supplied by the owning Go caller.
-  continuation.validated: " Report actual progress and follow the current question for the next task, or answer the user if work is complete."
+  continuation.validated: " Report actual progress, then follow the current plan question for the next task or parent closure. A verified Task does not complete its Approach or Plan. Give the final report after the Plan completion receipt."
   # Original use sites: internal/agent/style.go (styleSendback).
   continuation.style_sendback: "STYLE SEND-BACK: use the reported conflict below to reopen/requeue this task through its existing rework route, obtain readiness and a fresh claim, then adjust only the conflicting code. Rerun checks and request independent review. This advice does not reopen the settled claim or authorize edits."
 
@@ -2697,7 +2712,15 @@ texts:
   # Current settlement next action; no requeue or new claim is performed by this guidance.
   progress.rework: "Use the actual settlement; revise/requeue the same task, then obtain Ready and a fresh claim."
 
-  progress.complete: "Report the qualified result and follow the current question for the next task; this claim is closed."
+  progress.complete: "This Task is verified; follow the current plan question for the next task or parent closure. Task qualification does not complete the Plan."
+
+  # Independent review owner supplies this direction; no coding or sibling work.
+  progress.review: >2-
+    Review the frozen Task using source, retained edit observations and current check receipts.
+    Resolve a concrete missing fact with inspection; when the acceptance evidence is sufficient,
+    return PASS, FAIL or UNVERIFIED with the observed reason. Do not implement changes or assess
+    unfinished sibling tasks as separate work; report regressions caused by this Task.
+    Repeating an already-understood argument without new evidence does not advance this review.
 
   # Current-run claimed-task advisory; does not create or revoke authority. Fields: none.
   continuation.bookkeeping.claimed_authority_suffix: >2-
@@ -2733,7 +2756,7 @@ texts:
   help.plan: |2-
     ## help.plan
     While drafting, answer the current question and arguments shown above, then use its next receipt.
-    The host binds IDs. Draft answers save metadata; START claims execution and STATUS only reports state.
+    The host binds IDs. Draft answers save metadata; the advertised start action claims execution; STATUS only reports state.
     While executing a claimed task, use coding tools; a normal final answer with no tool call requests independent review. Inspect source as needed,
     finish all Task briefs for the current Approach, then request readiness and claim. A real Task claim
     binds its frozen brief, actual paired checks and independent review. For work already implemented,
@@ -2747,15 +2770,16 @@ texts:
 
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
   planning.goal: |2-
-    DRAFT PLAN: State outcome, preserved rules, delivery scopes and proof. articles: one scope per line,
-    not inspect/test/fix/review phases or automatically one per bug. An Approach serves one article;
-    group related requested Tasks there when they share a strategy. Honor requested grouping. Save Draft
-    metadata only; regression/repair/checks are task steps. Reuse an existing plan's actual focus.
+    DRAFT PLAN: State outcome, preserved rules, delivery scopes and proof. articles: one deliverable
+    per line. One Approach serves one article; its Tasks divide that deliverable. If the user asks for
+    one Approach and two fixes, use one combined article, then two Tasks under its Approach. Separate
+    articles need separate Approaches. Inspection, regression, repair and checks are Task steps.
+    Save draft intentions only and reuse an existing plan's actual focus.
 
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
   planning.approach: |2-
-    DRAFT APPROACH: State the strategy for the displayed Plan article, not other articles. Honor requested
-    grouping. Tasks deliver behaviors with implementation/assertions/verification; split independently
+    DRAFT APPROACH: State how to deliver the whole displayed Plan article and how its Tasks divide
+    that scope. Other articles get their own Approaches. Tasks include implementation/assertions/verification; split independently
     verifiable outcomes, resolve prerequisites before dependent work. This may activate a Draft parent
     and saves an approach; no coding starts. Owning goal/article:
 
@@ -2999,15 +3023,20 @@ texts:
   # Discovery cadence direction review; not the hard repeat/stall authorization gate.
   # Owner: internal/agent/loop.go. Fields: none; original request/replies/receipts supplied in context.
   decision.discovery.instructions: >2-
-    Use human requirements, Checkpoint, current owner facts and correlated calls/results.
-    Continue productive work when purposeful inspection, answers or effects advance the request.
-    Repair a rejected call only while PendingRepair identifies an unresolved call problem; use CurrentToolSchema
-    exactly. Earlier refusals and advice are historical when current receipts resolve them. Reconsider an unsuccessful approach when repeated legal attempts need more deliberation
-    or a different method. These are distinct directions. Pending PAT repairs do not erase progress.
-    Draft answers save metadata; selected PAT execution follows all Approach Task briefs, readiness and claim. Authored replies and
-    prior advice are claims; omitted thinking hashes/lengths are provenance. Long thinking alone is
-    not failure. A claimed task with current passed checks needs a normal final answer for independent review,
-    not another planning/start call. Continue sends no message; advice cannot stop/discard reasoning or grant authority.
+    Choose the next direction from the latest observed work, not its stated intentions.
+    Use Checkpoint for the active role and UnfinishedResponse for current deliberation;
+    previous receipts describe already completed actions. Continue when inspection, reasoning,
+    planning answers or effects add useful information. Long reasoning alone is not failure.
+    Reconsider when the model repeatedly asks or answers the same question without new evidence,
+    even if it says it will stop circling or run a check next. Direct it to inspect the specific
+    missing fact or conclude from established evidence; do not request more of the same deliberation.
+    Repair only an unresolved rejected call shown in PendingRepair or PreflightRefusal, using
+    CurrentToolSchema. Resolved refusals are history. A reviewer assesses only its frozen Task,
+    inspects missing evidence and gives a verdict; it does not implement sibling work. A worker
+    with current passed checks gives a final answer for independent review. PAT drafting saves
+    metadata; execution follows the Approach briefs, readiness and claim. Authored intentions and
+    advice are not effects. Continue sends no message; advice cannot stop or discard reasoning,
+    grant authority, or establish verification.
 
   # Choice statements, ordered by the owning Go direction review.
   decision.discovery.continue: "continue productive work"
@@ -3231,9 +3260,9 @@ texts:
 
   # Advisory progress wording; internal/agent progress touchpoints. Fields: none.
   continuation.discovery.reconsider: |2-
-    Reconsider the unsuccessful approach using actual failures and new evidence. Deliberate about
-    why the method did not advance the request, then choose a different grounded method or obtain
-    a genuinely missing fact. Keep the requested behavior, useful reasoning, approvals and actual
+    Change the approach that is not advancing the current role. If you are repeating the same
+    uncertainty, inspect the specific missing fact or conclude from evidence already established.
+    If a method actually failed, use that failure to choose a different grounded method. Keep the requested behavior, useful reasoning, approvals and actual
     check/review obligations. This advice grants no authority or success.
 
   # Advisory progress wording; internal/agent progress touchpoints. Fields: none.

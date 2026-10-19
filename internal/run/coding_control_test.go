@@ -159,9 +159,10 @@ func TestConfiguredCheckAuthAndDurableReceipt(t *testing.T) {
 				t.Fatal(e)
 			}
 			_, _, e = r.Run(context.Background(), "owned check")
-			if e != nil || r.Outcome.Status != outcome.Completed || !r.Continuation.Coding.Passed() || !approved || recorded < 2 {
+			if e != nil || r.Outcome.Status != outcome.Stopped || !r.Continuation.Coding.Passed() || !approved || recorded < 2 {
 				t.Fatalf("settlement %+v %+v approved%t records%d error%v", r.Outcome, r.Continuation.Coding, approved, recorded, e)
 			}
+			assertQualifiedTaskWithOpenParents(t, r, owned)
 			b, _ := os.ReadFile("marker")
 			if string(b) != "checked" {
 				t.Fatalf("actual check %q", b)
@@ -305,6 +306,10 @@ func TestCodingChecksRefuseAndInvalidateTruthfully(t *testing.T) {
 			hostExpected := scenario == "later bash" || scenario == "later launch" || scenario == "later workflow_resume" || scenario == "hidden workflow" || strings.Contains(scenario, "configured")
 			if hostExpected {
 				want = outcome.Completed
+				if view != "full" {
+					want = outcome.Stopped // Qualified Task; scripted model never closes parents.
+					assertQualifiedTaskWithOpenParents(t, r, owned)
+				}
 			}
 			if scenario == "later launch" || scenario == "later workflow_resume" {
 				b, err := os.ReadFile("child-marker")

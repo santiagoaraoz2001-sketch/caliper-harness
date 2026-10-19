@@ -90,9 +90,10 @@ func TestCompletionEvidencePublicRun(t *testing.T) {
 				}
 				return
 			}
-			if e != nil || runner.Outcome.Status != outcome.Completed || !runner.Continuation.Coding.Passed() {
+			if e != nil || !runner.Continuation.Coding.Passed() {
 				t.Fatalf("D14 outcome changed: %+v %v", runner.Outcome, e)
 			}
+			assertQualifiedTaskWithOpenParents(t, runner, owned)
 			t.Logf("%s actual outcome=%s evidence=%s", scenario, runner.Outcome.Status, runner.Evidence)
 			for _, want := range expected {
 				if !strings.Contains(runner.Evidence, want) {

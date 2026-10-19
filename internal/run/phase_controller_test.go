@@ -179,11 +179,12 @@ func TestMainPhaseCheckRemediation(t *testing.T) {
 			defer srv.Close()
 			cfg.Model.Server = srv.URL
 			sink := &codingSink{dir: filepath.Join(dir, "sessions")}
-			r, _, e := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, task.ID)}, Cfg: cfg, Store: s, Session: sink, SessionID: "phases", Server: srv.URL, Model: "fixture", Window: 32768, MaxSteps: 18}, "repair the marker and validate")
+			r, _, e := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, task.ID)}, Cfg: cfg, Store: s, Session: sink, SessionID: "phases", Server: srv.URL, Model: "fixture", Window: 262144, MaxSteps: len(calls)}, "repair the marker and validate")
 			if e != nil {
 				t.Fatal(e)
 			}
 			workspace = r.Workspace
+			// This scripted fixture checks role handoffs; compaction has separate fixtures.
 			if mode == "budget" {
 				r.MaxSteps = 4
 			}
@@ -210,9 +211,10 @@ func TestMainPhaseCheckRemediation(t *testing.T) {
 			if mode == "review" || mode == "next" {
 				wantReviews = 4
 			}
-			if e != nil || readErr != nil || r.Outcome.Status != outcome.Completed || !actual.Qualified() || actual.Attempts != 2 || mainCalls != len(calls) || reviewCalls != wantReviews {
+			if e != nil || readErr != nil || r.Outcome.Status != outcome.Stopped || !actual.Qualified() || actual.Attempts != 2 || mainCalls != len(calls) || reviewCalls != wantReviews {
 				t.Fatalf("handoff outcome=%+v task=%+v calls=%d/%d errors=%v/%v", r.Outcome, actual, mainCalls, reviewCalls, e, readErr)
 			}
+			assertQualifiedTaskWithOpenParents(t, r, s)
 			if mode == "next" {
 				other, e := plan.GetTask(s, nextTask.ID)
 				if e != nil || !other.Qualified() || other.Attempts != 1 || r.Continuation.Assignment.TaskID != other.ID {

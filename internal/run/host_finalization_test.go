@@ -60,9 +60,10 @@ func TestHostConfiguredCheckPublicFactoryPreservesModelClaim(t *testing.T) {
 	}
 	final, _, err := r.Run(context.Background(), "false model PASS is only a claim")
 	b, readErr := os.ReadFile("host-marker")
-	if err != nil || readErr != nil || string(b) != "host" || approvals != 1 || final != "PASS complete" || r.Outcome.Status != outcome.Completed || !r.Continuation.Coding.Passed() {
+	if err != nil || readErr != nil || string(b) != "host" || approvals != 1 || final != "PASS complete" || r.Outcome.Status != outcome.Stopped || !r.Continuation.Coding.Passed() {
 		t.Fatalf("actual host check marker=%q read=%v final=%q approvals=%d err=%v outcome=%+v", b, readErr, final, approvals, err, r.Outcome)
 	}
+	assertQualifiedTaskWithOpenParents(t, r, s)
 	events, err := session.Read(sink.dir, "host")
 	if err != nil {
 		t.Fatal(err)
@@ -187,6 +188,11 @@ func TestHostConfiguredCheckSettlementAndRevision(t *testing.T) {
 			}
 			final, _, runErr := r.Run(ctx, "ordinary final check control")
 			b, _ := os.ReadFile("marker")
+			qualified := want == outcome.Completed
+			if qualified {
+				want = outcome.Stopped // No scripted parent transitions.
+				assertQualifiedTaskWithOpenParents(t, r, owned)
+			}
 			if r.Outcome.Status != want || string(b) != markers || actualApprovals != approvals || final != "PASS complete" {
 				t.Fatalf("status=%+v want=%s marker=%q want=%q approvals=%d want=%d final=%q err=%v", r.Outcome, want, b, markers, actualApprovals, approvals, final, runErr)
 			}
@@ -209,7 +215,7 @@ func TestHostConfiguredCheckSettlementAndRevision(t *testing.T) {
 			if actualHost != host {
 				t.Fatalf("host announcements=%d want=%d", actualHost, host)
 			}
-			if want == outcome.Completed && !r.Continuation.Coding.Passed() {
+			if qualified && !r.Continuation.Coding.Passed() {
 				t.Fatal("missing current check")
 			}
 		})

@@ -182,8 +182,9 @@ func TestNormalFinalWithoutRepairDoesNotTrip(t *testing.T) {
 
 // Owning callbacks are controlled here; this checks handoff accounting, not D40 qualification.
 func TestNormalFinalNewQualifiedHandoffIsNotStall(t *testing.T) {
-	r, m, _ := finalRepairRunner([]string{"```tool\ntool: task_start\ntask: actual\n```", "qualified handoff", "final report"})
+	r, m, _ := finalRepairRunner([]string{"```tool\ntool: task_start\ntask: actual\n```", "qualified handoff", "final report without parent handoff", "still no parent handoff"})
 	r.LoopStall = 1
+	r.MaxSteps = 4
 	r.Workspace = "/workspace"
 	a := &session.Assignment{Store: "/owner", Workspace: "/workspace", PlanID: "plan", ApproachID: "approach", TaskID: "actual", Attempt: 1}
 	r.Assigned.Admit = func(context.Context) error { return nil }
@@ -191,15 +192,22 @@ func TestNormalFinalNewQualifiedHandoffIsNotStall(t *testing.T) {
 	r.Assigned.Settle = func(context.Context, outcome.Outcome, string, string, string, []llm.Message, *session.CodingState) (TaskSettlement, error) {
 		return TaskSettlement{TaskID: a.TaskID, Attempt: 1, Qualified: true}, nil
 	}
+	loops := 0
 	r.Judge = func(_ context.Context, q decision.Request) (decision.Verdict, error) {
 		if len(q.Options) == 3 {
-			t.Fatal("qualified owning handoff incorrectly judged a loop", q.Context)
+			loops++
+			// The new qualification at request2 resets the watcher. The next
+			// unchanged final may trigger advice because parent work is pending.
+			if len(m.seen) != 3 || !strings.Contains(q.Context, "1 consecutive attempts") {
+				t.Fatal("qualified handoff counted as a stall, or repeated final escaped supervision", q.Context)
+			}
+			return decision.Verdict{Option: q.Options[0], Confidence: .9}, nil
 		}
 		return decision.Verdict{Option: coherent, Confidence: .9}, nil
 	}
 	r.Registry.Register(r.TaskStartDefinition())
 	text, _, err := r.Run(t.Context(), "actual task")
-	if err != nil || text != "final report" || r.Outcome.Status != outcome.Completed || len(m.seen) != 3 {
-		t.Fatalf("%q %+v generations=%d %v", text, r.Outcome, len(m.seen), err)
+	if err != nil || text != "still no parent handoff" || r.Outcome.Status != outcome.Stopped || len(m.seen) != 4 || loops != 1 {
+		t.Fatalf("%q %+v generations=%d loops=%d %v", text, r.Outcome, len(m.seen), loops, err)
 	}
 }

@@ -189,9 +189,10 @@ func TestBehaviorPropagationCapturedRoles(t *testing.T) {
 				if len(notes) < 1 {
 					t.Fatal("truncation undisclosed")
 				}
-				if _, _, e = parent.Run(ctx, "PARENT_ROLE"); e != nil || parent.Outcome.ExitCode() != 0 {
+				if _, _, e = parent.Run(ctx, "PARENT_ROLE"); e != nil {
 					t.Fatalf("parent check/launch failed %+v %v", parent.Outcome, e)
 				}
+				assertQualifiedTaskWithOpenParents(t, parent, s)
 				c, _, e := session.Restore(sink.events, 32768)
 				if e != nil {
 					t.Fatal(e)

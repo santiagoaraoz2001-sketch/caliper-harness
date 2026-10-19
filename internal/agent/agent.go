@@ -126,6 +126,7 @@ type Runner struct {
 	// TaskSystem is supplied by the owning worker or reviewer role. It is a
 	// separate protected system entry, never restored as assignment authority.
 	TaskSystem string
+	Reviewing  bool // Set by the owning independent-review path, never inferred from prompt prose.
 	// FinalFeedback repairs a normal final in this same run; empty accepts it.
 	FinalFeedback func(string) string
 	// WorkspaceExcludes contains exact harness-owned state paths.
@@ -417,12 +418,13 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 				}
 			}
 		}
-		planningFinal := normalFinal && status == outcome.Completed && r.Assigned != nil && r.PlanningActive() && !r.assignedClaim
+		planningPending := r.PlanningActive() && (!r.assignedClaim || r.settlement != nil && r.settlement.Qualified)
+		planningFinal := normalFinal && status == outcome.Completed && r.Assigned != nil && planningPending
 		planningQualified := false
-		if status == outcome.Completed && r.PlanningActive() && !r.assignedClaim {
+		if status == outcome.Completed && planningPending {
 			if len(r.workflows) == 0 || r.PlanningCompletion == nil {
 				status, reason = outcome.Stopped, "planned work has no current qualified execution receipt"
-			} else if report, e := r.PlanningCompletion(r.Continuation.Workflow); e != nil {
+			} else if report, e := r.PlanningCompletion(r.PlanningScope()); e != nil {
 				status, reason = outcome.Failed, e.Error()
 			} else if report == nil || !report.Qualified || !r.workflows[report.Ref].Qualified {
 				status, reason = outcome.Stopped, "selected plan still has required unqualified work"
@@ -432,7 +434,7 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 		}
 		planningFinal = planningFinal && !planningQualified
 		validatedHandoff := false
-		if status == outcome.Completed && r.CodingRequired && (!r.PlanningActive() || r.assignedClaim) {
+		if status == outcome.Completed && r.CodingRequired && (!r.PlanningActive() || r.assignedClaim && (r.settlement == nil || !r.settlement.Qualified)) {
 			c := r.Continuation.Coding
 			if (!r.PlanningActive() || r.assignedClaim) && strings.TrimSpace(text) != "" && strings.TrimSpace(r.CheckCommand) != "" &&
 				r.Session != nil && sessErr == nil && r.codingErr == nil && ctx.Err() == nil &&
@@ -505,7 +507,7 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 				}
 			}
 		}
-		if normalFinal && err == nil && !planningQualified && sessErr == nil && r.codingErr == nil && ctx.Err() == nil && (status == outcome.Completed || r.Assigned != nil && r.PlanningActive() && !r.assignedClaim) {
+		if normalFinal && err == nil && !planningQualified && sessErr == nil && r.codingErr == nil && ctx.Err() == nil && (status == outcome.Completed || r.Assigned != nil && planningPending) {
 			repair, e := r.enforce(ctx, true, text, func(k, t string) error { log(k, t); return sessErr })
 			if e != nil {
 				status, reason, err = outcome.Failed, e.Error(), errors.Join(err, e)
@@ -533,6 +535,9 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 				add("evidence", "user", progress, false)
 				return text, transcript, repairFinal
 			}
+		}
+		if validatedHandoff && status == outcome.Completed && r.PlanningActive() && !r.withinStepBudget(usedSteps) {
+			status, reason = outcome.Stopped, "verified task; parent handoff pending; step budget exhausted"
 		}
 		if planningFinal && err == nil && sessErr == nil && r.codingErr == nil && ctx.Err() == nil {
 			if r.withinStepBudget(usedSteps) {
@@ -576,7 +581,7 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 			}
 		}
 		r.Outcome = outcome.Outcome{Status: status, Reason: reason}
-		if status == outcome.Completed {
+		if status == outcome.Completed || status == outcome.Stopped && r.settlement != nil && r.settlement.Qualified {
 			contract := "no declared chat check; correctness/test count unverified"
 			if r.CodingRequired {
 				contract = "declared check passed; coverage/test count unknown"
@@ -585,6 +590,9 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 				contract = "workflow verification follows owning check/review receipts"
 			}
 			r.Evidence = fmt.Sprintf("Model-reported response. Bash receipts: %d settled (%d failed), %d blocked, %d incomplete; %s.", settled, failed, blocked, incomplete, contract)
+			if status != outcome.Completed {
+				r.Evidence = "Run stopped: " + reason + ". Qualified Task evidence retained. " + r.Evidence
+			}
 			r.Evidence += r.completionEvidence()
 			fmt.Fprintln(out, r.Evidence)
 			log("evidence", r.Evidence)

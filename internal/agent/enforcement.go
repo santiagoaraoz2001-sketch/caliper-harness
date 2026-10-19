@@ -97,7 +97,12 @@ func (r *Runner) currentProgress(facts any) ProgressCheckpoint {
 		p.Phase, p.PATStep, p.SelectedID = "REWORK", "settled-"+s.State, s.TaskID
 		p.NextAction = r.Prompts.Text("progress.rework")
 		if s.Qualified {
-			p.Phase, p.NextAction = "COMPLETE", r.Prompts.Text("progress.complete")
+			p.Phase = "HANDOFF"
+			if f, ok := facts.(BookkeepingFacts); ok && f.Preparation != "" {
+				p.NextAction = f.Preparation
+			} else {
+				p.NextAction = r.Prompts.Text("progress.complete")
+			}
 		}
 	}
 	if p.Phase == "" {
@@ -172,6 +177,21 @@ var enforceOptions = []string{coherent, "request executor PAT update", "request 
 // PlanningActive derives the explicit workflow boundary; historical assignment is not a claim.
 func (r *Runner) PlanningActive() bool {
 	return r.Continuation.Workflow != nil || r.pendingFocus != nil || r.assignedClaim
+}
+
+// PlanningScope preserves explicit navigation. Without it, a current qualified
+// claim supplies only the view used for the next owning handoff; restored history
+// alone cannot select work, and no focus or completion receipt is manufactured.
+func (r *Runner) PlanningScope() *session.WorkflowScope {
+	if r.Continuation.Workflow != nil {
+		return r.Continuation.Workflow
+	}
+	a, s := r.Continuation.Assignment, r.settlement
+	if r.Assigned != nil && r.assignedClaim && a != nil && s != nil && s.Qualified &&
+		a.Store != "" && a.Workspace == r.Workspace && s.TaskID == a.TaskID && s.Attempt == a.Attempt {
+		return &session.WorkflowScope{Store: a.Store, Kind: "task", ID: a.TaskID}
+	}
+	return nil
 }
 
 // ClaimedTaskScope identifies this run's actual matching main claim.

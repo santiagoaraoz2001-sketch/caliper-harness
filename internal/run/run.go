@@ -523,8 +523,9 @@ func registerOwning(reg *tool.Registry, cfg config.Config, ld launch.Deps, judge
 					}
 				}
 			}
-			if r.Continuation.Workflow != nil && r.Continuation.Assignment == nil {
-				preparation, e = planningNextAction(ld, reg, r.Continuation.Workflow, cfg.Coding.CheckCommand)
+			a := r.Continuation.Assignment
+			if scope := r.PlanningScope(); scope != nil && (a == nil || !r.ClaimedTaskScope(&session.WorkflowScope{Store: a.Store, Kind: "task", ID: a.TaskID})) {
+				preparation, e = planningNextAction(ld, reg, scope, cfg.Coding.CheckCommand)
 				if e != nil {
 					return nil, e
 				}

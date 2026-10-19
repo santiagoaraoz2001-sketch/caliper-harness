@@ -46,7 +46,7 @@ func TestInterfaceSimplificationDistinctProgressChoices(t *testing.T) {
 	if repair := pc.Text("continuation.discovery.act"); !strings.Contains(repair, "actual refusal") || !strings.Contains(repair, "current schema") || strings.Contains(repair, "EXECUTE") {
 		t.Error("rejected-call advice is not grounded in its current refusal/schema", repair)
 	}
-	if reconsider := pc.Text("continuation.discovery.reconsider"); !strings.Contains(reconsider, "Deliberate") || !strings.Contains(reconsider, "different grounded method") || strings.Contains(reconsider, "carry out the next") {
+	if reconsider := pc.Text("continuation.discovery.reconsider"); !strings.Contains(reconsider, "specific missing fact") || !strings.Contains(reconsider, "different grounded method") || strings.Contains(reconsider, "carry out the next") {
 		t.Error("reconsider advice is still another execution demand", reconsider)
 	}
 }

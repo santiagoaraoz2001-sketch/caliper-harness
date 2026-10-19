@@ -165,14 +165,17 @@ func TestScopedHostConfiguredCheckUsesOwningDefinition(t *testing.T) {
 			final, _, runErr := r.Run(context.Background(), "claim needs actual scoped check")
 			marker, _ := os.ReadFile("marker")
 			cwd, _ := os.ReadFile("checked-cwd")
-			want := outcome.Completed
-			wantRequests := 3 // main, independent reviewer, then qualified-progress consumption
+			want := outcome.Stopped // Script ends at qualified Task with open parents.
+			wantRequests := 3       // main, independent reviewer, then qualified-progress consumption
 			if fail {
 				wantRequests = 2 // bounded remediation request; failed check never admits review
 				want = outcome.Failed
 			}
 			if string(marker) != "host" || strings.TrimSpace(string(cwd)) != r.Workspace || approvals != 1 || requests != wantRequests || final != "PASS complete" || r.Outcome.Status != want || r.Continuation.Coding == nil || r.Continuation.Coding.Receipt.ExitCode == nil {
 				t.Fatalf("scoped host marker=%q cwd=%q approvals=%d requests=%d final=%q outcome=%+v coding=%+v err=%v", marker, cwd, approvals, requests, final, r.Outcome, r.Continuation.Coding, runErr)
+			}
+			if !fail {
+				assertQualifiedTaskWithOpenParents(t, r, s)
 			}
 			wantExit := 0
 			if fail {

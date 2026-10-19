@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"specific-harness/internal/config"
 	"specific-harness/internal/memory"
-	"specific-harness/internal/outcome"
 	"specific-harness/internal/session"
 	"specific-harness/internal/store"
 	"strings"
@@ -89,14 +88,18 @@ func TestModelGraphQLPublicFlowAndApproval(t *testing.T) {
 				t.Fatal(e)
 			}
 			_, _, e = r.Run(context.Background(), "record authored note and check")
-			if e != nil || r.Outcome.Status != outcome.Completed || approvals != 3 {
+			if e != nil || approvals != 3 {
 				t.Fatalf("actual flow %+v approvals%d %v", r.Outcome, approvals, e)
 			}
-			if len(requests) != 6 {
+			assertQualifiedTaskWithOpenParents(t, r, s)
+			if len(requests) != 7 {
 				t.Fatalf("actual requests %d", len(requests))
 			}
 			if !bytes.Contains(requests[5], []byte("VALIDATED task=")) {
 				t.Fatal("qualified progress missing from final consuming request")
+			}
+			if !bytes.Contains(requests[6], []byte("The selected Plan is not complete")) {
+				t.Fatal("premature final omitted the pending parent handoff")
 			}
 			var next struct {
 				Messages []struct {

@@ -141,6 +141,30 @@ func assignedFixtureTask(t *testing.T, s *store.Store, command string, behavior 
 	return task
 }
 
+// Task-only scripts never publish parent closure. Keep qualification separate
+// from the whole selected workflow outcome, using current owning state.
+func assertQualifiedTaskWithOpenParents(t *testing.T, r *agent.Runner, s *store.Store) {
+	t.Helper()
+	if r.Continuation.Assignment == nil {
+		t.Fatal("qualified task assertion requires an actual assignment")
+	}
+	task, err := plan.GetTask(s, r.Continuation.Assignment.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approach, err := plan.TaskApproach(s, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := plan.ApproachPlan(s, approach.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !task.Qualified() || approach.State != plan.ApproachRunning || owner.State != plan.PlanActive || r.Outcome.Status != outcome.Stopped {
+		t.Fatalf("task=%s qualified=%t approach=%s plan=%s outcome=%+v", task.ID, task.Qualified(), approach.State, owner.State, r.Outcome)
+	}
+}
+
 type settlementEvidenceSink struct {
 	*codingSink
 	reject bool
@@ -202,7 +226,7 @@ func TestAssignedMainClaimsChecksReviewsAndRestores(t *testing.T) {
 				r.MaxSteps = 4
 			}
 			_, _, e = r.Run(context.Background(), "perform actual operation")
-			want := outcome.Completed
+			want := outcome.Stopped // No parent handoff calls are scripted.
 			if pendingFinal {
 				want = outcome.Stopped
 				if !strings.Contains(r.Outcome.Reason, "bookkeeping repair pending; step budget exhausted") {
@@ -223,6 +247,9 @@ func TestAssignedMainClaimsChecksReviewsAndRestores(t *testing.T) {
 			actual, e := plan.GetTask(s, task.ID)
 			if e != nil || !actual.Qualified() || actual.Attempts != 1 || actual.Result != "PASS complete" {
 				t.Fatalf("actual %+v %v", actual, e)
+			}
+			if want == outcome.Stopped {
+				assertQualifiedTaskWithOpenParents(t, r, s)
 			}
 			coding := r.Continuation.Coding
 			if coding.AcceptanceCommand != task.AcceptanceCommand || coding.Receipt == nil || coding.Receipt.Acceptance == nil || coding.Receipt.Acceptance.Command != task.AcceptanceCommand || coding.Receipt.Acceptance.ExitCode == nil || *coding.Receipt.Acceptance.ExitCode != 0 {
