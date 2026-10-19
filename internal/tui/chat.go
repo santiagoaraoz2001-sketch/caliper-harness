@@ -1210,10 +1210,7 @@ func (m *Model) compactChat() tea.Cmd {
 		}
 		defer s.Close()
 		r.Session, r.SessionID = graph.NewSessionLog(graph.New(s, version, dir)), id
-		next, sum, ran, err := r.Compact(ctx, c)
-		if err == nil && !ran {
-			err = fmt.Errorf("nothing eligible to compact")
-		}
+		next, sum, _, err := r.Compact(ctx, c)
 		return compactDoneMsg{ctx: ctx, origin: owner, continuation: next, summary: sum, in: r.UsedIn, out: r.UsedOut, unknown: r.UsageUnknown, runErr: err}
 	}
 }
@@ -1237,7 +1234,7 @@ func (m *Model) onCompactDone(msg compactDoneMsg) tea.Cmd {
 	if target == nil && msg.runErr == nil {
 		msg.runErr = fmt.Errorf("compaction origin/revision/config changed — context intact")
 	}
-	if msg.runErr == nil && !msg.persisted {
+	if msg.runErr == nil && !msg.persisted && msg.summary != "" {
 		encoded, err := msg.continuation.Encode()
 		if err != nil {
 			msg.runErr = err
@@ -1274,7 +1271,10 @@ func (m *Model) onCompactDone(msg compactDoneMsg) tea.Cmd {
 		}
 		c.compactCancel = nil
 	}
-	if target != nil && msg.runErr == nil {
+	if target != nil && msg.runErr == nil && msg.summary == "" {
+		m.alert("info", "context unchanged; no summary applied (see compaction judgment if available)")
+	}
+	if target != nil && msg.runErr == nil && msg.summary != "" {
 		target.Context = msg.continuation
 		target.History = nil
 		target.appendLine(lineSys, "history compacted; prompt size unknown until next measured request")

@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -9,52 +8,15 @@ import (
 	"specific-harness/internal/session"
 )
 
-// The percent trigger alone fires at 235k on a 262k window; the absolute
-// ceiling must fire at measured occupancy long before the model degrades.
-func TestShouldCompactAbsoluteCeiling(t *testing.T) {
-	c := Compaction{Trigger: 90, Absolute: 65536}
-	if !shouldCompact(70000, 262144, true, c) {
-		t.Fatal("70k measured tokens must fire the 65k absolute ceiling")
-	}
-	if shouldCompact(60000, 262144, true, c) {
-		t.Fatal("60k must waitbelow the absolute ceiling")
-	}
-	if shouldCompact(70000, 262144, true, Compaction{Trigger: 90}) {
-		t.Fatal("without Absolute, 70k stays under the 90% trigger")
-	}
-	if !shouldCompact(240000, 262144, true, Compaction{Trigger: 90}) {
-		t.Fatal("percent trigger still fires without Absolute")
-	}
-	if shouldCompact(70000, 262144, true, Compaction{Trigger: 0, Absolute: 65536}) {
-		t.Fatal("Trigger 0 disables automatic summaries entirely")
-	}
-}
-
-// Regression for the 2026-10-17 live stop: at 93,141 tokens on a 262,144
-// window the absolute ceiling fired but Keep=40% (104,858 tokens) retained
-// everything, so compaction found no summary material and the length path
-// stopped the task. The keep budget must shrink under the ceiling so
-// compaction always has material whenever the ceiling fires.
-func TestCompactRunsWhenAbsoluteFiresBelowKeepPercent(t *testing.T) {
-	c := Compaction{Trigger: 90, Keep: 40, Summary: 10, Step: 1, Max: 20, WordsPerToken: 0.5, Absolute: 65536}
-	if got := keepBudgetTokens(c, 262144, 0); got != 65536-26214 {
-		t.Fatalf("keep budget: got %v, want %v", got, 65536-26214)
-	}
-	if got := keepBudgetTokens(testCompaction(), 262144, 0); got != 40.0/100*262144 {
-		t.Fatalf("percent-only keep budget changed: %v", got)
-	}
-	model := &scriptModel{replies: []string{"factual summary"}}
-	r := Runner{Judge: acceptCompaction, Threshold: .7, Model: model, MaxTokens: 262144,
-		TemplatesDir: testTemplateDir(t), Compaction: c}
-	msgs := []llm.Message{{Role: "system", Content: "sys"}}
-	for i := 0; i < 10; i++ {
-		msgs = append(msgs, llm.Message{Role: "user", Content: strings.Repeat("old ", 2000)})
-		msgs = append(msgs, llm.Message{Role: "assistant", Content: strings.Repeat("done ", 2000)})
-	}
-	msgs = append(msgs, llm.Message{Role: "user", Content: "fresh"})
-	_, _, ran, err := testCompact(&r, context.Background(), msgs, 93141, 0)
-	if err != nil || !ran {
-		t.Fatalf("compaction at 93k with 65k ceiling: ran=%t err=%v", ran, err)
+// Large windows use the same 90-percent rule as smaller windows.
+func TestCompactionOnlyAtWindowPercentage(t *testing.T) {
+	for _, window := range []int{131072, 262144} {
+		for _, tokens := range []int{65536, 70000, int(float64(window) * .9), int(float64(window)*.9) + 1} {
+			want := float64(tokens) >= .9*float64(window)
+			if got := shouldCompact(tokens, window, true, Compaction{Trigger: 90}); got != want {
+				t.Fatalf("window=%d tokens=%d got=%v want=%v", window, tokens, got, want)
+			}
+		}
 	}
 }
 

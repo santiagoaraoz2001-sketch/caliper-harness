@@ -319,12 +319,12 @@ func TestManualCompactionSelectedJudgeOriginalSession(t *testing.T) {
 					<-r.Context().Done()
 					return
 				}
-				pick, confidence := 0, 1.0
+				pick, confidence := 0, .547
 				if disposition == "reject" {
 					pick = 1
 				}
 				if disposition == "uncertain" {
-					confidence = m.Cfg.Decision.RiskThreshold - .01
+					confidence = .5
 				}
 				json.NewEncoder(w).Encode(map[string]any{"pick": pick, "option": q.Options[pick], "confidence": confidence, "model": "component", "device": "cpu"})
 			}))

@@ -118,9 +118,9 @@ type ContextConfig struct {
 	// growing by SummaryStep up to SummaryMax. Targets guide concise model writing;
 	// admission requires a smaller complete continuation that fits the window.
 	Trigger float64 `yaml:"compaction_trigger"`
-	// CompactionAbsoluteTokens additionally fires compaction at this many
-	// measured/estimated tokens regardless of window percent; 0 disables.
-	CompactionAbsoluteTokens int     `yaml:"compaction_absolute_tokens"`
+	// CompactionAbsoluteTokens is a retired key accepted for old configuration files.
+	// It has no effect; automatic summaries use Trigger percent of Window only.
+	CompactionAbsoluteTokens int     `yaml:"compaction_absolute_tokens,omitempty"`
 	Keep                     float64 `yaml:"compaction_keep"`
 	Summary                  float64 `yaml:"compaction_summary"`
 	SummaryStep              float64 `yaml:"compaction_summary_step"`
@@ -466,16 +466,15 @@ func Defaults() Config {
 		UI:               UIConfig{MaxFileEntries: 500, MaxFileViewLines: 2000, MaxRunIDs: 20, MaxDecisionRows: 100, MaxAlerts: 50, MaxLegacyMessages: 100},
 		Serve:            ServeConfig{ProbeTimeoutSeconds: 3},
 		Context: ContextConfig{
-			Window:                   0,
-			Trigger:                  90,
-			CompactionAbsoluteTokens: 65536,
-			Keep:                     40,
-			Summary:                  10,
-			SummaryStep:              1,
-			SummaryMax:               20,
-			SummaryWordsPerToken:     0.75,
-			OutputPruneAfterTokens:   50000,
-			InflightOutputs:          0,
+			Window:                 0,
+			Trigger:                90,
+			Keep:                   40,
+			Summary:                10,
+			SummaryStep:            1,
+			SummaryMax:             20,
+			SummaryWordsPerToken:   0.75,
+			OutputPruneAfterTokens: 50000,
+			InflightOutputs:        0,
 		},
 		Schemas:   SchemaConfig{InflightCap: 0, KeepLatest: 3},
 		Retention: RetentionConfig{SessionMonths: 3},
@@ -569,6 +568,8 @@ func Load(path string) (cfg Config, usedFile bool, err error) {
 	if err := dec.Decode(&merged); err != nil {
 		return Config{}, false, fmt.Errorf("config file %s has a problem: %s", path, plainYAML(err))
 	}
+	// Retire the historical fixed trigger without breaking strict loading of old files.
+	merged.Context.CompactionAbsoluteTokens = 0
 	if err := merged.Validate(); err != nil {
 		return Config{}, false, fmt.Errorf("config file %s has a problem: %s", path, err.Error())
 	}

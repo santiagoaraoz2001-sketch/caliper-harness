@@ -3274,6 +3274,22 @@ texts:
     the field unless its signature declares input. Select needed returned fields only.
     {{.Template}}
 
+  # Evidence recall: usable page and reviewer-event recipes, loaded only on request.
+  help.schema.graphql.taskEvidence: |-
+    Start at offset:0; nextOffset is the next absolute record position. Omit attempt/kind unless their stored values are known. kind filters record types, NOT execution/reviewer/check phases; kind:"reviewer" does not select reviewer events.
+    The template returns record locations and types without copying a whole attempt log. Use findings already in context; no duplicate read is required. Select text only for a small raw record; use the nested event recipe below for large attempts.
+    For nested reviewer calls/results, use an actual returned group offset as record, phase:"reviewer", and offset:0 to start paging that record's events:
+    ```graphql
+    query { taskEvidence(taskId:"<actual task ID>",record:0,phase:"reviewer",offset:0,limit:1) {
+      historical nextOffset unsettledOffset
+      groups { reference offset callIds records { time kind source text message { content toolCallId name toolCalls { id name arguments } } } }
+    } }
+    ```
+    Replace record:0 with the actual record index. phase can also be "execution" or "check". Continue from nextOffset. Historical PASS never grants current qualification. For fields use help(topic="schema.graphql.EvidencePage"), EvidenceGroup or EvidenceRecord; do not guess field names.
+
+  help.schema.graphql.sessionEvidence: |-
+    Start at offset:0 and page from actual nextOffset. A page contains whole call/result groups. Use callId only with an actual recorded ID. Select records { message { content toolCallId name toolCalls { id name arguments } } } for native calls/results. text is the recorded raw event; it may be large. unsettledOffset identifies an unfinished group. Historical evidence is not current verification.
+
   # Compact reference framing/examples; executable names/arguments are generated from the owning registry/SDL.
   help.schema.graphql.appendKnowledge: |-
     Appends one immutable authored version. For a new key set expectedPreviousId to "". For an existing key, use the actual current head ID already in context as expectedPreviousId. Query knowledge(key:"<key>"){id body} only if the needed head/body is missing or may have changed externally. Never guess it. Optional taskId/filePath link real work or a project path; project and author are host-bound. Keep actual applied IDs and partial-effect receipts. Authored knowledge is not a check/review result.

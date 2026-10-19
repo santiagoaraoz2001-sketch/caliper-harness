@@ -38,3 +38,15 @@ func TestNewWiresRunner(t *testing.T) {
 		t.Error("runner fields not threaded")
 	}
 }
+
+func TestRetiredAbsoluteCompactionSettingIsIgnored(t *testing.T) {
+	cfg := config.Defaults()
+	base := compactionFromConfig(cfg)
+	cfg.Context.CompactionAbsoluteTokens = 65536 // Old saved YAML still loads, but cannot activate this trigger.
+	if got := compactionFromConfig(cfg); got != base {
+		t.Fatalf("retired setting changed compaction policy: %+v", got)
+	}
+	if base.Trigger != 90 {
+		t.Fatalf("unexpected context policy: %+v", cfg.Context)
+	}
+}

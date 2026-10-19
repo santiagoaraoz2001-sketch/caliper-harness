@@ -87,7 +87,7 @@ func TestFactualCompactionContradiction(t *testing.T) {
 		return decision.Verdict{Option: q.Options[1], Confidence: .95}, nil
 	}
 	next, _, ran, err := r.Compact(context.Background(), original)
-	if err == nil || ran || !judged || !reflect.DeepEqual(next, original) {
+	if err != nil || ran || !judged || !reflect.DeepEqual(next, original) {
 		t.Fatalf("contradiction replaced context: judged=%t ran=%t err=%v", judged, ran, err)
 	}
 	sink := r.Session.(*recordSink)
@@ -136,7 +136,7 @@ func TestFactualCompactionAdmissionAndFailures(t *testing.T) {
 				case "reject":
 					return decision.Verdict{Option: q.Options[1], Confidence: 1}, nil
 				case "uncertain":
-					return decision.Verdict{Option: q.Options[0], Confidence: .699}, nil
+					return decision.Verdict{Option: q.Options[0], Confidence: .5}, nil
 				}
 				return acceptCompaction(actual, q)
 			}
@@ -148,7 +148,8 @@ func TestFactualCompactionAdmissionAndFailures(t *testing.T) {
 			}
 			next, summary, ran, err := r.Compact(ctx, original)
 			if scenario != "accept" {
-				if err == nil || ran || !reflect.DeepEqual(next, original) {
+				wantErr := scenario != "reject" && scenario != "uncertain" && scenario != "unknown"
+				if (err != nil) != wantErr || ran || !reflect.DeepEqual(next, original) {
 					t.Fatalf("failed admission changed context: ran%t err%v", ran, err)
 				}
 				return
@@ -226,5 +227,53 @@ func TestFactualCompactionCompleteDecisionInputAndRecording(t *testing.T) {
 	}
 	if len(sink.kinds) < 2 || sink.kinds[0] != "reasoning" {
 		t.Error("original proposal not archived before judgment failure")
+	}
+}
+
+// Replay the failed native verdict independently of the authorization threshold.
+func TestCompactionOwnerConfidence(t *testing.T) {
+	for _, confidence := range []float64{.499, .5, .5001, .547} {
+		t.Run(fmt.Sprint(confidence), func(t *testing.T) {
+			original := passedCompactionFixture()
+			r := truthRunner(t, &scriptModel{replies: []string{"Recorded checks passed; review failure and task remain recorded."}}, 32768)
+			r.Threshold = .99
+			r.Judge = func(_ context.Context, q decision.Request) (decision.Verdict, error) {
+				return decision.Verdict{Option: q.Options[0], Confidence: confidence}, nil
+			}
+			next, _, ran, err := r.Compact(context.Background(), original)
+			if err != nil || ran != (confidence > .5) {
+				t.Fatalf("confidence=%v ran=%v err=%v", confidence, ran, err)
+			}
+			if !ran && !reflect.DeepEqual(next, original) {
+				t.Fatal("uncertain summary changed context")
+			}
+		})
+	}
+}
+
+func TestUncertainCompactionContinuesExecution(t *testing.T) {
+	model := &scriptModel{
+		replies: []string{echoBlock(strings.Repeat("x", 5000)), echoBlock("b"), "UNCERTAIN SUMMARY", "done"},
+		usages:  []llm.Usage{{In: 20, Reported: true}, {In: 1450, Reported: true}, {In: 20, Reported: true}, {In: 100, Reported: true}},
+	}
+	sink := &recordSink{}
+	r := compactRunner(model, sink, testTemplateDir(t))
+	r.Compaction.Keep = 5
+	r.Judge = func(_ context.Context, q decision.Request) (decision.Verdict, error) {
+		return decision.Verdict{Option: q.Options[0], Confidence: .5}, nil
+	}
+	final, _, err := r.Run(context.Background(), "go")
+	if err != nil || final != "done" || len(model.seen) != 4 {
+		t.Fatalf("did not continue after uncertain summary: %q %v calls=%d", final, err, len(model.seen))
+	}
+	for _, msg := range model.seen[3] {
+		if msg.Content == "UNCERTAIN SUMMARY" {
+			t.Fatal("unadmitted summary entered worker context")
+		}
+	}
+	for _, kind := range sink.kinds {
+		if kind == "compact" || kind == "stopped" {
+			t.Fatalf("unexpected %s", kind)
+		}
 	}
 }

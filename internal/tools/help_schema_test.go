@@ -6,13 +6,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vektah/gqlparser/v2"
 	"github.com/vektah/gqlparser/v2/ast"
 	"specific-harness/internal/config"
 	api "specific-harness/internal/graph"
 	"specific-harness/internal/graph/generated"
+	"specific-harness/internal/plan"
 	"specific-harness/internal/prompts"
+	"specific-harness/internal/session"
 	"specific-harness/internal/store"
 	"specific-harness/internal/tool"
 	graphTool "specific-harness/internal/tools/graph"
@@ -182,5 +185,82 @@ func TestHelpGraphQLSchemaTemplatesAndRecovery(t *testing.T) {
 	missing, err := h.Execute(context.Background(), tool.Args{"topic": "schema.graphql.appendKnowledge"})
 	if err != nil || !strings.Contains(missing.Text, "unavailable in the current tool view") || strings.Contains(missing.Text, "```json") {
 		t.Fatalf("unavailable graph gained executable template: %s %v", missing.Text, err)
+	}
+}
+
+func TestEvidenceHelpReturnsRecordsAndReviewerRecipe(t *testing.T) {
+	reg, cfg := catalogTools(t, prompts.Builtin())
+	h := helpDefinition(cfg, reg, prompts.Builtin())
+	for _, name := range []string{"taskEvidence", "sessionEvidence"} {
+		res, err := h.Execute(context.Background(), tool.Args{"topic": "schema.graphql." + name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		query := nativeHelpTemplate(t, res.Text).Arguments["query"].(string)
+		for _, field := range []string{"groups", "records", "nextOffset", "kind"} {
+			if !strings.Contains(query, field) {
+				t.Errorf("%s template lacks useful %s: %s", name, field, query)
+			}
+		}
+		if name == "taskEvidence" {
+			for _, cue := range []string{`phase:"reviewer"`, "record", "kind", "offset:0"} {
+				if !strings.Contains(res.Text, cue) {
+					t.Errorf("missing %s in %s", cue, res.Text)
+				}
+			}
+		}
+	}
+}
+
+func TestEvidenceHelpExecutesReviewerRead(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := plan.CreatePlanContext(plan.WithProject(t.Context(), root), s, "plan", "goal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := plan.CreateApproach(s, p.ID, "approach")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := plan.CreateTask(s, a.ID, "task", "prompt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, _ := json.Marshal([]any{map[string]any{"Kind": "review", "Attempt": 1, "Verification": "unverified", "Output": strings.Repeat("large recorded output", 20000), "ReviewerEvents": []session.Event{{Time: time.Now().UTC(), Kind: "role_violation", Text: "reviewer shell modified project contents"}}}})
+	if err := s.Write(`MATCH(t:Task) WHERE t.id=$id SET t.attempt_log=$log,t.attempts=1`, map[string]any{"id": task.ID, "log": string(records)}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Defaults()
+	d, err := graphTool.New(api.New(s, "test", t.TempDir()), cfg.Tools.GraphQL, root, "evidence-help", s.Identity())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := tool.NewRegistry()
+	reg.Register(d)
+	h := helpDefinition(cfg, reg, prompts.Builtin())
+	res, err := h.Execute(t.Context(), tool.Args{"topic": "schema.graphql.taskEvidence"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated := nativeHelpTemplate(t, res.Text).Arguments["query"].(string)
+	_, recipe, _ := strings.Cut(res.Text, "```graphql\n")
+	recipe, _, _ = strings.Cut(recipe, "```")
+	for index, query := range []string{strings.ReplaceAll(generated, "<taskId>", task.ID), strings.ReplaceAll(recipe, "<actual task ID>", task.ID)} {
+		want := `"kind":"review"`
+		if index == 1 {
+			want = "reviewer shell modified project contents"
+		}
+		result, err := d.Execute(t.Context(), tool.Args{"query": query})
+		if err != nil || result.Failed || !strings.Contains(result.Text, want) {
+			t.Fatalf("help failed to retrieve real reviewer failure: %s %v", result.Text, err)
+		}
 	}
 }

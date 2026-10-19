@@ -122,7 +122,11 @@ func helpGraphQLSchema(suffix string, d tool.Definition, pc *prompts.Catalog) (s
 	var args []string
 	for _, a := range field.Arguments {
 		if a.Type.NonNull && a.DefaultValue == nil {
-			args = append(args, a.Name+":"+graphInput(schema, a.Name, a.Type))
+			value := graphInput(schema, a.Name, a.Type)
+			if a.Name == "offset" {
+				value = "0"
+			}
+			args = append(args, a.Name+":"+value)
 		}
 	}
 	call := field.Name
@@ -130,7 +134,11 @@ func helpGraphQLSchema(suffix string, d tool.Definition, pc *prompts.Catalog) (s
 		call += "(" + strings.Join(args, ",") + ")"
 	}
 	if output := schema.Types[field.Type.Name()]; output.IsCompositeType() {
-		call += " { " + graphSelection(schema, output) + " }"
+		selection := graphSelection(schema, output)
+		if output.Name == "EvidencePage" {
+			selection = "historical nextOffset unsettledOffset groups { reference offset callIds records { kind source } }"
+		}
+		call += " { " + selection + " }"
 	}
 	text := pc.Format("help.schema.graphql.operation", graphSignature(field), (tool.Definition{Name: d.Name, Prompts: pc, Example: tool.Args{"query": operation + " { " + call + " }"}}).CallTemplate())
 	if pc.Has("help.schema.graphql." + name) {

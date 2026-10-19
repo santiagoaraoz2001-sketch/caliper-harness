@@ -161,7 +161,10 @@ See [Server and model connections](SERVER-MODELS.md) for details.
   judgments degrade to silence on advisory paths, never to invented success.
 - **Context management** — measured token calibration from the server's own
   usage reports, age-based pruning of consumed tool outputs, and
-  model-written compaction. The full retained context governs admission;
+  model-written compaction at 90% of the context window or on `/compact`.
+  A consistent summary needs decision confidence above 0.5; an uncertain or
+  rejected summary leaves context intact and execution continues. Old
+  `compaction_absolute_tokens` settings are ignored. The full retained context governs admission;
   estimates are disclosed, never silently trusted.
 
 ## Configuration

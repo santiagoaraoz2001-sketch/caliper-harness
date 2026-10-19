@@ -345,3 +345,14 @@ func TestWatchStartupCaps(t *testing.T) {
 		}
 	}
 }
+
+func TestLegacyCompactionTriggerRetired(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("context:\n  window: 131072\n  compaction_absolute_tokens: 65536\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, used, err := Load(path)
+	if err != nil || !used || cfg.Context.CompactionAbsoluteTokens != 0 || cfg.Context.Trigger != 90 {
+		t.Fatalf("old trigger remains active: %+v used=%t err=%v", cfg.Context, used, err)
+	}
+}

@@ -27,11 +27,6 @@ type Compaction struct {
 	Step          float64
 	Max           float64
 	WordsPerToken float64
-	// Absolute fires compaction when the larger of the calibrated estimate
-	// and the server-measured prompt reaches this many tokens, regardless
-	// of the window percent. Estimates under-read real occupancy, so the
-	// percent trigger alone fires too late on large windows.
-	Absolute int
 }
 
 var compactionRecordFailure = errors.New("compaction recording failed")
@@ -49,14 +44,10 @@ func (r *Runner) contextOccupancy(estimate int) int {
 
 // shouldCompact compares the supplied occupancy (larger of the calibrated
 // estimate and the server-measured prompt) with the YAML triggers: the
-// emergency window percent and, when set, an absolute token ceiling so a
-// large window cannot defer maintenance until the model degrades.
+// emergency window percent. Routine pruning does not use this trigger.
 func shouldCompact(lastPrompt, window int, have bool, c Compaction) bool {
 	if !have || window <= 0 || c.Trigger <= 0 {
 		return false
-	}
-	if c.Absolute > 0 && lastPrompt >= c.Absolute {
-		return true
 	}
 	return float64(lastPrompt) >= c.Trigger/100*float64(window)
 }
@@ -72,24 +63,6 @@ func summaryBudget(c Compaction, window, n int) int {
 		return b
 	}
 	return 1
-}
-
-// keepBudgetTokens is the verbatim-retention budget for one compaction:
-// Keep percent of the window, additionally capped so retained context plus
-// the summary target fit under the Absolute ceiling when one is configured.
-// Without the cap, an absolute trigger below the Keep budget would leave
-// the compactor nothing to summarize.
-func keepBudgetTokens(c Compaction, window, n int) float64 {
-	budget := c.Keep / 100 * float64(window)
-	if c.Absolute > 0 {
-		if capped := float64(c.Absolute - summaryBudget(c, window, n)); capped < budget {
-			budget = capped
-		}
-	}
-	if budget < 0 {
-		budget = 0
-	}
-	return budget
 }
 
 // keepStart returns the first kept index: the latest messages whose
@@ -166,7 +139,7 @@ func (r *Runner) Compact(ctx context.Context, c session.Continuation) (next sess
 			keep[i] = true
 		}
 	}
-	ks := keepStartBudget(c.Messages(), c.Estimate(), keepBudgetTokens(r.Compaction, r.MaxTokens, c.Compactions))
+	ks := keepStartBudget(c.Messages(), c.Estimate(), r.Compaction.Keep/100*float64(r.MaxTokens))
 	for i := 0; i < len(c.Entries); {
 		end := c.GroupEnd(i)
 		if i < ks && end > ks {
@@ -320,7 +293,7 @@ func (r *Runner) Compact(ctx context.Context, c session.Continuation) (next sess
 	if estimate >= c.Estimate() {
 		return c, "", false, fmt.Errorf("compaction summary does not reduce estimated retained context (%d tokens) — context intact", estimate)
 	}
-	if err := r.reviewCompaction(ctx, c, b.String(), reply); err != nil {
+	if accepted, err := r.reviewCompaction(ctx, c, b.String(), reply); err != nil || !accepted {
 		return c, "", false, err
 	}
 	out.Compactions++
@@ -329,9 +302,9 @@ func (r *Runner) Compact(ctx context.Context, c session.Continuation) (next sess
 }
 
 // reviewCompaction checks factual anchors only; omitted history is referenced, not judged.
-func (r *Runner) reviewCompaction(ctx context.Context, c session.Continuation, source, summary string) error {
+func (r *Runner) reviewCompaction(ctx context.Context, c session.Continuation, source, summary string) (bool, error) {
 	if r.Judge == nil {
-		return fmt.Errorf("compaction needs the selected decision judge — context intact")
+		return false, fmt.Errorf("compaction needs the selected decision judge — context intact")
 	}
 	anchors := []session.Entry{}
 	ids := []string{}
@@ -356,19 +329,19 @@ func (r *Runner) reviewCompaction(ctx context.Context, c session.Continuation, s
 		SessionID     string
 	}{summary, anchors, c.Coding, c.Assignment, c.Workflow, fmt.Sprintf("%x", sha256.Sum256([]byte(source))), len(source), ids, r.SessionID})
 	if err != nil {
-		return err
+		return false, err
 	}
 	const accept = "the summary is factually consistent with essential anchors"
 	req := decision.Request{Context: string(raw), Instructions: r.Prompts.Text("decision.compaction.instructions"), Options: []string{accept, "the summary contradicts, invents or omits essential facts"}}
 	v, err := r.Judge(ctx, req)
 	if err != nil {
-		return fmt.Errorf("compaction decision unavailable — context intact: %w", err)
+		return false, fmt.Errorf("compaction decision unavailable — context intact: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return false, err
 	}
-	resolution := "rejected"
-	if v.Option == accept && v.Confidence >= r.Threshold {
+	resolution := "context retained; summary not applied"
+	if v.Option == accept && v.Confidence > .5 {
 		resolution = "accepted"
 	}
 	var saved error
@@ -378,10 +351,7 @@ func (r *Runner) reviewCompaction(ctx context.Context, c session.Continuation, s
 		}
 	}, "compaction-facts", req, v, resolution, r.JudgmentContextChars)
 	if saved != nil {
-		return errors.Join(compactionRecordFailure, saved)
+		return false, errors.Join(compactionRecordFailure, saved)
 	}
-	if resolution != "accepted" {
-		return fmt.Errorf("compaction factual admission rejected or uncertain (confidence %.3f) — context intact", v.Confidence)
-	}
-	return ctx.Err()
+	return resolution == "accepted", ctx.Err()
 }

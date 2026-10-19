@@ -660,6 +660,7 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 		return sessErr
 	}
 	deferredBoundaryAdvice := ""
+	deferCompaction := false // A declined length-boundary summary must still yield a worker turn.
 	compactModel := func(candidate session.Continuation) (session.Continuation, string, bool, error) {
 		requestCtx, cancel := context.WithCancelCause(ctx)
 		if r.GenerationInterrupt != nil {
@@ -783,7 +784,7 @@ steps:
 				contextEvent(r.Continuation)
 			}
 		}
-		if shouldCompact(r.contextOccupancy(basis), r.MaxTokens, true, r.Compaction) {
+		if !deferCompaction && shouldCompact(r.contextOccupancy(basis), r.MaxTokens, true, r.Compaction) {
 			nt, sum, ran, err := compactModel(r.Continuation)
 			if err != nil {
 				if errors.Is(err, userCommentInterrupt) && ctx.Err() == nil {
@@ -810,6 +811,7 @@ steps:
 				fmt.Fprintln(out, note)
 			}
 		}
+		deferCompaction = false
 		if overBudget(basis, r.MaxTokens, true) {
 			msg := fmt.Sprintf("stopped: content estimate %d tokens reached budget %d (backend token occupancy unmeasured) — the task needs a bigger window or breaking down", basis, r.MaxTokens)
 			fmt.Fprintln(out, msg)
@@ -914,7 +916,7 @@ steps:
 						return finish(status, "unfinished-response context compaction: "+compactErr.Error(), "", compactErr)
 					}
 					if !ran {
-						// Nothing was eligible to summarize. That is maintenance
+						// Nothing was applied (ineligible or unapproved summary). That is maintenance
 						// information, not a dead end: unless the retained draft
 						// genuinely reaches the window, start a fresh response
 						// from it (deferred boundary advice delivers there).
@@ -922,6 +924,7 @@ steps:
 							return finish(outcome.Stopped, "unfinished response reached context cleanup threshold but no model-written compaction could be published; raw draft retained", "", nil)
 						}
 						log("note", "unfinished response retained as unverified history without compaction; starting a fresh response")
+						deferCompaction = true
 						step-- // Response handover grants no new execution step.
 						continue steps
 					}
