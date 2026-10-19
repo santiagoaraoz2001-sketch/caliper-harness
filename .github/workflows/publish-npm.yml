@@ -18,7 +18,9 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || (!github.event.release.draft && !github.event.release.prerelease)
     runs-on: ubuntu-24.04
     permissions:
-      contents: read
+      # GitHub requires push access to read unpublished drafts. This job only
+      # reads release metadata/assets; it never changes GitHub content.
+      contents: write
       id-token: write
     env:
       RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
@@ -26,6 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          persist-credentials: false
           # Drafts need not have a tag yet. Manual validation uses its selected
           # source commit; a published release always uses the exact tag.
           ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.sha }}

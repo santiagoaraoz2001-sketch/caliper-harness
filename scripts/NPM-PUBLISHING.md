@@ -6,6 +6,8 @@ The workflow runs the launcher and publication tests, packs the npm package and 
 
 For a manual dry run, select **Publish npm launcher → Run workflow**, choose the source branch/commit and enter the existing release tag. A draft need not have a Git tag yet: this mode validates the selected source commit against the draft's metadata. It performs the same read-only checks and packaging but never publishes or changes a release or dist-tag. A published-release event always builds from the exact release tag.
 
+The job requests `contents: write` because GitHub restricts reading unpublished drafts to identities with push access. Its GitHub API calls only read release metadata and assets; no step changes GitHub content. Checkout uses `persist-credentials: false`, so the workflow token is not retained in Git configuration. This permission is separate from npm OIDC publication.
+
 ## One-time npm setup
 
 The package must already exist before its trusted publisher can be configured. Enable two-factor authentication on the owning npm account. For the initial release, the maintainer must publish the checked package once using their own authenticated npm session, after the release and native-platform checks pass. Do not create a placeholder package. Then configure the package's trusted publisher with:
