@@ -1,19 +1,14 @@
 package tui
 
 import (
-	_ "embed"
 	"fmt"
 	"path/filepath"
 	"runtime"
 	"specific-harness/internal/config"
-	"strings"
 
 	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 )
-
-//go:embed manage_assisted.md
-var assistedSetupTemplate string
 
 func (m Model) helpBody() string {
 	if m.HelpText != "" {
@@ -37,7 +32,17 @@ func (m *Model) openAssistedSetup() {
 		m.alert("err", "cannot locate project settings: "+err.Error())
 		return
 	}
-	m.HelpText = strings.NewReplacer("{{OS}}", runtime.GOOS, "{{CONNECTIONS}}", path, "{{PROJECT}}", project).Replace(assistedSetupTemplate)
+	pc, err := m.Cfg.LoadPrompts()
+	if err != nil {
+		m.alert("err", "cannot load assisted setup prompt; check prompts.path: "+err.Error())
+		return
+	}
+	text, err := pc.Render("setup.assisted", map[string]any{"OS": runtime.GOOS, "Connections": path, "Project": project})
+	if err != nil {
+		m.alert("err", "cannot render assisted setup; add setup.assisted from the shipped prompts.yaml to your selected catalog: "+err.Error())
+		return
+	}
+	m.HelpText = text
 	m.HelpOpen, m.HelpScroll, m.HelpNotice = true, 0, ""
 }
 

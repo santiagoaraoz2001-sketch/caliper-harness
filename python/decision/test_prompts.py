@@ -32,6 +32,16 @@ class PromptControls(unittest.TestCase):
         self.assertEqual(Path(catalog.source), canonical.resolve())
         self.assertEqual(dict(catalog.texts), yaml.safe_load(canonical.read_text())["texts"])
 
+    def test_legacy_catalog_without_optional_setup_guide_remains_valid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.selected(directory)
+            data = yaml.safe_load(path.read_text())
+            del data['texts']['setup.assisted']
+            path.write_text(yaml.safe_dump(data), encoding='utf-8')
+            catalog = prompts.load(path)
+            self.assertEqual(catalog.text('decision.default.instructions'), 'Selected catalog default.')
+            self.assertNotIn('setup.assisted', catalog.texts)
+
     def test_manager_uses_one_selected_snapshot_for_probe_and_fallback(self):
         with tempfile.TemporaryDirectory() as directory:
             path = self.selected(directory)

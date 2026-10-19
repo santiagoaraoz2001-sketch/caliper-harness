@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"os"
@@ -8,7 +9,49 @@ import (
 	"specific-harness/internal/prompts"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
+
+func TestUpdatePreservesExplicitCustomizedCatalogWithoutOptionalAssistedSetupKey(t *testing.T) {
+	isolatedUser(t)
+	t.Chdir(t.TempDir())
+	var doc struct {
+		Texts map[string]string `yaml:"texts"`
+	}
+	if err := yaml.Unmarshal([]byte(prompts.Builtin().YAML()), &doc); err != nil {
+		t.Fatal(err)
+	}
+	delete(doc.Texts, "setup.assisted") // Customized catalog from before v0.1.5.
+	raw, err := yaml.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := t.TempDir()
+	oldPath := filepath.Join(old, "prompts.yaml")
+	next := filepath.Join(t.TempDir(), "prompts.yaml")
+	if err := os.WriteFile(oldPath, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(next, []byte(prompts.Builtin().YAML()), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Defaults()
+	cfg.Prompts.Path = oldPath
+	if _, err := cfg.LoadPrompts(); err != nil {
+		t.Fatal("older catalog prevented ordinary coding", err)
+	}
+	if err := PreserveCustomPrompts(DefaultFile(), cfg, old, next); err != nil {
+		t.Fatal("optional UI guide blocked compatible update", err)
+	}
+	if after, err := os.ReadFile(oldPath); err != nil || !bytes.Equal(after, raw) {
+		t.Fatal("original customized catalog changed", err)
+	}
+	connections, _ := ConnectionsPath()
+	if _, err := os.Stat(connections); !os.IsNotExist(err) {
+		t.Fatal("failed compatibility check changed connections", err)
+	}
+}
 
 func TestUpdatePreservesCustomShippedPromptsOutsideVersions(t *testing.T) {
 	isolatedUser(t)

@@ -208,7 +208,7 @@ def main():
         term.field('zsetup-draft')  # Start with a key that is not a Manage action.
         draft = term.send('g')
         checks['assisted_preserves_composer'] = 'zsetup-draftg' in plain(draft) and 'LLM-assisted setup' not in plain(draft)
-        term.field('')
+        term.send('\x7f' * len('zsetup-draftg'))
         term.expect('/manage assisted\r', 'LLM-assisted setup', 'Help me connect')
         checks['assisted_slash_command'] = True
         term.expect('\x1b', 'Models & Servers', 'Add model')

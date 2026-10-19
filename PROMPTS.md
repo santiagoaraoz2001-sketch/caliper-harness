@@ -18,6 +18,15 @@ allowed named fields. For example, edit `system.native.orientation` to change
 the coding role or `help.read` for model-facing read help. `help()` pulls the guide
 into model context; `help(topic="read")` pulls only the relevant section.
 
+`setup.assisted` is the prompt copied from `/manage assisted` for a user's preferred
+external LLM. Its `.OS`, `.Connections` and `.Project` fields are filled with the
+current computer and configuration paths. It is loaded through the same selected
+catalog and is not included in ordinary coding requests. This UI-only key is optional
+for older customized catalogs; ordinary coding and updates keep working unchanged.
+To use assisted setup with such a catalog, copy this key from the shipped YAML while
+retaining your edits. Assisted setup names the missing key instead of substituting
+instructions from another catalog.
+
 `help(topic="reference")` opens the small topical index; request a document such
 as `reference.pat` for lifecycle guidance. `help.reference.<topic>` in this same
 YAML is its editable source. Startup versions changed documents in captured
@@ -28,7 +37,8 @@ independent of executable tool scope; tool help labels actual availability and
 shows a current schema only when available. These references are separate from
 `plan`'s current question-led authoring workflow and grant no execution authority.
 
-Keep every key and each nonempty string value. Quote standalone yes/no/on/off
+Keep every inference key and each nonempty string value; only the UI-only
+`setup.assisted` guide may be absent from an older catalog. Quote standalone yes/no/on/off
 values (or use a literal block) to avoid YAML-version ambiguity. Named template fields such as `{{.TaskID}}`
 are supplied as actual data by Go; their allowed names are listed in comments.
 Reordering or repeating an existing field is supported. Interpolation supports

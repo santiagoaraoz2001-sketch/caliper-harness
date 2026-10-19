@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"specific-harness/internal/config"
+	"specific-harness/internal/prompts"
 	"strings"
 	"testing"
 
@@ -117,5 +118,67 @@ func TestAssistedSetupUsesAbsoluteCurrentProjectPath(t *testing.T) {
 	abs, err := filepath.Abs(m.CfgPath)
 	if err != nil || !strings.Contains(m.HelpText, abs) {
 		t.Fatal("relative project path left ambiguous in copied prompt")
+	}
+}
+
+func TestAssistedSetupUsesSelectedEditableCatalogAndRefusesBrokenSource(t *testing.T) {
+	m := setupFixture(t, 80, 24)
+	var doc struct {
+		Texts map[string]string `yaml:"texts"`
+	}
+	if err := yaml.Unmarshal([]byte(prompts.Builtin().YAML()), &doc); err != nil {
+		t.Fatal(err)
+	}
+	doc.Texts["setup.assisted"] = "MY SETUP INSTRUCTIONS {{.OS}} :: {{.Connections}} :: {{.Project}}"
+	raw, err := yaml.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "custom-prompts.yaml")
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	m.Cfg.Prompts.Path = path
+	m.openAssistedSetup()
+	var copied string
+	copyAssistedPrompt(m.HelpText, func(text string) error { copied = text; return nil })()
+	connections, _ := config.ConnectionsPath()
+	if !strings.HasPrefix(copied, "MY SETUP INSTRUCTIONS ") || !strings.Contains(copied, connections) || strings.Contains(copied, "{{") {
+		t.Fatalf("selected catalog edit did not reach copied prompt: %q", copied)
+	}
+	if err := os.WriteFile(path, []byte("texts: {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m.HelpOpen, m.HelpText = false, ""
+	m.openAssistedSetup()
+	if m.HelpOpen || m.HelpText != "" || len(m.Alerts) == 0 || !strings.Contains(m.Alerts[len(m.Alerts)-1].Text, "check prompts.path") {
+		t.Fatal("broken selected catalog silently used builtin setup instructions")
+	}
+}
+
+func TestAssistedSetupLegacyCatalogDoesNotFallBackOrBlockCoding(t *testing.T) {
+	m := setupFixture(t, 80, 24)
+	var doc struct {
+		Texts map[string]string `yaml:"texts"`
+	}
+	if err := yaml.Unmarshal([]byte(prompts.Builtin().YAML()), &doc); err != nil {
+		t.Fatal(err)
+	}
+	delete(doc.Texts, "setup.assisted")
+	raw, err := yaml.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "legacy-prompts.yaml")
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	m.Cfg.Prompts.Path = path
+	if _, err := m.Cfg.LoadPrompts(); err != nil {
+		t.Fatal("optional setup guide blocked ordinary prompts", err)
+	}
+	m.openAssistedSetup()
+	if m.HelpOpen || m.HelpText != "" || len(m.Alerts) == 0 || !strings.Contains(m.Alerts[len(m.Alerts)-1].Text, "add setup.assisted from the shipped prompts.yaml") {
+		t.Fatal("missing guide fell back or lacked migration instructions")
 	}
 }
