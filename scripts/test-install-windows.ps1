@@ -49,6 +49,8 @@ try {
     & (Join-Path $source 'install-windows.ps1')
     Assert ((Get-ChildItem (Join-Path $target 'applications') -Directory).Count -eq 2) 'reinstall replaced an existing application copy'
     Assert ([IO.File]::ReadAllText($launcher) -ne $firstLauncher) 'launcher did not select new immutable copy'
+    $backups = @(Get-ChildItem -LiteralPath (Join-Path $target 'commands') -Filter '.caliper-previous-*.cmd' -Force)
+    Assert ($backups.Count -eq 1 -and [IO.File]::ReadAllText($backups[0].FullName) -eq $firstLauncher) 'atomic replacement did not preserve the prior launcher'
     Assert (($env:PATH -split ';')[0] -eq (Join-Path $target 'commands')) 'command directory is not first on PATH'
     Assert ((Get-Command caliper).Source -eq $launcher) 'legacy executable shadows new launcher'
     foreach ($name in $sentinels) {

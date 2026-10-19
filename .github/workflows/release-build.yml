@@ -6,6 +6,15 @@ on:
         description: Immutable release version
         required: true
         default: '0.1.2'
+      platform:
+        description: Platform to build and validate
+        type: choice
+        required: false
+        default: all
+        options:
+          - all
+          - windows-amd64
+          - linux-amd64
 permissions:
   contents: read
 jobs:
@@ -13,11 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: windows-2022
-            platform: windows-amd64
-          - runner: ubuntu-24.04
-            platform: linux-amd64
+        include: ${{ fromJSON(inputs.platform == 'windows-amd64' && '[{"runner":"windows-2022","platform":"windows-amd64"}]' || inputs.platform == 'linux-amd64' && '[{"runner":"ubuntu-24.04","platform":"linux-amd64"}]' || '[{"runner":"windows-2022","platform":"windows-amd64"},{"runner":"ubuntu-24.04","platform":"linux-amd64"}]') }}
     runs-on: ${{ matrix.runner }}
     env:
       RELEASE_VERSION: ${{ inputs.version }}

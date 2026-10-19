@@ -61,7 +61,10 @@ $temporaryLauncher = Join-Path $commands ('.caliper-install-' + [guid]::NewGuid(
 [IO.File]::WriteAllText($temporaryLauncher, $shim, (New-Object System.Text.ASCIIEncoding))
 try {
     if (Test-Path -LiteralPath $launcher) {
-        [IO.File]::Replace($temporaryLauncher, $launcher, $null)
+        # PowerShell converts $null to an empty string for this .NET overload.
+        # Use a real backup path, retaining the previous launcher for recovery.
+        $previousLauncher = Join-Path $commands ('.caliper-previous-' + [guid]::NewGuid().ToString('N') + '.cmd')
+        [IO.File]::Replace($temporaryLauncher, $launcher, $previousLauncher)
     } else {
         [IO.File]::Move($temporaryLauncher, $launcher)
     }
