@@ -97,7 +97,7 @@ func (r *Runner) keepCompleted(reply llm.Reply, log func(string, string) error) 
 }
 
 // keepThinking retains original nonexecuted fields, never assistant text.
-func (r *Runner) keepThinking(reply llm.Reply, reason string, log func(string, string) error) (string, error) {
+func (r *Runner) keepThinking(reply llm.Reply, log func(string, string) error) error {
 	entry := session.Entry{Message: reply.Message.Clone(), Kind: "reply"}
 	raw, _ := json.Marshal(entry)
 	if err := nativeArchiveHeader(struct {
@@ -105,19 +105,18 @@ func (r *Runner) keepThinking(reply llm.Reply, reason string, log func(string, s
 		Usage  llm.Usage
 		Bytes  int
 	}{reply.Served, reply.Usage, len(raw)}, "thinking", log); err != nil {
-		return "", err
+		return err
 	}
 	candidate := r.Continuation.Clone()
 	candidate.Entries = append(candidate.Entries, entry)
-	candidate.Add("failure", "user", "Harness outcome: "+reason, false)
 	if err := candidate.Snapshot().Validate(); err != nil {
-		return "", err
+		return err
 	}
 	if err := log("native_reply", string(raw)); err != nil {
-		return "", err
+		return err
 	}
 	r.Continuation.Entries = append(r.Continuation.Entries, entry)
-	return "", nil
+	return nil
 }
 
 // keepPartial archives a refused native response without making it replayable.

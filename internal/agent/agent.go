@@ -1052,16 +1052,15 @@ steps:
 		}
 		if native.ThinkingOnly && native.FinishReason == "stop" && strings.TrimSpace(reply) == "" && len(native.Message.ToolCalls) == 0 &&
 			(native.Message.Thinking != "" || native.Message.Reasoning != "" || native.Message.ReasoningContent != "") {
-			thinkingStop = true
-			reason := "model completed thinking only; no answer or function call; no tool ran from this reply; explicit resume required"
-			note, keepErr := r.keepThinking(native, reason, func(kind, text string) error { log(kind, text); return sessErr })
-			if keepErr != nil {
+			if keepErr := r.keepThinking(native, func(kind, text string) error { log(kind, text); return sessErr }); keepErr != nil {
 				return finish(outcome.Failed, keepErr.Error(), "", keepErr)
 			}
-			reason += note
+			log("note", "model completed thinking only; continuing from retained context")
+			if sessErr != nil {
+				return finish(outcome.Failed, sessErr.Error(), "", sessErr)
+			}
 			transcript = r.Continuation.Messages()
-			fmt.Fprintln(out, reason)
-			return finish(outcome.Stopped, reason, reason, nil)
+			continue
 		}
 		if len(native.Message.ToolCalls) > 0 {
 			if watch != nil {

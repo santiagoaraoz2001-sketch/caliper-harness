@@ -26,6 +26,11 @@ import (
 //go:embed testdata/thinking-227.ndjson
 var thinking227 []byte
 
+// Exact API output from the captured Qwen parser-loss replay; SHA256 547fceb3071ac4b5bcf43b10d03ed0f8e7ccd9b3ca7238c7dc6de15a5a63798c.
+//
+//go:embed testdata/thinking-qwen-empty-stop.ndjson
+var thinkingQwenEmpty []byte
+
 var thinkingRecordError = errors.New("controlled thinking record failure")
 
 type thinkingLog struct{ dir, fail string }
@@ -76,17 +81,22 @@ func thinkingRunner(t *testing.T, raw []byte, sink agent.SessionLog) (*agent.Run
 	return r, &latest, &calls
 }
 
-func TestThinkingStopCaptured227AndExplicitResume(t *testing.T) {
+func TestThinkingContinuesCaptured227WithoutAddedPrompt(t *testing.T) {
+	assertThinkingContinues(t, thinking227, 5347, 678)
+}
+func TestThinkingContinuesCapturedQwenWithoutAddedPrompt(t *testing.T) {
+	assertThinkingContinues(t, thinkingQwenEmpty, 12033, 4789)
+}
+func assertThinkingContinues(t *testing.T, raw []byte, input, output int) {
+	t.Helper()
 	dir := t.TempDir()
-	r, latest, calls := thinkingRunner(t, thinking227, thinkingLog{dir: dir})
-	visible := ""
-	r.OnToken = func(s string) { visible += s }
+	r, latest, calls := thinkingRunner(t, raw, thinkingLog{dir: dir})
 	_, _, err := r.Run(context.Background(), "inspect the project")
-	if err != nil || r.Outcome.Status != outcome.Stopped || r.Outcome.ExitCode() != 1 || *calls != 1 || visible != "" || r.UsedIn != 5347 || r.UsedOut != 678 || r.UsageUnknown {
-		t.Fatalf("captured completed thinking disposition: %+v %v calls=%d usage=%d/%d", r.Outcome, err, *calls, r.UsedIn, r.UsedOut)
+	if err != nil || *calls != 2 || r.Outcome.Status != outcome.Completed || r.UsedIn != input || r.UsedOut != output {
+		t.Fatalf("%+v %v calls=%d", r.Outcome, err, *calls)
 	}
 	var thought strings.Builder
-	dec := json.NewDecoder(bytes.NewReader(thinking227))
+	dec := json.NewDecoder(bytes.NewReader(raw))
 	for dec.More() {
 		var row struct{ Message struct{ Thinking string } }
 		if err := dec.Decode(&row); err != nil {
@@ -94,41 +104,34 @@ func TestThinkingStopCaptured227AndExplicitResume(t *testing.T) {
 		}
 		thought.WriteString(row.Message.Thinking)
 	}
+	found := false
+	users := 0
+	for _, m := range *latest {
+		if m.Role == "user" {
+			users++
+			if m.Content != "inspect the project" {
+				t.Fatalf("injected prompt %q", m.Content)
+			}
+		}
+		found = found || m.Thinking == thought.String()
+	}
+	if !found || users != 1 {
+		t.Fatalf("lost thinking or added prompt: %+v", *latest)
+	}
 	events, err := session.Read(dir, "thinking")
 	if err != nil {
 		t.Fatal(err)
 	}
-	continuation, _, err := session.Restore(events, 32768)
+	restored, _, err := session.Restore(events, 32768)
 	if err != nil {
 		t.Fatal(err)
 	}
-	found, header := false, false
-	for _, e := range events {
-		if e.Kind == "reasoning" && strings.Contains(e.Text, `"Served":"qwen3:8b"`) && strings.Contains(e.Text, `"In":5347`) {
-			header = true
-		}
-	}
-	for _, e := range continuation.Entries {
-		if e.Message.Thinking == thought.String() {
-			found = e.Kind == "reply" && e.Message.Content == "" && len(e.Message.ToolCalls) == 0
-		}
-	}
-	if !found || !header {
-		t.Fatal("original thinking/identity/per-turn usage not preserved")
-	}
-	r.Continuation = continuation
-	r.CodingRequired, r.Workspace, r.CheckCommand = true, t.TempDir(), "true"
-	r.MaxSteps = 1 // Explicit resume consumes its step; D18 has no remaining host-check admission.
-	_, _, err = r.Run(context.Background(), "resume explicitly")
-	if err != nil || *calls != 2 || r.Outcome.Status != outcome.Stopped || r.Continuation.Coding.Passed() || r.Continuation.Coding.Closed {
-		t.Fatalf("resume inferred check or did not run: %+v %v calls=%d", r.Outcome, err, *calls)
-	}
 	found = false
-	for _, msg := range *latest {
-		found = found || msg.Thinking == thought.String()
+	for _, e := range restored.Entries {
+		found = found || e.Message.Thinking == thought.String()
 	}
 	if !found {
-		t.Fatal("explicit next native request lost original thinking")
+		t.Fatal("lost saved original thinking")
 	}
 }
 
@@ -147,6 +150,7 @@ func TestThinkingStopOversizeReadableRawAndBoundedResume(t *testing.T) {
 	body, thought := oversizedThinking()
 	dir := t.TempDir()
 	r, _, calls := thinkingRunner(t, body, thinkingLog{dir: dir})
+	r.MaxSteps = 1
 	_, _, err := r.Run(context.Background(), "keep original provenance")
 	if err != nil || r.Outcome.Status != outcome.Stopped || *calls != 1 {
 		t.Fatalf("oversize stopped disposition: %+v %v", r.Outcome, err)
@@ -179,9 +183,10 @@ func TestThinkingStopOversizeReadableRawAndBoundedResume(t *testing.T) {
 		}
 	}
 	if retained != 1 {
-		t.Fatal("thinking-only stop must remain retained without covert resume", retained)
+		t.Fatal("thinking history must remain retained exactly once", retained)
 	}
 	r, _, _ = thinkingRunner(t, body, nil)
+	r.MaxSteps = 1
 	_, _, err = r.Run(context.Background(), "sessionless library")
 	if err != nil || r.Outcome.Status != outcome.Stopped {
 		t.Fatalf("sessionless stopped disposition: %+v %v", r.Outcome, err)
@@ -194,7 +199,7 @@ func TestThinkingStopOversizeReadableRawAndBoundedResume(t *testing.T) {
 }
 
 func TestThinkingStopRecordingFailures(t *testing.T) {
-	for _, kind := range []string{"reasoning", "native_reply", "stopped", "continuation"} {
+	for _, kind := range []string{"reasoning", "native_reply", "note"} {
 		t.Run(kind, func(t *testing.T) {
 			r, _, calls := thinkingRunner(t, thinking227, thinkingLog{dir: t.TempDir(), fail: kind})
 			_, _, err := r.Run(context.Background(), "retained failure")

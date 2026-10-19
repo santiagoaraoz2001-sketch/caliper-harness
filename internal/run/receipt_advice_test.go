@@ -438,7 +438,9 @@ func TestPrepareTaskExplicitFullReceiptReadyClaim(t *testing.T) {
 	}))
 	defer model.Close()
 	cfg.Model.Server = model.URL
-	rr, _, err = New(Deps{Tools: "full", Cfg: cfg, Store: s, Server: model.URL, Model: "component", Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: "prepare", Window: 32768, MaxSteps: 3}, "repair conversion")
+	// This control tests full-tool receipts and claims, not context exhaustion.
+	// The full catalog plus receipt history exceeds 32K in the frozen baseline.
+	rr, _, err = New(Deps{Tools: "full", Cfg: cfg, Store: s, Server: model.URL, Model: "component", Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: "prepare", Window: 65536, MaxSteps: 3}, "repair conversion")
 	if err != nil {
 		t.Fatal(err)
 	}
