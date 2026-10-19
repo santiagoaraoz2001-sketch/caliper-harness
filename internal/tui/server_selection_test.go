@@ -251,13 +251,13 @@ func TestWorkerCatalogSelectionRollsBackOnSaveFailure(t *testing.T) {
 	}
 }
 
-func TestOrdinaryCatalogCannotSelectJudge(t *testing.T) {
+func TestOrdinaryCatalogStagesJudge(t *testing.T) {
 	m := serveModelWithModels(t)
 	m.Serve.Sel = 2
 	before := m.Cfg
 	m.serveUseJudge()
-	if !reflect.DeepEqual(m.Cfg, before) || m.Settings.DecisionDraft != nil || !strings.Contains(lastAlert(m).Text, "native") {
-		t.Fatal("ordinary catalog changed judge selection")
+	if !reflect.DeepEqual(m.Cfg, before) || m.Settings.DecisionDraft == nil || m.Settings.DecisionDraft.Runtime != "ollama" || !strings.Contains(lastAlert(m).Text, "self-reported") {
+		t.Fatal("ordinary catalog failed to stage a chat judge without changing live configuration")
 	}
 	m.serveUse()
 	if m.Cfg.Model.Name != "qwen3:8b" {
@@ -265,11 +265,11 @@ func TestOrdinaryCatalogCannotSelectJudge(t *testing.T) {
 	}
 }
 
-func TestSettingsRejectsChatJudgeWithoutChangingSelection(t *testing.T) {
+func TestSettingsStagesChatJudgeWithoutChangingLiveSelection(t *testing.T) {
 	m := settingsModel(t)
 	before := m.Cfg.Decision
 	m.applyField(settingsField("decision", "runtime", "runtime"), "openai")
-	if !reflect.DeepEqual(m.Cfg.Decision, before) || m.Settings.DecisionDraft != nil {
-		t.Fatal("invalid judge selection staged")
+	if !reflect.DeepEqual(m.Cfg.Decision, before) || m.Settings.DecisionDraft == nil || m.Settings.DecisionDraft.Runtime != "openai" {
+		t.Fatal("chat judge failed to stage independently")
 	}
 }

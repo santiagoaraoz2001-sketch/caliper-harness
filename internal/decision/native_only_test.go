@@ -12,7 +12,7 @@ func TestUnsupportedJudgeRuntimeNeverContactsServer(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests++; t.Errorf("unexpected request %s", r.URL) }))
 	defer server.Close()
-	for _, runtime := range []string{"openai", "mlx", "ollama", "chat"} {
+	for _, runtime := range []string{"chat", "unknown"} {
 		selection := Selection{Model: "ordinary", Device: DeviceAuto, Runtime: runtime}
 		c := New(server.URL, selection.Model, selection.Device, time.Second).WithSelection(selection)
 		if _, err := c.Judge(context.Background(), Request{Context: "test", Options: []string{"yes", "no"}}); err == nil {

@@ -551,6 +551,9 @@ func Save(path string, cfg Config) error {
 // values are plain-language errors.
 func Load(path string) (cfg Config, usedFile bool, err error) {
 	cfg = Defaults()
+	if err := loadConnections(&cfg); err != nil {
+		return Config{}, false, err
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -560,7 +563,7 @@ func Load(path string) (cfg Config, usedFile bool, err error) {
 	}
 	// Decode over a copy of the defaults so absent keys keep them.
 	// KnownFields rejects typo'd keys instead of silently dropping them.
-	merged := Defaults()
+	merged := cfg
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	dec.KnownFields(true)
 	if err := dec.Decode(&merged); err != nil {
@@ -813,8 +816,8 @@ func (c Config) Validate() error {
 	if c.Workflows.RetryDelaySeconds < 0 {
 		return fmt.Errorf("workflows.retry_delay_seconds cannot be negative, got %d", c.Workflows.RetryDelaySeconds)
 	}
-	if c.Decision.Runtime != "" && c.Decision.Runtime != "laya" && c.Decision.Runtime != "system_one" {
-		return fmt.Errorf("decision.runtime must be laya or system_one, got %q", c.Decision.Runtime)
+	if c.Decision.Runtime != "" && c.Decision.Runtime != "laya" && c.Decision.Runtime != "system_one" && c.Decision.Runtime != "openai" && c.Decision.Runtime != "mlx" && c.Decision.Runtime != "ollama" && c.Decision.Runtime != "rulith" {
+		return fmt.Errorf("decision.runtime must be laya, system_one, openai, mlx, ollama, or rulith, got %q", c.Decision.Runtime)
 	}
 	if u, err := url.ParseRequestURI(c.Decision.Server); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return fmt.Errorf("decision.server must be an http(s) URL")

@@ -168,7 +168,7 @@ func (m *Model) cycleField(f SettingField) {
 	case "runtime":
 		options := []string{llm.RuntimeOpenAI, llm.RuntimeOllama, llm.RuntimeMLX, llm.RuntimeRulith}
 		if f.Section == "decision" {
-			options = []string{"laya", "system_one"}
+			options = []string{"laya", "system_one", "openai", "mlx", "ollama", "rulith"}
 		}
 		next = cycleNext(options, m.settingValue(f))
 	case "submode":
@@ -272,7 +272,7 @@ func (m *Model) applyField(f SettingField, val string) {
 	if f.Section == "decision" {
 		m.Settings.DecisionDraft = &next.Decision
 		m.Settings.DecisionSeq++
-		m.Settings.DecisionNotice = "staged — a applies; external services remain pending activation"
+		m.Settings.DecisionNotice = "staged — a applies; external native services remain pending activation"
 		m.alert("info", m.Settings.DecisionNotice)
 		return
 	}

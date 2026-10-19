@@ -1,0 +1,133 @@
+package config
+
+import (
+	"bytes"
+	"fmt"
+	"gopkg.in/yaml.v3"
+	"io"
+	"os"
+	"path/filepath"
+)
+
+// Connections contains reusable machine choices, never project state or checks.
+type Connections struct {
+	Model    ModelConfig    `yaml:"model"`
+	Decision DecisionConfig `yaml:"decision"`
+	Serve    ServeConfig    `yaml:"serve"`
+}
+
+func ConnectionsPath() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "caliper", "connections.yaml"), nil
+}
+func loadConnections(c *Config) error {
+	path, err := ConnectionsPath()
+	if err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	v := Connections{c.Model, c.Decision, c.Serve}
+	d := yaml.NewDecoder(bytes.NewReader(raw))
+	d.KnownFields(true)
+	if err = d.Decode(&v); err != nil {
+		return fmt.Errorf("connections %s: %w", path, err)
+	}
+	var extra any
+	if err = d.Decode(&extra); err != io.EOF {
+		return fmt.Errorf("connections %s contains trailing YAML documents", path)
+	}
+	c.Model, c.Decision, c.Serve = v.Model, v.Decision, v.Serve
+	return c.Validate()
+}
+
+// SaveConnections atomically saves the reusable selections. Project config is
+// separate and continues to override these machine defaults.
+func SaveConnections(c Config) error {
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	path, err := ConnectionsPath()
+	if err != nil {
+		return err
+	}
+	raw, err := yaml.Marshal(Connections{c.Model, c.Decision, c.Serve})
+	if err != nil {
+		return err
+	}
+	if err = os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), ".connections-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err = f.Write(raw); err != nil {
+		f.Close()
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), path)
+}
+
+// ProjectBytes keeps reusable choices out of a setup-managed project's file.
+func ProjectBytes(c Config) ([]byte, error) {
+	raw, err := yaml.Marshal(c)
+	if err != nil {
+		return nil, err
+	}
+	var n map[string]any
+	if err = yaml.Unmarshal(raw, &n); err != nil {
+		return nil, err
+	}
+	delete(n, "model")
+	delete(n, "decision")
+	delete(n, "serve")
+	return yaml.Marshal(n)
+}
+
+// SaveEffective preserves explicit project configuration. Files created by Setup
+// have no reusable sections, so subsequent Settings/Status choices stay reusable.
+func SaveEffective(path string, c Config) error {
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return Save(path, c)
+	}
+	if err != nil {
+		return err
+	}
+	var n map[string]any
+	if err = yaml.Unmarshal(raw, &n); err != nil {
+		return err
+	}
+	for _, key := range []string{"model", "decision", "serve"} {
+		if _, explicit := n[key]; explicit {
+			return Save(path, c)
+		}
+	}
+	if err = c.Validate(); err != nil {
+		return err
+	}
+	out, err := ProjectBytes(c)
+	if err != nil {
+		return err
+	}
+	if err = os.WriteFile(path, out, 0644); err != nil {
+		return err
+	}
+	if err = SaveConnections(c); err != nil {
+		return fmt.Errorf("project saved but reusable connections failed: %w", err)
+	}
+	return nil
+}

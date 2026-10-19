@@ -764,6 +764,11 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, cmd tea.Cmd) {
 	case plansLoadedMsg:
 		m.onPlansLoaded(msg)
 		return m, nil
+	case connectionTestMsg:
+		if m.Setup.Add == msg.Form {
+			m.Setup.Add.Receipt = msg.Receipt
+		}
+		return m, nil
 	case serveProbedMsg:
 		m.onServeProbed(msg)
 		return m, nil
@@ -959,6 +964,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if m.setupActive() && m.Setup.Add != nil && m.Chat.Dialog == nil && m.Input.Value() == "" && msg.Type != tea.KeyEsc && msg.Type != tea.KeyCtrlC {
+		um, cmd, _ := m.connectionKey(msg)
+		return um, cmd
+	}
 	if m.askOptions() && m.askOwns(msg) {
 		return m.askKey(msg)
 	}
@@ -971,6 +980,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.setupActive() {
+			if m.Setup.Add != nil {
+				m.Setup.Add = nil
+				return m, nil
+			}
 			if m.Setup.Stage > 0 {
 				m.Setup.Stage--
 				m.Setup.Err = ""
@@ -1366,7 +1379,7 @@ func (m Model) View() string {
 		left = "Enter /command · Ctrl+J newline · running · " + m.escapeHint() + " · /btw"
 	}
 	inputView := m.composerView()
-	if m.setupActive() && m.Chat.Dialog == nil && m.Setup.Stage == 1 && m.Setup.CheckFocused && m.Input.Value() == "" {
+	if m.setupActive() && m.Chat.Dialog == nil && m.Setup.Stage == 2 && m.Setup.CheckFocused && m.Input.Value() == "" {
 		left = "Enter review · Tab /command · " + m.escapeHint()
 		ti := m.Input
 		ti.Blur()
@@ -1376,7 +1389,7 @@ func (m Model) View() string {
 		if m.Setup.Stage == 0 {
 			left = "↑↓ select · Enter continue · r rescan · esc chat"
 		}
-		if m.Setup.Stage == 2 {
+		if m.Setup.Stage == 3 {
 			left = "Enter save · PgUp/PgDn review · " + m.escapeHint()
 		}
 	}

@@ -81,21 +81,13 @@ func Discover(roots []ModelRoot, explicit []string) ([]Asset, []string) {
 		a := Asset{Path: canonical, ID: id, Revision: rev, Runtime: runtime}
 		if strings.EqualFold(filepath.Ext(canonical), ".gguf") {
 			a.Format, a.Runtime = "gguf", ""
-			f, err := os.Open(canonical)
-			if err == nil {
-				var magic [4]byte
-				_, err = io.ReadFull(f, magic[:])
-				f.Close()
-				if err == nil && string(magic[:]) == "GGUF" {
-					a.headerFound = true // Not checkpoint completeness.
-				} else {
-					err = fmt.Errorf("missing GGUF header")
-				}
-			}
-			a.Reason = "GGUF header found; checkpoint completeness and native compatibility unconfirmed"
+			reason, err := inspectGGUF(canonical)
+			a.headerFound = err == nil
+			a.Reason = reason
 			if err != nil {
 				a.Reason = err.Error()
 			}
+
 		} else if runtime == "ollama" {
 			a.Reason = "native catalog directory; model identities require its server"
 		} else {
@@ -147,6 +139,14 @@ func Discover(roots []ModelRoot, explicit []string) ([]Asset, []string) {
 		found := false
 		for _, entry := range dirs(path) {
 			if !entry.IsDir() && strings.EqualFold(filepath.Ext(entry.Name()), ".gguf") {
+				if parts := splitGGUF.FindStringSubmatch(entry.Name()); parts != nil && parts[2] != "00001" {
+					first := parts[1] + "-00001-of-" + parts[3] + ".gguf"
+					if _, err := os.Stat(filepath.Join(path, first)); err != nil {
+						add(filepath.Join(path, entry.Name()), id+"/"+entry.Name(), rev, "")
+						found = true
+					}
+					continue
+				}
 				add(filepath.Join(path, entry.Name()), id+"/"+entry.Name(), rev, "")
 				found = true
 			}

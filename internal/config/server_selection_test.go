@@ -27,12 +27,12 @@ func TestDuplicateServerRecipesRefused(t *testing.T) {
 	}
 }
 
-func TestDecisionRejectsOrdinaryChatRuntimes(t *testing.T) {
-	for _, runtime := range []string{"openai", "mlx", "ollama", "chat"} {
+func TestDecisionAcceptsSupportedChatRuntimes(t *testing.T) {
+	for _, runtime := range []string{"openai", "mlx", "ollama", "rulith"} {
 		c := Defaults()
 		c.Decision.Runtime = runtime
-		if err := c.Validate(); err == nil {
-			t.Fatalf("accepted ordinary chat judge %q", runtime)
+		if err := c.Validate(); err != nil {
+			t.Fatalf("rejected ordinary chat judge %q: %v", runtime, err)
 		}
 	}
 }

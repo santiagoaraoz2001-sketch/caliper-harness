@@ -589,3 +589,6 @@ func snippet(b []byte) string {
 	}
 	return s
 }
+
+// WithHTTPClient supplies the caller-owned transport policy without changing it.
+func (c *Client) WithHTTPClient(client *http.Client) *Client { c.http = client; return c }

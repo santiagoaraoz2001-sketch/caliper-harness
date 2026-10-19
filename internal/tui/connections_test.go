@@ -1,0 +1,167 @@
+package tui
+
+import (
+	tea "github.com/charmbracelet/bubbletea"
+	"net/http"
+	"os"
+	"path/filepath"
+	"reflect"
+	"specific-harness/internal/config"
+	"specific-harness/internal/serve"
+	"strings"
+	"testing"
+)
+
+func formModel(t *testing.T) Model {
+	t.Helper()
+	m := setupFixture(t, 80, 24)
+	m.openConnectionForm()
+	return m
+}
+func TestConnectionFormOwnsKeysAndStagesWithoutEffects(t *testing.T) {
+	m := formModel(t)
+	f := m.Setup.Add
+	f.Values[3].SetValue("coder")
+	before := m.Cfg
+	tabs := len(m.Tabs)
+	um, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	m = um.(Model)
+	if cmd == nil || len(m.Tabs) != tabs || m.Setup.Add != f {
+		t.Fatal("catalog test key opened a tab or lost form")
+	}
+	m = viewportKey(m, tea.KeyTab)
+	if f.Field != 1 {
+		t.Fatal("form did not own Tab")
+	}
+	m = viewportKey(m, tea.KeyCtrlS)
+	if m.Setup.Stage != 1 || m.Setup.Model.Name != "coder" || m.Setup.Add != nil {
+		t.Fatalf("staging failed: %+v", m.Setup)
+	}
+	if !reflect.DeepEqual(before, m.Cfg) {
+		t.Fatal("staging modified live config")
+	}
+	if _, err := os.Stat(m.CfgPath); !os.IsNotExist(err) {
+		t.Fatal("staging wrote project")
+	}
+}
+func TestConnectionFolderKeepsWireAliasAndValidatesShards(t *testing.T) {
+	m := formModel(t)
+	dir := t.TempDir()
+	for name, value := range map[string]string{"config.json": "{\"model_type\":\"qwen\"}", "tokenizer.json": "{}", "model.safetensors.index.json": "{\"weight_map\":{\"a\":\"one.safetensors\",\"b\":\"two.safetensors\"}}", "one.safetensors": "weights"} {
+		os.WriteFile(filepath.Join(dir, name), []byte(value), 0600)
+	}
+	f := m.Setup.Add
+	f.Values[3].SetValue("served-alias")
+	f.Values[4].SetValue(dir)
+	if _, err := f.candidate(m.Cfg); err == nil || !strings.Contains(err.Error(), "two.safetensors") {
+		t.Fatalf("missing shard not explained: %v", err)
+	}
+	os.WriteFile(filepath.Join(dir, "two.safetensors"), []byte("weights"), 0600)
+	c, err := f.candidate(m.Cfg)
+	if err != nil || c.Model.Name != "served-alias" {
+		t.Fatalf("wire alias replaced: %+v %v", c.Model, err)
+	}
+	f.Values[3].SetValue("")
+	c, err = f.candidate(m.Cfg)
+	canonical, _ := filepath.EvalSymlinks(dir)
+	if err != nil || c.Model.Name != canonical {
+		t.Fatalf("folder default missing: %+v %v", c.Model, err)
+	}
+}
+func TestSetupStatusSelectionStaysGlobalWithoutProjectCheckLeak(t *testing.T) {
+	m := setupFixture(t, 80, 24)
+	for i := 0; i < 3; i++ {
+		m = viewportKey(m, tea.KeyEnter)
+	}
+	m.setupSave()
+	if m.Setup.Err != "" {
+		t.Fatal(m.Setup.Err)
+	}
+	m.Serve.Rows = []ServeRow{{Ep: serve.Endpoint{Kind: serve.KindOpenAI, URL: "http://127.0.0.1:9999/v1", Model: "changed"}, Health: serve.Health{Up: true, Runtime: "openai"}, Have: true, IsModel: true}}
+	m.serveUse()
+	second, _, err := config.Load(filepath.Join(t.TempDir(), "missing.yaml"))
+	if err != nil || second.Model.Name != "changed" {
+		t.Fatalf("Status change not reusable: %+v %v", second.Model, err)
+	}
+	raw, _ := os.ReadFile(m.CfgPath)
+	if strings.Contains(string(raw), "model:") {
+		t.Fatal("Status shadowed global choices")
+	}
+}
+func TestCustomSafetensorsRecipeGetsLoadableAsset(t *testing.T) {
+	isolateModelRoots(t)
+	m := settingsModel(t)
+	dir := t.TempDir()
+	for name, value := range map[string]string{"config.json": "{}", "tokenizer.json": "{}", "model.safetensors": "weights"} {
+		os.WriteFile(filepath.Join(dir, name), []byte(value), 0600)
+	}
+	os.WriteFile(filepath.Join(dir, "config.json"), []byte("{\"model_type\":\"fixture\"}"), 0600)
+	m.Cfg.Serve.ModelDirs = []string{dir}
+	m.Cfg.Serve.Recipes = []config.RecipeConfig{{Name: "custom", Kind: "openai", Runtime: "openai", URL: "http://127.0.0.1:19998/v1", Argv: []string{"custom", "--model", "{model}"}}}
+	msg := m.probeServeWith(&http.Client{Transport: offlineTransport{}})().(serveProbedMsg)
+	found := false
+	for _, r := range msg.rows {
+		if r.Asset != nil && r.Ep.Label == "custom" {
+			found = true
+			if !r.Asset.LoadCandidate() {
+				t.Fatal(r.Asset)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("custom safetensors omitted")
+	}
+}
+
+type offlineTransport struct{}
+
+func (offlineTransport) RoundTrip(*http.Request) (*http.Response, error) { return nil, os.ErrNotExist }
+
+func TestChangingJudgeKeepsOldOwnedSidecarVisible(t *testing.T) {
+	m := settingsModel(t)
+	p, err := serve.Start(serve.Recipe{Name: "old-judge-fixture", Argv: []string{"sleep", "30"}}, filepath.Join(t.TempDir(), "owner.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Stop()
+	old := m.Cfg.Decision.Server
+	m.Serve.Spawned = map[string]*serve.Proc{old: p}
+	m.Serve.Rows = []ServeRow{{Ep: serve.Endpoint{Kind: serve.KindSidecar, URL: old}, Sidecar: true}}
+	next := m.Cfg.Decision
+	next.Runtime = "openai"
+	next.Server = "http://127.0.0.1:19997/v1"
+	next.Model = "judge"
+	m.Settings.DecisionDraft = &next
+	if cmd := m.applyDecisionSelection(); cmd != nil {
+		t.Fatal("chat selection attempted native activation")
+	}
+	for i := 0; i < 2; i++ {
+		found := false
+		for _, e := range m.serveEndpoints() {
+			if e.URL == old {
+				found = true
+				if e.Kind != serve.KindSidecar {
+					t.Fatal("old native identity lost")
+				}
+			}
+		}
+		if !found {
+			t.Fatal("owned child disappeared")
+		}
+		msg := m.probeServeWith(&http.Client{Transport: offlineTransport{}})().(serveProbedMsg)
+		m.onServeProbed(msg)
+	}
+	if p.PID() == 0 {
+		t.Fatal("selection stopped old process without user command")
+	}
+	for i, r := range m.Serve.Rows {
+		if r.Ep.URL == old && r.Sidecar {
+			m.Serve.Sel = i
+			break
+		}
+	}
+	m.serveUnload()
+	if p.PID() != 0 {
+		t.Fatal("unhealthy old owned sidecar could not be stopped")
+	}
+}

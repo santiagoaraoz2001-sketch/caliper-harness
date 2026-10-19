@@ -30,6 +30,7 @@ func TestFirstUseGallery(t *testing.T) {
 		m.Setup.Path = "caliper-harness.yaml"
 		capture("setup-model", m.View())
 		m = viewportKey(m, tea.KeyEnter)
+		m = viewportKey(m, tea.KeyEnter)
 		m.Setup.Check.SetValue("go test ./...")
 		capture("setup-check", m.View())
 		m = viewportKey(m, tea.KeyEnter)

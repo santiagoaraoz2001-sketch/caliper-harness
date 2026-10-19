@@ -43,6 +43,17 @@ def install_native_hooks(native, canonical):
         handler.wfile.write(json.dumps(payload).encode())
         handler.wfile.flush()
 
+    def models(handler):
+        # This offline owner accepts exactly one canonical checkpoint. Its catalog
+        # must not depend on an unrelated Hugging Face cache existing in HOME.
+        # Availability is separate from health's actual loaded/generation facts.
+        payload = {"object": "list", "data": [{"id": canonical, "object": "model", "owned_by": "mlx"}]}
+        handler._set_completion_headers(200)
+        handler.end_headers()
+        handler.wfile.write(json.dumps(payload).encode())
+        handler.wfile.flush()
+
+    native.APIHandler.handle_models_request = models
     native.ModelProvider.load = load
     native.APIHandler.handle_health_check = health
 

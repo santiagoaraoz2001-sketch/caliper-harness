@@ -72,3 +72,36 @@ func InstalledRecipes(endpoint string) []Recipe {
 	}
 	return out
 }
+
+// LocalRecipe reuses a known launcher at the selected loopback endpoint.
+// Empty custom argv remains endpoint-only when no platform launcher exists.
+func LocalRecipe(root, runtime, endpoint, model string) (Recipe, bool) {
+	u, err := url.Parse(endpoint)
+	if err != nil || !Loopback(endpoint) || u.Scheme != "http" || u.Port() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return Recipe{}, false
+	}
+	if p := strings.TrimRight(u.Path, "/"); p != "" && p != "/v1" {
+		return Recipe{}, false
+	}
+	for _, r := range DefaultRecipes(root, model, "") {
+		if r.Runtime != runtime {
+			continue
+		}
+		r.URL = endpoint
+		if runtime == "ollama" {
+			r.Env = append(r.Env, "OLLAMA_HOST="+u.Host)
+			return r, true
+		}
+		if runtime != "mlx" {
+			continue
+		}
+		for i := 0; i+1 < len(r.Argv); i++ {
+			if r.Argv[i] == "--port" {
+				r.Argv[i+1] = u.Port()
+			}
+		}
+		r.Argv = append(r.Argv, "--host", u.Hostname())
+		return r, true
+	}
+	return Recipe{}, false
+}

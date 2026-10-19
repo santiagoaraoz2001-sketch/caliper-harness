@@ -1,5 +1,5 @@
-// Package decision judges typed options through a native decision sidecar:
-// one request in, one picked option out, no text to parse.
+// Package decision validates typed choices from native decision services or
+// explicitly selected chat models using the shared LLM transport.
 package decision
 
 import (
@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"specific-harness/internal/llm"
 	"specific-harness/internal/prompts"
 	"strings"
 	"time"
@@ -29,6 +30,7 @@ type Client struct {
 	model      string
 	device     string
 	inputLimit int
+	params     *llm.Params
 	expected   *Selection
 	http       *http.Client
 }
@@ -118,8 +120,8 @@ func (c *Client) Judge(ctx context.Context, r Request) (Verdict, error) {
 		}
 		seen[o] = true
 	}
-	if c.expected != nil && !nativeRuntime(c.expected.Runtime) {
-		return Verdict{}, fmt.Errorf("decision runtime %q is unsupported; use laya or system_one", c.expected.Runtime)
+	if c.expected != nil && !NativeRuntime(c.expected.Runtime) {
+		return c.judgeChat(ctx, r)
 	}
 	var deadlineUnixMS int64
 	if deadline, ok := ctx.Deadline(); ok {
@@ -242,3 +244,6 @@ func excerpt(b []byte) string {
 }
 
 func (c *Client) WithPrompts(pc *prompts.Catalog) *Client { c.Prompts = pc; return c }
+
+// WithParams applies existing configured generation controls to ordinary chat judges only.
+func (c *Client) WithParams(p llm.Params) *Client { c.params = &p; return c }

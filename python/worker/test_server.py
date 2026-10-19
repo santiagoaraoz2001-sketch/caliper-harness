@@ -54,6 +54,17 @@ class NativeHooks(unittest.TestCase):
         return types.SimpleNamespace(ModelProvider=Provider, ResponseGenerator=Generator,
                                      APIHandler=Handler, _make_logits_processors=lambda args: [], mx=types.SimpleNamespace(default_device=lambda: "component-device"))
 
+    def test_catalog_is_selected_checkpoint_without_cache_or_loading(self):
+        native = self.native()
+        server.install_native_hooks(native, "/canonical/local")
+        with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, {"HOME": home, "HF_HUB_CACHE": home + "/does-not-exist"}):
+            h = native.APIHandler()
+            h.wfile = io.BytesIO()
+            h.handle_models_request()
+            self.assertEqual(h.status, 200)
+            self.assertEqual(json.loads(h.wfile.getvalue()), {"object": "list", "data": [{"id": "/canonical/local", "object": "model", "owned_by": "mlx"}]})
+            self.assertFalse(os.path.exists(home + "/does-not-exist"))
+
     def test_native_call_identity_and_no_unknown_resolution(self):
         native = self.native()
         server.install_native_hooks(native, "/canonical/local")
@@ -120,6 +131,7 @@ class NativeHooks(unittest.TestCase):
         native = importlib.import_module("mlx_lm.server")
         original_load = native.ModelProvider.load
         original_health = native.APIHandler.handle_health_check
+        original_models = native.APIHandler.handle_models_request
         with patch.object(native.ResponseGenerator, "__init__", side_effect=AssertionError("must not construct native generator")), patch.object(native.ModelProvider, "__init__", side_effect=AssertionError("must not construct native provider")):
             try:
                 server.install_native_hooks(native, "/canonical/local")
@@ -128,6 +140,7 @@ class NativeHooks(unittest.TestCase):
             finally:
                 native.ModelProvider.load = original_load
                 native.APIHandler.handle_health_check = original_health
+                native.APIHandler.handle_models_request = original_models
 
     def test_entry_preserves_native_arguments_and_offline_before_import(self):
         native = self.native()

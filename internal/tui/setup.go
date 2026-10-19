@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	tea "github.com/charmbracelet/bubbletea"
-	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
 	"specific-harness/internal/config"
@@ -14,6 +13,11 @@ import (
 
 type SetupState struct {
 	Stage        int
+	Judge        config.DecisionConfig
+	JudgePick    string
+	Serve        config.ServeConfig
+	Add          *connectionForm
+	Added        []setupChoice
 	Scroll       int
 	CheckFocused bool
 	Pick         string
@@ -27,18 +31,19 @@ type SetupState struct {
 type setupChoice struct {
 	key, label, state string
 	model             config.ModelConfig
+	judge             *config.DecisionConfig
 }
 
 func (m Model) setupActive() bool { return m.Tabs[m.Active].at.view == ViewSetup }
 func (m Model) setupChoices() []setupChoice {
-	var out []setupChoice
+	out := append([]setupChoice(nil), m.Setup.Added...)
 	seen := map[string]bool{}
 	for _, r := range m.Serve.Rows {
 		if r.Sidecar || !r.IsModel || r.Ep.Model == "" {
 			continue
 		}
 		if r.Asset != nil {
-			if r.Asset.Runtime != "mlx" || !r.Asset.Complete {
+			if !r.Asset.LoadCandidate() {
 				continue
 			}
 		} else if !r.Have || !r.Health.Up {
@@ -51,6 +56,12 @@ func (m Model) setupChoices() []setupChoice {
 			candidate.Server = r.Ep.URL
 		}
 		candidate.Runtime = r.Health.Runtime
+		if r.Health.Kind == "ollama" || r.Ep.Kind == "ollama" {
+			candidate.Runtime = "ollama"
+		}
+		if r.Health.Kind == "rulith" || r.Ep.Kind == "rulith" {
+			candidate.Runtime = "rulith"
+		}
 		if r.Asset != nil {
 			candidate.Runtime = r.Asset.Runtime
 		}
@@ -72,7 +83,7 @@ func (m Model) setupChoices() []setupChoice {
 		if r.Asset != nil {
 			state = "installed · load in Status"
 		}
-		out = append(out, setupChoice{key, candidate.Name, state, candidate})
+		out = append(out, setupChoice{key: key, label: candidate.Name, state: state, model: candidate})
 	}
 	return out
 }
@@ -102,17 +113,17 @@ func (m *Model) OpenSetup() {
 		field.SetWidth(max(1, m.Width-8))
 		field.Placeholder = "Your project's check command"
 		field.SetValue(m.Cfg.Coding.CheckCommand)
-		m.Setup = SetupState{Started: true, Path: path, Original: raw, Existed: err == nil, Model: m.Cfg.Model, Check: field}
+		m.Setup = SetupState{Started: true, Path: path, Original: raw, Existed: err == nil, Model: m.Cfg.Model, Judge: m.Cfg.Decision, Serve: m.Cfg.Serve, Check: field}
 	}
 	m.navigate(ViewSetup, "")
 }
 func (m Model) setupIndex(choices []setupChoice) int {
 	for i, c := range choices {
-		if c.key == m.Setup.Pick {
+		if c.key == m.setupPick() {
 			return i
 		}
 	}
-	if m.Setup.Pick == "" && len(choices) > 0 {
+	if m.setupPick() == "" && len(choices) > 0 {
 		return 0
 	}
 	return -1
@@ -143,18 +154,25 @@ func (m *Model) setupSave() {
 	candidate.Model.Name = m.Setup.Model.Name
 	candidate.Model.Server = m.Setup.Model.Server
 	candidate.Model.Runtime = m.Setup.Model.Runtime
+	candidate.Decision = m.Setup.Judge
+	candidate.Serve = m.Setup.Serve
 	candidate.Coding.CheckCommand = strings.TrimSpace(m.Setup.Check.Value())
-	if candidate.Coding.CheckCommand == "" {
-		m.Setup.Err = "Enter the project check before saving"
-		return
-	}
-	saved, err := yaml.Marshal(candidate)
+	saved, err := config.ProjectBytes(candidate)
 	if err != nil {
 		m.Setup.Err = err.Error()
 		return
 	}
-	if err := config.Save(m.Setup.Path, candidate); err != nil {
+	if err := candidate.Validate(); err != nil {
 		m.Setup.Err = err.Error()
+		return
+	}
+	if err := os.WriteFile(m.Setup.Path, saved, 0644); err != nil {
+		m.Setup.Err = err.Error()
+		return
+	}
+	if err := config.SaveConnections(candidate); err != nil {
+		m.Setup.Original, m.Setup.Existed = saved, true
+		m.Setup.Err = "Project saved, but reusable connections failed: " + err.Error()
 		return
 	}
 	m.Cfg = candidate
@@ -166,13 +184,16 @@ func (m *Model) setupSave() {
 	m.Setup.Original, m.Setup.Existed = saved, true
 	m.Setup.Model, m.Setup.Err = candidate.Model, ""
 	m.focusChat()
-	m.alert("info", "Configuration saved · inference unchecked · /status to inspect or load")
+	m.alert("info", "Connections saved for all projects · inference unchecked · /status to load or inspect")
 }
 func (m Model) setupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	if !m.setupActive() || m.Chat.Dialog != nil || m.Input.Value() != "" {
 		return m, nil, false
 	}
-	if m.Setup.Stage == 1 {
+	if m.Setup.Add != nil {
+		return m.connectionKey(msg)
+	}
+	if m.Setup.Stage == 2 {
 		if msg.Type == tea.KeyTab {
 			m.Setup.CheckFocused = !m.Setup.CheckFocused
 			return m, nil, true
@@ -181,11 +202,8 @@ func (m Model) setupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			return m, nil, false
 		}
 		if msg.Type == tea.KeyEnter {
-			if strings.TrimSpace(m.Setup.Check.Value()) == "" {
-				m.Setup.Err = "Enter the exact command used to check this project"
-				return m, nil, true
-			}
-			m.Setup.Stage = 2
+
+			m.Setup.Stage = 3
 			m.Setup.Err = ""
 			return m, nil, true
 		}
@@ -193,22 +211,26 @@ func (m Model) setupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		m.Setup.Check, cmd = m.Setup.Check.Update(msg)
 		return m, cmd, true
 	}
-	choices := m.setupChoices()
+	choices := m.currentSetupChoices()
 	i := m.setupIndex(choices)
 	switch msg.Type {
 	case tea.KeyUp, tea.KeyDown:
-		if m.Setup.Stage == 0 && len(choices) > 0 {
+		if m.Setup.Stage <= 1 && len(choices) > 0 {
 			if msg.Type == tea.KeyDown {
 				i = min(len(choices)-1, i+1)
 			} else {
 				i = max(0, i-1)
 			}
-			m.Setup.Pick = choices[i].key
+			if m.Setup.Stage == 1 {
+				m.Setup.JudgePick = choices[i].key
+			} else {
+				m.Setup.Pick = choices[i].key
+			}
 			m.Setup.Err = ""
 		}
 		return m, nil, true
 	case tea.KeyEnter:
-		if m.Setup.Stage == 2 {
+		if m.Setup.Stage == 3 {
 			m.setupSave()
 			return m, nil, true
 		}
@@ -216,17 +238,36 @@ func (m Model) setupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			m.Setup.Err = "No available model · r rescans · /settings configures another endpoint"
 			return m, nil, true
 		}
-		m.Setup.Pick, m.Setup.Model = choices[i].key, choices[i].model
-		m.Setup.Stage = 1
-		m.Setup.CheckFocused = true
+		if m.Setup.Stage == 0 {
+			m.Setup.Pick, m.Setup.Model = choices[i].key, choices[i].model
+			m.Setup.Stage = 1
+		} else {
+			m.Setup.JudgePick = choices[i].key
+			if choices[i].judge != nil {
+				m.Setup.Judge = *choices[i].judge
+			} else {
+				m.Setup.Judge.Server = choices[i].model.Server
+				m.Setup.Judge.Model = choices[i].model.Name
+				m.Setup.Judge.Runtime = choices[i].model.Runtime
+				m.Setup.Judge.Path = ""
+				m.Setup.Judge.Revision = ""
+				m.Setup.Judge.Device = "auto"
+			}
+			m.Setup.Stage = 2
+			m.Setup.CheckFocused = true
+		}
 		m.Setup.Err = ""
 		return m, nil, true
 	case tea.KeyRunes:
+		if msg.String() == "a" && m.Setup.Stage < 2 {
+			m.openConnectionForm()
+			return m, nil, true
+		}
 		if msg.String() == "r" {
 			return m, m.probeServe(), true
 		}
 	case tea.KeyPgUp, tea.KeyPgDown:
-		if m.Setup.Stage == 2 {
+		if m.Setup.Stage == 3 {
 			if msg.Type == tea.KeyPgUp {
 				m.Setup.Scroll = max(0, m.Setup.Scroll-1)
 			} else {
@@ -240,7 +281,7 @@ func (m Model) setupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 
 func (s SetupState) reviewRows(width int) []string {
 	var rows []string
-	for _, kv := range [][2]string{{"Model", s.Model.Name}, {"Runtime", s.Model.Runtime}, {"Endpoint", s.Model.Server}, {"Project check", s.Check.Value()}, {"Save to", s.Path}} {
+	for _, kv := range [][2]string{{"Model", s.Model.Name}, {"Runtime", s.Model.Runtime}, {"Endpoint", s.Model.Server}, {"Judge", s.Judge.Model + " · " + s.Judge.Runtime}, {"Judge endpoint", s.Judge.Server}, {"Project check (optional)", s.Check.Value()}, {"Save to", s.Path}} {
 		for _, line := range Wrap(kv[0]+": "+kv[1], width) {
 			rows = append(rows, Body.Render(line))
 		}
@@ -251,118 +292,90 @@ func (s SetupState) reviewRows(width int) []string {
 func (m Model) renderSetup(w, h int) string {
 	inner := BoxInner(w)
 	s := m.Setup
-	if h <= 6 {
-		var compact []string
-		if s.Err != "" {
-			compact = append(compact, ErrSt.Render(truncate(s.Err, inner)))
-		}
-		switch s.Stage {
-		case 0:
-			choices := m.setupChoices()
-			i := m.setupIndex(choices)
-			label := "No model found · r rescan"
-			if i >= 0 {
-				label = "› " + choices[i].label
-			}
-			compact = append(compact, Body.Render(truncate(label, inner)))
-		case 1:
-			field := s.Check
-			field.SetWidth(max(1, inner-2))
-			field.SetHeight(1)
-			if !s.CheckFocused || m.Chat.Dialog != nil {
-				field.Blur()
-			}
-			compact = append(compact, strings.Split(field.View(), "\n")...)
-		case 2:
-			review := s.reviewRows(inner)
-			room := max(1, h-2-len(compact))
-			start := min(s.Scroll, max(0, len(review)-room))
-			compact = append(compact, review[start:min(len(review), start+room)]...)
-		}
-		title := "Setup · " + []string{"Model", "Project check", "Review"}[s.Stage]
-		if s.Stage == 2 {
-			title = "Review · pgup/pgdn"
-		}
-		return panel(title, compact, nil, w, h)
+	if s.Add != nil {
+		return m.renderConnection(w, h)
 	}
-	steps := []string{"1 Model", "2 Project check", "3 Review"}
-	for i := range steps {
-		if i == s.Stage {
-			steps[i] = InfoSt.Bold(true).Render(steps[i])
-		} else {
-			steps[i] = Guidance.Render(steps[i])
-		}
+	titles := []string{"Worker", "Judge", "Project check", "Review"}
+	body := []string{}
+	if h > 6 {
+		body = append(body, Title.Render(titles[s.Stage]))
 	}
-	body := []string{strings.Join(steps, Guidance.Render("  ›  ")), ""}
-	hint := "↑↓ select · enter continue · r rescan · esc chat"
+	hint := "↑↓ select · enter continue · a add server/model · r rescan · esc back"
 	switch s.Stage {
-	case 0:
-		body = append(body, Body.Render("Choose an existing model."), Guidance.Render("Selection stays staged until review and save."), "")
-		choices := m.setupChoices()
+	case 0, 1:
+		if s.Stage == 1 && h > 6 {
+			body = append(body, Guidance.Render("Decision-trained models recommended. Chat-model confidence is self-reported."))
+		}
+		choices := m.currentSetupChoices()
 		selected := m.setupIndex(choices)
-		if len(choices) == 0 {
-			body = append(body, WarnSt.Render("No model endpoint found yet."))
-			for _, line := range Wrap("Start an existing Ollama or MLX server, then press r. For another endpoint, use /settings or /status. Caliper does not download model weights.", inner) {
-				body = append(body, Guidance.Render(line))
+		var rows []string
+		for i, c := range choices {
+			line := "  " + c.label
+			if i == selected {
+				line = "› " + c.label
+				rows = append(rows, selectionRow(truncate(line, inner), inner))
+			} else {
+				rows = append(rows, Body.Render(truncate(line, inner)))
 			}
+		}
+		if len(rows) == 0 {
+			body = append(body, Guidance.Render("No models found · a add endpoint or checkpoint · r rescan"))
 		} else {
-			var rows []string
-			for i, c := range choices {
-				prefix := "  "
-				if i == selected {
-					prefix = "› "
-				}
-				row := prefix + truncate(c.label, max(1, inner-2))
-				if i == selected {
-					row = selectionRow(row, inner)
-				} else {
-					row = Body.Render(row)
-				}
-				rows = append(rows, row)
-			}
-			body = append(body, listWindow(rows, selected, max(1, h-len(body)-7))...)
+			body = append(body, listWindow(rows, selected, max(1, h-8))...)
 			if selected >= 0 {
-				body = append(body, Guidance.Render(choices[selected].state+" · "+choices[selected].model.Runtime), PathSt.Render(truncate(choices[selected].model.Server, inner)))
+				body = append(body, Guidance.Render(truncate(choices[selected].state, inner)))
 			}
 		}
-	case 1:
-		body = append(body, Title.Render("How do you check this project?"))
-		for _, line := range Wrap("Enter the exact command from this project's documentation. Setup saves it; it does not run it.", inner) {
-			body = append(body, Guidance.Render(line))
+	case 2:
+		if h > 6 {
+			body = append(body, Guidance.Render("Optional project check; kept only in this project."))
 		}
-		body = append(body, "")
 		field := s.Check
+		field.SetWidth(max(1, inner-2))
+		field.SetHeight(min(2, max(1, h-7)))
 		if !s.CheckFocused || m.Chat.Dialog != nil {
 			field.Blur()
 		}
-		field.SetWidth(max(1, inner-2))
-		field.SetHeight(min(2, max(1, h-9)))
 		body = append(body, strings.Split(field.View(), "\n")...)
-		hint = "enter review · tab field/command · ctrl+j newline · esc model"
-		if m.Chat.Dialog != nil {
-			hint = "Setup paused while answering the question below"
-		}
-	case 2:
+		hint = "enter review · tab field/command · ctrl+j newline · esc judge"
+	case 3:
 		review := s.reviewRows(inner)
 		room := max(1, h-6)
-		if s.Err != "" {
-			room = max(1, room-len(Wrap(s.Err, inner)))
-		}
 		start := min(s.Scroll, max(0, len(review)-room))
-		end := min(len(review), start+room)
-		body = append(body, review[start:end]...)
-		if len(review) > room {
-			body = append(body, Guidance.Render(fmt.Sprintf("%d–%d/%d lines · pgup/pgdn", start+1, end, len(review))))
-		}
-		hint = "enter save configuration · esc project check"
+		body = append(body, review[start:min(len(review), start+room)]...)
+		hint = "enter save · pgup/pgdn review · esc project check"
 	}
 	if s.Err != "" {
-		for _, line := range Wrap(s.Err, inner) {
-			body = append(body, ErrSt.Render(line))
-		}
-	}
-	if m.Input.Value() != "" {
-		body = append(body, Guidance.Render("Your retained composer draft is active below."))
+		body = append(body, ErrSt.Render(truncate(s.Err, inner)))
 	}
 	return panel("Setup · "+filepath.Base(s.Path), body, []string{m.ownedHint(hint)}, w, h)
+}
+
+func (m Model) setupPick() string {
+	if m.Setup.Stage == 1 {
+		return m.Setup.JudgePick
+	}
+	return m.Setup.Pick
+}
+func (m Model) currentSetupChoices() []setupChoice {
+	out := m.setupChoices()
+	if m.Setup.Stage != 1 {
+		return out
+	}
+	// Keep the configured native selection available even before its sidecar is running.
+	d := m.Setup.Judge
+	if d.Runtime == "laya" || d.Runtime == "system_one" {
+		out = append([]setupChoice{{key: "native:" + d.Server + ":" + d.Model, label: d.Model, state: "native decision service · connection untested", judge: &d}}, out...)
+	}
+	for _, r := range m.Serve.Rows {
+		if r.Sidecar && r.Asset != nil && r.Asset.Complete {
+			d := m.Setup.Judge
+			d.Model = r.Asset.ID
+			d.Path = r.Asset.Path
+			d.Revision = r.Asset.Revision
+			d.Runtime = r.Asset.Runtime
+			out = append(out, setupChoice{key: "native:" + d.Path, label: d.Model, state: r.Asset.Reason, judge: &d})
+		}
+	}
+	return out
 }
