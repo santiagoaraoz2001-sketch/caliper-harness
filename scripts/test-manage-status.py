@@ -173,7 +173,7 @@ def main():
             testenv.setdefault('GOPATH', '/tmp/go-path')
             testenv.setdefault('GOCACHE', '/tmp/go-build-cache')
             result = subprocess.run(['go', 'test', '-count=1', '-timeout', '240s', '-run',
-                                     'TestExplicitManage|TestRequestObserver', './internal/tui', './internal/llm'],
+                                     'TestExplicitManage|TestAssistedSetup|TestRequestObserver', './internal/tui', './internal/llm'],
                                     cwd=Path(__file__).resolve().parent.parent, env=testenv,
                                     capture_output=True, text=True)
             (out / 'components.log').write_text(result.stdout + result.stderr)
@@ -189,6 +189,30 @@ def main():
         checks['status_readonly'] = 'Add server' not in plain(status)
         term.expect('/manage\r', 'Add server', 'Add model')
         checks['manage_controls'] = True
+        before_assisted = cfg.read_bytes()
+        if sys.platform == 'darwin':
+            connections = home / 'Library/Application Support/caliper/connections.yaml'
+        elif os.name == 'nt':
+            connections = Path(env['APPDATA']) / 'caliper/connections.yaml'
+        else:
+            connections = Path(env['XDG_CONFIG_HOME']) / 'caliper/connections.yaml'
+        assisted = term.expect('g', 'LLM-assisted setup', 'Help me connect', 'c copy full prompt')
+        checks['assisted_manage_shortcut'] = True
+        # Remove terminal wrapping whitespace; paths with spaces remain exact
+        # apart from presentation. No clipboard write touches the operator's OS.
+        checks['assisted_actual_config_path'] = ''.join(str(connections).split()) in ''.join(plain(assisted).split())
+        checks['assisted_actual_project_path'] = ''.join(str(cfg).split()) in ''.join(plain(assisted).split())
+        term.expect('\x1b[F', 'what remains untested.')
+        checks['assisted_full_document_reachable'] = True
+        term.expect('\x1b', 'Models & Servers', 'Add model')
+        term.field('zsetup-draft')  # Start with a key that is not a Manage action.
+        draft = term.send('g')
+        checks['assisted_preserves_composer'] = 'zsetup-draftg' in plain(draft) and 'LLM-assisted setup' not in plain(draft)
+        term.field('')
+        term.expect('/manage assisted\r', 'LLM-assisted setup', 'Help me connect')
+        checks['assisted_slash_command'] = True
+        term.expect('\x1b', 'Models & Servers', 'Add model')
+        checks['assisted_no_configuration_write'] = cfg.read_bytes() == before_assisted and not connections.exists()
         term.expect('n', 'Preset')
         checks['server_form'] = True
         term.field('Catalog test')

@@ -1186,6 +1186,9 @@ func (m Model) serveKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			return m, nil, false
 		}
 		switch s := msg.String(); s {
+		case "g", "G":
+			m.openAssistedSetup()
+			return m, nil, true
 		case "n", "N":
 			m.openManagedForm("server")
 			return m, nil, true
@@ -1368,7 +1371,7 @@ func serveModelRow(m Model, i int, r ServeRow, inner int) string {
 // serveHints is the full key list, wrapped to fit any frame —
 // discoverability never depends on terminal width.
 func (m Model) serveHints(inner int) []string {
-	text := "n Add server · + Add model · e Edit · ⌫ Remove · t Test · ↑↓ select\nu Coding · j Judge · s start · l load · x unload/stop · r refresh · " + m.escapeHint()
+	text := "n Add server · + Add model · g LLM-assisted setup · e Edit · ⌫ Remove · t Test · ↑↓ select\nu Coding · j Judge · s start · l load · x unload/stop · r refresh · " + m.escapeHint()
 	if r := m.serveCur(); r != nil && r.Sidecar {
 		text += "\nd device · m model · a apply Judge"
 	}

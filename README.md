@@ -136,6 +136,8 @@ across projects; checks stay local. `/manage` opens Models & Servers to add,
 edit, test, select, load or unload saved connections. `/status` shows runtime
 activity and measured usage. Caliper does not scan your computer for models
 or servers. `/setup` reopens setup; `/help` lists commands.
+For help wiring existing installations with your preferred LLM, use
+`/manage assisted` and press `c` to copy the setup prompt.
 In `/settings`, switch the decision model off to use human approval for PAT
 readiness and Risky actions. Checks and independent review remain required;
 automatic progress advice and tool-call recovery are disabled.

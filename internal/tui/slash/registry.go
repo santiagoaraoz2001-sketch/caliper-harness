@@ -41,7 +41,7 @@ func Commands() []Command {
 		{Name: "files", Desc: "browse files", Usage: "/files", View: "files"},
 		{Name: "settings", Desc: "edit configuration", Usage: "/settings", View: "settings"},
 		{Name: "status", Desc: "read-only runtime dashboard", Usage: "/status", View: "status"},
-		{Name: "manage", Desc: "Models & Servers: saved connections and controls", Usage: "/manage", View: "manage"},
+		{Name: "manage", Desc: "Models & Servers; /manage assisted for a setup prompt", Usage: "/manage [assisted]", View: "manage"},
 		{Name: "models", Desc: "Models & Servers shortcut", Usage: "/models [exact name/path]", View: "manage"},
 		{Name: "new", Desc: "new session", Usage: "/new"},
 		{Name: "stop", Desc: "stop the run", Usage: "/stop"},

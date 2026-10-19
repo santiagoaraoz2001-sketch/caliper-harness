@@ -125,6 +125,8 @@ type Model struct {
 	Alerts              []Alert
 	HelpOpen            bool
 	HelpScroll          int
+	HelpText            string
+	HelpNotice          string
 	PickerIdx           int
 	PickerHide          bool
 	St                  Status
@@ -506,6 +508,10 @@ func (m *Model) submit(raw string) tea.Cmd {
 	case c.Name == "help":
 		m.HelpOpen = true
 		m.HelpScroll = 0
+		m.HelpText, m.HelpNotice = "", ""
+		return nil
+	case c.Name == "manage" && len(args) == 1 && args[0] == "assisted":
+		m.openAssistedSetup()
 		return nil
 	case c.View != "":
 		target := ""
@@ -644,7 +650,7 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, cmd tea.Cmd) {
 				next.Chat.Dialog.Scroll = min(max(0, next.Chat.Dialog.Scroll), max(0, len(lines)-page))
 			}
 			if next.HelpOpen {
-				next.HelpScroll = min(max(0, next.HelpScroll), max(0, len(Wrap(next.Reg.Help()+"\n"+keyHelp(), next.Width))-max(1, next.Height-len(next.tabChrome())-2)))
+				next.HelpScroll = min(max(0, next.HelpScroll), max(0, len(Wrap(next.helpBody(), next.Width))-max(1, next.Height-len(next.tabChrome())-2)))
 			}
 			if next.serveActive() {
 				lines, _ := next.serveContent(next.Width)
@@ -790,6 +796,14 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, cmd tea.Cmd) {
 		return m, nil
 	case managedTestMsg:
 		m.onManagedTest(msg)
+		return m, nil
+	case assistedCopiedMsg:
+		if m.HelpOpen && m.HelpText != "" {
+			m.HelpNotice = "Full prompt copied"
+			if msg.err != nil {
+				m.HelpNotice = "Clipboard unavailable; select prompt text in your terminal: " + msg.err.Error()
+			}
+		}
 		return m, nil
 	case connectionTestMsg:
 		if m.Setup.Add == msg.Form {
@@ -970,6 +984,9 @@ func (m Model) escapeHint() string {
 // shift+left/right swaps drafts. Bare arrows edit text (picker excepted).
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.HelpOpen {
+		if m.HelpText != "" && msg.String() == "c" {
+			return m, m.copyAssistedSetup()
+		}
 		page := max(1, m.Height-len(m.tabChrome())-2)
 		switch msg.Type {
 		case tea.KeyUp:
@@ -983,7 +1000,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case tea.KeyHome:
 			m.HelpScroll = 0
 		case tea.KeyEnd:
-			m.HelpScroll = len(Wrap(m.Reg.Help()+"\n"+keyHelp(), m.Width))
+			m.HelpScroll = len(Wrap(m.helpBody(), m.Width))
 		case tea.KeyCtrlC:
 			return m, m.requestQuit()
 		default:
@@ -1279,7 +1296,7 @@ func keyHelp() string {
 		{"diff", "↑↓ select · enter open · f comment · esc chat"},
 		{"plans", "↑↓ move · →← expand · enter dive · f comment · r refresh · esc chat"},
 		{"status", "read-only runtime metrics · /manage connections · esc chat"},
-		{"manage", "n Add server · + Add model · e Edit · backspace Remove · t Test · u Coding · j Judge · s start · x unload · l load"},
+		{"manage", "n Add server · + Add model · g LLM-assisted setup · e Edit · backspace Remove · t Test · u Coding · j Judge · s start · x unload · l load"},
 		{"sessions", "↑↓ select · enter open · r refresh · esc chat"},
 		{"slash menu", "↑↓ move · enter complete · esc close"},
 		{"dialogs", "y/n answer · esc dismiss"},
@@ -1300,10 +1317,10 @@ func (m Model) View() string {
 		m.Chat.Tools = "workflow"
 	}
 	if m.HelpOpen {
-		lines := Wrap(m.Reg.Help()+"\n"+keyHelp(), m.Width)
+		lines := Wrap(m.helpBody(), m.Width)
 		start := min(max(0, m.HelpScroll), max(0, len(lines)-max(1, m.Height-len(m.tabChrome())-2)))
 		end := min(len(lines), start+max(1, m.Height-len(m.tabChrome())-2))
-		return strings.Join(m.tabChrome(), "\n") + "\n" + ansi.Truncate(Title.Render(fmt.Sprintf("Commands & keys · %d-%d/%d", start+1, end, len(lines))), m.Width, "…") + "\n" + strings.Join(lines[start:end], "\n") + "\n" + ansi.Truncate(Muted.Render("↑↓ scroll · pgup/pgdn page · home/end · esc/any other key closes"), m.Width, "…")
+		return strings.Join(m.tabChrome(), "\n") + "\n" + ansi.Truncate(Title.Render(fmt.Sprintf("%s · %d-%d/%d", m.helpHeading(), start+1, end, len(lines))), m.Width, "…") + "\n" + strings.Join(lines[start:end], "\n") + "\n" + ansi.Truncate(Muted.Render(m.helpHint()), m.Width, "…")
 	}
 	if m.Chat.Dialog != nil && m.Chat.Dialog.Kind == "auth" {
 		return strings.Join(m.tabChrome(), "\n") + "\n" + m.authView()

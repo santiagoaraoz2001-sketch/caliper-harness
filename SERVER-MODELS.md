@@ -4,6 +4,10 @@ Use `/manage` to add and manage your server connections and models. Use `/status
 
 In `/manage`, use `n` to add a server, `+` to add a model, `e` to edit, Backspace to remove, and `t` to test. Forms use Tab between fields, Ctrl+S to save, Ctrl+T to test, F2 for advanced options, and Escape to cancel.
 
+## Set up with your preferred LLM
+
+As a second option, open `/manage assisted` or press `g` in `/manage`. Press `c` to copy the complete setup prompt and paste it into your preferred LLM. It includes this computer's actual configuration paths, the connection format, native judge guidance and validation steps. A coding assistant with local access can inspect your existing servers and checkpoints; a chat-only assistant will need you to provide paths and command output. Caliper makes no model request and changes no settings when you open or copy this prompt. Review the proposed wiring before applying it, then restart Caliper to reload saved connections.
+
 Caliper does not scan your computer or open ports looking for models or servers. Only saved connections and services Caliper started are listed. Existing selected model/server settings remain available. Old `serve.model_dirs` settings remain readable but no longer populate the list.
 
 ## Connect a server
