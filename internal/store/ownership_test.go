@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -57,6 +58,9 @@ func TestStoreIndependentLeasesPersist(t *testing.T) {
 
 func TestStorePathAliases(t *testing.T) {
 	dir := t.TempDir()
+	// Windows CI keeps its checkout and temporary directory on different drives.
+	// Resolve the relative alias from the fixture directory, on the same volume.
+	t.Chdir(dir)
 	path := filepath.Join(dir, "db")
 	a := openLease(t, path)
 	link := filepath.Join(dir, "alias")
@@ -154,7 +158,14 @@ func TestStoreClosedLeaseRefuses(t *testing.T) {
 
 func TestStoreInMemoryRemainsIndependent(t *testing.T) {
 	a, b := openLease(t, ":memory:"), openLease(t, ":memory:")
-	disk := openLease(t, filepath.Join(t.TempDir(), ":memory:"))
+	name := ":memory:"
+	if runtime.GOOS == "windows" {
+		// A colon is not a legal Windows filename. Keep the independent persistent
+		// store coverage here; Unix also proves a sentinel-looking basename persists.
+		name = "memory.db"
+	}
+	path := filepath.Join(t.TempDir(), name)
+	disk := openLease(t, path)
 	if err := writeNote(disk, "disk-before"); err != nil {
 		t.Fatal(err)
 	}
@@ -173,6 +184,8 @@ func TestStoreInMemoryRemainsIndependent(t *testing.T) {
 		t.Fatal(err)
 	}
 	countNodes(t, disk, "MemoryEntry", 2)
+	disk.Close()
+	countNodes(t, openLease(t, path), "MemoryEntry", 2)
 }
 
 // A subprocess proves native file locking; in-process sharing cannot stand in
