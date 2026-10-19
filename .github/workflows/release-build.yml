@@ -1,0 +1,106 @@
+name: Build complete release folders
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Immutable release version
+        required: true
+        default: '0.1.2'
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2022
+            platform: windows-amd64
+          - runner: ubuntu-24.04
+            platform: linux-amd64
+    runs-on: ${{ matrix.runner }}
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.7'
+          cache: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.9.30'
+      - name: Windows native compiler
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          install: mingw-w64-x86_64-gcc
+          update: false
+      - name: Build Windows product and test native seams
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:PATH = "C:\msys64\mingw64\bin;C:\msys64\usr\bin;" + $env:PATH
+          $env:CC = 'gcc'
+          $env:CGO_ENABLED = '1'
+          $env:GOPATH = Join-Path $env:TEMP 'caliper-go-path'
+          $env:GOCACHE = Join-Path $env:TEMP 'caliper-go-build-cache'
+          $env:GOTOOLCHAIN = 'local'
+          go mod download
+          if ($LASTEXITCODE -ne 0) { throw 'module acquisition failed' }
+          $kuzu = (& go list -m -f '{{.Dir}}' github.com/kuzudb/go-kuzu).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Kuzu module lookup failed' }
+          $env:PATH = (Join-Path $kuzu 'lib\dynamic\windows') + ';' + $env:PATH
+          go test -count=1 ./internal/update ./internal/bundle ./internal/config ./internal/session ./internal/tools/bash ./internal/store
+          if ($LASTEXITCODE -ne 0) { throw 'native tests failed' }
+          ./scripts/test-install-windows.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows installer preservation tests failed' }
+          ./scripts/bundle-windows-managed.ps1 -Out "$env:RUNNER_TEMP/Caliper" -AllowDownloads
+          if ($LASTEXITCODE -ne 0) { throw 'product build failed' }
+          $builderPath = $env:PATH
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$env:RUNNER_TEMP\Caliper\bin"
+          & "$env:RUNNER_TEMP/Caliper/caliper.exe" version
+          if ($LASTEXITCODE -ne 0) { throw 'native product launch failed without compiler/module PATH' }
+          $env:PATH = $builderPath
+          $package = python scripts/package-release.py "$env:RUNNER_TEMP/Caliper" --version "$env:RELEASE_VERSION" --out dist
+          if ($LASTEXITCODE -ne 0) { throw 'release packaging failed' }
+          $package | Set-Content "$env:RUNNER_TEMP/release.json"
+          $release = $package | ConvertFrom-Json
+          $asset = if ($release.archive) { $release.archive } else { $release.parts_manifest }
+          if (-not $asset) { throw 'packager returned no complete release transport' }
+          npm ci --prefix scripts/npm --ignore-scripts
+          if ($LASTEXITCODE -ne 0) { throw 'npm launcher dependencies failed' }
+          node scripts/test-npm-release.cjs "$asset" "$env:RUNNER_TEMP/npm-native-proof"
+          if ($LASTEXITCODE -ne 0) { throw 'native npm product install and launch failed' }
+      - name: Build Linux product and test native seams
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          # The full GPU runtime needs space for its build and a second install
+          # proof. Display disk evidence; never substitute a smaller CPU product.
+          df -h "$RUNNER_TEMP"
+          export GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local
+          GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go mod download
+          GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go test -count=1 ./internal/update ./internal/bundle ./internal/config ./internal/session ./internal/tools/bash ./internal/store
+          bash scripts/bundle-linux.sh "$RUNNER_TEMP/Caliper"
+          LD_LIBRARY_PATH="$RUNNER_TEMP/Caliper/lib" "$RUNNER_TEMP/Caliper/caliper-harness" version
+          python scripts/package-release.py "$RUNNER_TEMP/Caliper" --version "$RELEASE_VERSION" --out dist > "$RUNNER_TEMP/release.json"
+          asset=$(python -c 'import json,sys; p=json.load(open(sys.argv[1])); print(p["archive"] or p["parts_manifest"])' "$RUNNER_TEMP/release.json")
+          test -f "$asset"
+          # Only this job's built scratch folder is removed after successful
+          # packaging. Verified release transport remains; npm independently
+          # reconstructs it. This avoids three simultaneous GPU runtime copies.
+          rm -rf -- "$RUNNER_TEMP/Caliper"
+          npm ci --prefix scripts/npm --ignore-scripts
+          node scripts/test-npm-release.cjs "$asset" "$RUNNER_TEMP/npm-native-proof"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: caliper-${{ inputs.version }}-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error

@@ -114,6 +114,7 @@ workflows:
   verify_followup: true    # queue a review run per done task after completion
 
 decision:
+  disabled: false         # true: human readiness/Risky approvals; no automatic judge advice
   runtime: laya            # laya/system_one native decision sidecar only
   trust_remote_code: false # explicit opt-in for checkpoint code
   # path: /absolute/downloaded/assets

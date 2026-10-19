@@ -121,7 +121,8 @@ type database struct {
 	db              *kuzu.Database
 	writes          chan writeReq
 	wg              sync.WaitGroup
-	refs            int // guarded by databases.Mutex
+	readers         sync.RWMutex // private reads share; rollback checkpoint waits for their native settlement
+	refs            int          // guarded by databases.Mutex
 }
 
 // Registry locking serializes initial migration and final close as well as
@@ -331,6 +332,8 @@ func (s *Store) QueryContext(ctx context.Context, query string, params map[strin
 	if s.closed {
 		return nil, ErrClosed
 	}
+	s.owner.readers.RLock()
+	defer s.owner.readers.RUnlock()
 	conn, err := kuzu.OpenConnection(s.owner.db)
 	if err != nil {
 		return nil, err
@@ -385,7 +388,12 @@ func (s *database) writer() {
 		return
 	}
 	defer conn.Close()
+	var unavailable error
 	for req := range s.writes {
+		if unavailable != nil {
+			req.done <- unavailable
+			continue
+		}
 		ctx := req.ctx
 		if ctx == nil {
 			ctx = context.Background()
@@ -395,27 +403,25 @@ func (s *database) writer() {
 			continue
 		}
 		setTimeout(conn, ctx)
-		if req.update != nil {
-			err := transactContext(conn, ctx, req.update)
-			if isAllocationFailure(err) && ctx.Err() == nil {
-				// Buffer-pool exhaustion can be transient (pages pinned by
-				// concurrent readers); the serialized writer retries once.
-				time.Sleep(100 * time.Millisecond)
-				setTimeout(conn, ctx)
-				err = transactContext(conn, ctx, req.update)
+		execute := func() error {
+			if req.update != nil {
+				return s.transactContext(conn, ctx, req.update)
 			}
-			conn.SetTimeout(0)
-			req.done <- err
-			continue
+			return s.writeStatement(conn, req.query, req.params)
 		}
-		res, err := run(conn, req.query, req.params)
-		if err != nil && isAllocationFailure(err) && ctx.Err() == nil {
+		err := execute()
+		var settlement *TransactionError
+		cleanupFailed := errors.As(err, &settlement) && settlement.maintenanceErr != nil
+		if !cleanupFailed && isAllocationFailure(err) && ctx.Err() == nil {
+			// Buffer-pool exhaustion can be transient (pages pinned by
+			// concurrent readers); the serialized writer retries once.
 			time.Sleep(100 * time.Millisecond)
 			setTimeout(conn, ctx)
-			res, err = run(conn, req.query, req.params)
+			err = execute()
 		}
-		if err == nil {
-			res.Close()
+		if errors.As(err, &settlement) && settlement.maintenanceErr != nil {
+			unavailable = fmt.Errorf("store maintenance failed after rollback; close and reopen this project's sessions before writing again: %w", settlement.maintenanceErr)
+			err = errors.Join(err, unavailable)
 		}
 		conn.SetTimeout(0)
 		req.done <- err

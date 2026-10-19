@@ -116,7 +116,19 @@ func sameServeURL(a, b string) bool {
 }
 
 // serveEndpoints lists active roles, conventional endpoints and launch recipes.
-func (m *Model) serveEndpoints() []serve.Endpoint {
+func (m *Model) serveEndpoints() (result []serve.Endpoint) {
+	defer func() {
+		if !m.Cfg.Decision.Disabled {
+			return
+		}
+		kept := result[:0]
+		for _, ep := range result {
+			if ep.Kind != serve.KindSidecar && (!sameServeURL(ep.URL, m.Cfg.Decision.Server) || sameServeURL(ep.URL, m.Cfg.Model.Server)) {
+				kept = append(kept, ep)
+			}
+		}
+		result = kept
+	}()
 	worker := m.Cfg.Model.Server
 	for _, rec := range m.serveRecipes() {
 		if rec.Kind != serve.KindSidecar && sameServeURL(rec.URL, worker) {
@@ -189,7 +201,19 @@ func (m *Model) serveEndpoints() []serve.Endpoint {
 }
 
 // serveRecipes merges built-ins with the user's extras.
-func (m *Model) serveRecipes() []serve.Recipe {
+func (m *Model) serveRecipes() (result []serve.Recipe) {
+	defer func() {
+		if !m.Cfg.Decision.Disabled {
+			return
+		}
+		kept := result[:0]
+		for _, rec := range result {
+			if rec.Kind != serve.KindSidecar && (!sameServeURL(rec.URL, m.Cfg.Decision.Server) || sameServeURL(rec.URL, m.Cfg.Model.Server)) {
+				kept = append(kept, rec)
+			}
+		}
+		result = kept
+	}()
 	extra := make([]serve.Recipe, 0, len(m.Cfg.Serve.Recipes))
 	for _, r := range m.Cfg.Serve.Recipes {
 		rec := serve.Recipe{Name: r.Name, Kind: r.Kind, Runtime: r.Runtime, URL: r.URL, Argv: r.Argv, Dir: r.Dir}
@@ -234,7 +258,13 @@ func (m *Model) serveRecipes() []serve.Recipe {
 
 // probeServe checks every endpoint off the event loop.
 func (m *Model) probeServe() tea.Cmd {
-	return m.probeServeWithDiscovery(&http.Client{Timeout: time.Duration(m.Cfg.Serve.ProbeTimeoutSeconds) * time.Second}, serve.DiscoverServers)
+	excluded := ""
+	if m.Cfg.Decision.Disabled && !sameServeURL(m.Cfg.Decision.Server, m.Cfg.Model.Server) {
+		excluded = m.Cfg.Decision.Server
+	}
+	return m.probeServeWithDiscovery(&http.Client{Timeout: time.Duration(m.Cfg.Serve.ProbeTimeoutSeconds) * time.Second}, func(ctx context.Context, client *http.Client) ([]serve.DiscoveredServer, error) {
+		return serve.DiscoverServersExcept(ctx, client, excluded)
+	})
 }
 
 // probeServeWith is the injectable core: tests fake the transport.
@@ -739,6 +769,9 @@ func labelOf(r *ServeRow) string {
 // fresh every time so a just-selected decision model is honored;
 // other rows use the probe-time recipe.
 func (m *Model) recipeFor(r *ServeRow) *serve.Recipe {
+	if m.Cfg.Decision.Disabled && r.Sidecar {
+		return nil
+	}
 	if r.Sidecar {
 		for _, configured := range m.Cfg.Serve.Recipes {
 			if configured.Kind == serve.KindSidecar && configured.URL == r.Ep.URL && len(configured.Argv) > 0 && (r.Recipe == nil || r.Recipe.Name == configured.Name) {
@@ -1100,6 +1133,11 @@ func (m *Model) commitExternalDecision() {
 	m.Cfg.Decision = *m.Settings.DecisionDraft
 	m.Settings.DecisionDraft = nil
 	m.Settings.DecisionNotice = "requested selection saved in memory — pending external activation (ownership unconfirmed)"
+	if m.Cfg.Decision.Disabled {
+		m.Settings.DecisionNotice = "decision model disabled; selection retained without activation"
+		m.alert("info", m.Settings.DecisionNotice)
+		return
+	}
 	if !decision.NativeRuntime(m.Cfg.Decision.Runtime) {
 		m.Settings.DecisionNotice = "Chat judge selected for next request; server controls residency; confidence is self-reported"
 	}
@@ -1122,6 +1160,13 @@ func (m *Model) applyDecisionSelection() tea.Cmd {
 	}
 	if m.Settings.DecisionDraft == nil {
 		m.alert("info", "no staged decision selection")
+		return nil
+	}
+	if m.Cfg.Decision.Disabled {
+		m.Cfg.Decision = *m.Settings.DecisionDraft
+		m.Settings.DecisionDraft = nil
+		m.Settings.DecisionNotice = "decision model disabled; selection retained without activation"
+		m.alert("info", m.Settings.DecisionNotice)
 		return nil
 	}
 	if !decision.NativeRuntime(m.Settings.DecisionDraft.Runtime) {

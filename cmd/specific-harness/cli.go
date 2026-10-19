@@ -55,7 +55,7 @@ func commandFlags(command string) *flag.FlagSet {
 		case "max-steps":
 			fs.String(name, "", "tool-call limit; 0 means no call ceiling; omitted uses config")
 		case "config":
-			fs.String(name, config.DefaultPath, "YAML path")
+			fs.String(name, config.DefaultPath, "YAML path; existing project file takes precedence, otherwise workspace settings in user data")
 		default:
 			fs.String(name, "", "value; otherwise use config where applicable")
 		}

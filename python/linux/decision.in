@@ -1,0 +1,5 @@
+# Existing typed-choice adapters; no model assets or checkpoint Python opt-in.
+laya==0.3.28
+transformers==5.19.0
+torch==2.11.0
+PyYAML==6.0.1

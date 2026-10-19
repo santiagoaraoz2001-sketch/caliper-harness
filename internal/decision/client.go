@@ -25,6 +25,7 @@ const (
 
 // Client talks to the decision sidecar's /judge endpoint.
 type Client struct {
+	disabled   bool
 	Prompts    *prompts.Catalog
 	baseURL    string
 	model      string
@@ -45,6 +46,11 @@ func New(server, model, device string, timeout time.Duration) *Client {
 		http:    &http.Client{Timeout: timeout},
 	}
 }
+
+// WithDisabled keeps the selected model but prevents all decision network calls.
+func (c *Client) WithDisabled(disabled bool) *Client { c.disabled = disabled; return c }
+
+var ErrDisabled = errors.New("decision model is disabled; enable it in Settings (decision.disabled: false) for this operation")
 
 // WithInputLimit sets the complete native judgment input budget in tokens.
 func (c *Client) WithInputLimit(tokens int) *Client {
@@ -95,6 +101,9 @@ type judgeResponse struct {
 // Anything else is a loud error — a verdict that fails validation is
 // never defaulted.
 func (c *Client) Judge(ctx context.Context, r Request) (Verdict, error) {
+	if c.disabled {
+		return Verdict{}, ErrDisabled
+	}
 	if r.Instructions == "" {
 		r.Instructions = c.Prompts.Text("decision.default.instructions")
 	}

@@ -303,6 +303,26 @@ func (r *Runner) Compact(ctx context.Context, c session.Continuation) (next sess
 
 // reviewCompaction checks factual anchors only; omitted history is referenced, not judged.
 func (r *Runner) reviewCompaction(ctx context.Context, c session.Continuation, source, summary string) (bool, error) {
+	if r.ManualDecisions {
+		if r.Ask == nil {
+			return false, fmt.Errorf("compaction needs your approval while decision model is disabled — context intact; use an interactive session")
+		}
+		prompt := "Decision model disabled — apply this summary? Original context remains saved. Reject to keep it unchanged.\n\nPROPOSED SUMMARY:\n" + summary + "\n\nCOMPLETE SOURCE CONTEXT (untrusted recorded text):\n" + source
+		accepted := r.Ask(ctx, prompt)
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		if r.Session != nil {
+			raw, _ := json.Marshal(struct {
+				Summary  string
+				Approved bool
+			}{summary, accepted})
+			if err := r.Session.Append(ctx, r.SessionID, "manual-compaction", string(raw)); err != nil {
+				return false, fmt.Errorf("%w: %v", compactionRecordFailure, err)
+			}
+		}
+		return accepted, nil
+	}
 	if r.Judge == nil {
 		return false, fmt.Errorf("compaction needs the selected decision judge — context intact")
 	}

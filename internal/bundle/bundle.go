@@ -46,6 +46,13 @@ func Check(root string) error {
 	}
 	for _, profile := range requiredProfiles() {
 		path := Python(root, profile)
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if _, err := containedPath(root, filepath.ToSlash(rel)); err != nil {
+			return err
+		}
 		st, err := os.Stat(path)
 		if err != nil || !executable(st) {
 			return fmt.Errorf("bundled %s interpreter missing or not executable: %s; replace the complete Caliper folder", profile, path)
@@ -85,7 +92,7 @@ func Python(root, profile string) string {
 
 // platform is the bundled runtime identity this build can run: darwin arm64
 // ships the MLX worker; windows amd64 ships the decision stack and drives
-// Ollama. Any other platform has no bundle identity of its own.
+// Ollama. Linux ships the decision stack and uses an external worker server.
 func platform() string { return platformFor(runtime.GOOS, runtime.GOARCH) }
 
 func platformFor(goos, goarch string) string {
@@ -94,6 +101,8 @@ func platformFor(goos, goarch string) string {
 		return "darwin-arm64"
 	case goos == "windows" && goarch == "amd64":
 		return "windows-amd64"
+	case goos == "linux" && (goarch == "amd64" || goarch == "arm64"):
+		return "linux-" + goarch
 	default:
 		return ""
 	}
@@ -102,7 +111,7 @@ func platformFor(goos, goarch string) string {
 // requiredProfiles are the interpreters a complete bundle must contain here:
 // the MLX worker is Apple-only; the decision sidecar runs everywhere.
 func requiredProfiles() []string {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS != "darwin" {
 		return []string{"decision"}
 	}
 	return []string{"worker", "decision"}
@@ -131,7 +140,10 @@ func rgFileName() string {
 func Tool(name string) (string, error) { return ToolAt(Root(), name) }
 func ToolAt(root, name string) (string, error) {
 	if name == "rg" && Managed(root) {
-		p := filepath.Join(root, "bin", rgFileName())
+		p, err := containedPath(root, "bin/"+rgFileName())
+		if err != nil {
+			return "", err
+		}
 		s, err := os.Stat(p)
 		if err != nil || !executable(s) {
 			return "", fmt.Errorf("bundled ripgrep missing or not executable: %s; replace the complete Caliper folder", p)

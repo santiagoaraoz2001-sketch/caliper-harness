@@ -37,9 +37,15 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-const version = "0.1.1"
+const version = "0.1.2"
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "install-activate" {
+		os.Exit(activateInstalledVersion())
+	}
+	if launched, code := launchSelectedVersion(); launched {
+		os.Exit(code)
+	}
 	if len(os.Args) < 2 {
 		os.Args = append(os.Args, "tui")
 	}
@@ -231,7 +237,7 @@ func runTUI(args cliArgs) {
 	}
 	sweepSessions(cfg)
 	var sidecar *serve.Proc
-	if cfg.Model.Name != "" {
+	if cfg.Model.Name != "" && !cfg.Decision.Disabled {
 		boot.begin("Decision service", "Checking the configured service")
 		sidecar = ensureSidecarContext(startupCtx, cfg, boot.detail)
 		state, message := "info", "Preparation complete · inspect readiness in Status"
@@ -239,8 +245,10 @@ func runTUI(args cliArgs) {
 			state, message = "warn", boot.message
 		}
 		boot.finish(state, message)
-	} else {
+	} else if cfg.Model.Name == "" {
 		boot.line("info", "Model selection", "Choose an existing model in Setup")
+	} else {
+		boot.line("info", "Decision service", "Disabled · readiness and required decisions ask you")
 	}
 	if sidecar != nil {
 		if startupCtx.Err() == nil {
@@ -290,7 +298,7 @@ func ensureSidecarWith(cfg config.Config, note func(string)) *serve.Proc {
 }
 
 func ensureSidecarContext(ctx context.Context, cfg config.Config, note func(string)) *serve.Proc {
-	if !decision.NativeRuntime(cfg.Decision.Runtime) {
+	if cfg.Decision.Disabled || !decision.NativeRuntime(cfg.Decision.Runtime) {
 		return nil
 	}
 	if ctx.Err() != nil {
@@ -502,14 +510,14 @@ func runGraph(args cliArgs) {
 	defer s.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	dj := decision.New(cfg.Decision.Server, cfg.Decision.Model, cfg.Decision.Device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(decision.SelectionFor(cfg.Decision)).WithPrompts(pc).WithInputLimit(cfg.Decision.MaxInputTokens).WithParams(run.ModelParams(cfg.Params))
+	dj := decision.New(cfg.Decision.Server, cfg.Decision.Model, cfg.Decision.Device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithDisabled(cfg.Decision.Disabled).WithSelection(decision.SelectionFor(cfg.Decision)).WithPrompts(pc).WithInputLimit(cfg.Decision.MaxInputTokens).WithParams(run.ModelParams(cfg.Params))
 	api := graph.NewWithReady(s, version, sessionsDir, func(ctx context.Context, id string) (*plan.Approach, error) {
 		input, err := ask.NewFileInput(os.Stdin)
 		if err != nil {
 			return nil, err
 		}
 		defer input.Close()
-		d := launch.Deps{Prompts: pc, Store: s, Wf: cfg.Workflows, Judge: dj.Judge, Threshold: cfg.Decision.RiskThreshold, CoherenceMaxChars: cfg.Decision.CoherenceMaxChars, In: input, Out: os.Stderr}
+		d := launch.Deps{ManualReadiness: cfg.Decision.Disabled, Prompts: pc, Store: s, Wf: cfg.Workflows, Judge: dj.Judge, Threshold: cfg.Decision.RiskThreshold, CoherenceMaxChars: cfg.Decision.CoherenceMaxChars, In: input, Out: os.Stderr}
 		return launch.Ready(ctx, d, id)
 	})
 	w, err := files.Capture(cfg.Tools.Bash, pc)
@@ -777,7 +785,7 @@ func runDecision(args cliArgs) {
 	if err != nil {
 		fatal(err)
 	}
-	c := decision.New(server, cfg.Decision.Model, device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(selection).WithPrompts(pc).WithInputLimit(cfg.Decision.MaxInputTokens).WithParams(run.ModelParams(cfg.Params))
+	c := decision.New(server, cfg.Decision.Model, device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithDisabled(cfg.Decision.Disabled).WithSelection(selection).WithPrompts(pc).WithInputLimit(cfg.Decision.MaxInputTokens).WithParams(run.ModelParams(cfg.Params))
 	v, err := c.Judge(context.Background(), decision.Request{Context: ctxText, Instructions: instructions, Options: opts})
 	if err != nil {
 		fatal(err)

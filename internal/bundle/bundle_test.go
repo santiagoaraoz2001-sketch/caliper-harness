@@ -101,7 +101,7 @@ func TestIncompleteBuildRefusesOtherwiseValidBundle(t *testing.T) {
 func TestManagedPlatformRequiresExactArchitecture(t *testing.T) {
 	for _, tc := range []struct{ os, arch, want string }{
 		{"darwin", "arm64", "darwin-arm64"}, {"windows", "amd64", "windows-amd64"},
-		{"darwin", "amd64", ""}, {"windows", "arm64", ""}, {"linux", "amd64", ""}, {"linux", "arm64", ""},
+		{"darwin", "amd64", ""}, {"windows", "arm64", ""}, {"linux", "amd64", "linux-amd64"}, {"linux", "arm64", "linux-arm64"},
 	} {
 		if got := platformFor(tc.os, tc.arch); got != tc.want {
 			t.Fatalf("%s/%s: %q", tc.os, tc.arch, got)

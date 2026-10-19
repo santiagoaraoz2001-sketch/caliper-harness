@@ -101,7 +101,8 @@ type Runner struct {
 	UsedOut      int
 	UsageUnknown bool
 	// Judge resolves enabled guards and admission; thinking/compaction refuse if missing.
-	Judge JudgeFunc
+	Judge           JudgeFunc
+	ManualDecisions bool // decision opt-out requests human admission through Ask
 	// Threshold belongs to factual admission; advisory supervision uses the owner's 0.5 floor.
 	Threshold float64
 	Ask       func(ctx context.Context, prompt string) bool

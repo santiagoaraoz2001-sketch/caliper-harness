@@ -74,12 +74,38 @@ func checkCoherence(ctx context.Context, d Deps, approachID string, p *plan.Plan
 	if err := requiredCommands(d, tasks); err != nil {
 		return err
 	}
-	if d.Judge == nil {
-		return fmt.Errorf("launch gate has no decision judge wired — refusing %q", approachID)
-	}
 	req, size, err := coherenceRequest(d, p, tasks)
 	if err != nil {
 		return err
+	}
+	if d.ManualReadiness {
+		prompt := fmt.Sprintf("Decision model disabled — approve approach %q as ready for execution? Review the complete task briefs below; this is readiness approval, not evidence that code passed checks or independent review.\n", approachID)
+		for _, row := range strings.Split(req.Context, "\n") {
+			prompt += fmt.Sprintf("\n%+q", row)
+		}
+		accepted := false
+		if d.Ask != nil {
+			accepted = d.Ask(ctx, prompt)
+		} else if d.In != nil && d.Out != nil {
+			accepted = auth.Ask(ctx, d.In, d.Out, prompt)
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if d.Log != nil {
+			raw, _ := json.Marshal(struct {
+				Approach, Brief string
+				Approved        bool
+			}{approachID, req.Context, accepted})
+			d.Log("manual-readiness", string(raw))
+		}
+		if !accepted {
+			return fmt.Errorf("readiness not approved; approve the exact brief in an interactive session or enable the decision model")
+		}
+		return nil
+	}
+	if d.Judge == nil {
+		return fmt.Errorf("PAT readiness has no decision judge; enable it in Settings (decision.disabled: false) — refusing %q", approachID)
 	}
 	if d.CoherenceMaxChars > 0 && size > d.CoherenceMaxChars {
 		return fmt.Errorf("readiness request is %d bytes, exceeds decision.coherence_max_chars=%d — split or narrow the full brief; no judgment ran", size, d.CoherenceMaxChars)

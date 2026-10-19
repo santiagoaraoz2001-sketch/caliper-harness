@@ -16,7 +16,7 @@ import (
 
 // writeInventory records files in MANIFEST.sha256 exactly as the builder's
 // write_manifest.py does, so verification is tested against an independent
-// fixture rather than WriteManifest's own output.
+// fixture rather than the repair writer's own output.
 func writeInventory(t *testing.T, root string, files map[string]string) {
 	t.Helper()
 	rels := make([]string, 0, len(files))
@@ -163,32 +163,5 @@ func TestInstallRipgrepFromZipArchive(t *testing.T) {
 	got, err := os.ReadFile(filepath.Join(root, "bin", rgFileName()))
 	if err != nil || string(got) != "fake rg" {
 		t.Fatalf("installed rg=%q err=%v", got, err)
-	}
-}
-
-func TestWriteManifestRoundTripsThroughVerify(t *testing.T) {
-	root := t.TempDir()
-	for rel, contents := range map[string]string{"a.txt": "a", "sub/b.txt": "b"} {
-		full := filepath.Join(root, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(full, []byte(contents), 0644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	staged := filepath.Join(root, ".runtime-repair", "junk.txt")
-	if err := os.MkdirAll(filepath.Dir(staged), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(staged, []byte("junk"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := WriteManifest(root); err != nil {
-		t.Fatal(err)
-	}
-	checked, failures, err := VerifyManifest(root)
-	if err != nil || len(failures) != 0 || checked != 2 {
-		t.Fatalf("checked=%d failures=%v err=%v", checked, failures, err)
 	}
 }

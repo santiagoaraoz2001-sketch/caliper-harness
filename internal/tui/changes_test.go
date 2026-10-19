@@ -227,7 +227,7 @@ func TestOriginalCommandsRemainUnchangedWithAdditions(t *testing.T) {
 			t.Fatalf("original command %s missing", name)
 		}
 	}
-	if len(commands) != len(original)+4 || !names["open-diff"] || !names["changes"] || !names["turns"] || !names["setup"] {
+	if len(commands) != len(original)+5 || !names["open-diff"] || !names["changes"] || !names["turns"] || !names["setup"] || !names["update"] {
 		t.Fatal("unexpected registry changes")
 	}
 }

@@ -38,6 +38,11 @@ type DiscoveredServer struct {
 // answers the Ollama, OpenAI, or sidecar health contracts on loopback —
 // or is owned by the Rulith manager — is a model server here.
 func DiscoverServers(ctx context.Context, client *http.Client) ([]DiscoveredServer, error) {
+	return DiscoverServersExcept(ctx, client, "")
+}
+
+// DiscoverServersExcept leaves an explicitly disabled role endpoint untouched.
+func DiscoverServersExcept(ctx context.Context, client *http.Client, excluded string) ([]DiscoveredServer, error) {
 	listeners, err := loopbackListeners(ctx)
 	if err != nil {
 		return nil, err
@@ -46,6 +51,9 @@ func DiscoverServers(ctx context.Context, client *http.Client) ([]DiscoveredServ
 	var endpoints []string
 	for _, l := range listeners {
 		base := "http://" + net.JoinHostPort(l.Host, strconv.Itoa(l.Port))
+		if SameEndpoint(base, excluded) {
+			continue
+		}
 		if _, dup := byEndpoint[base]; !dup {
 			byEndpoint[base] = l
 			endpoints = append(endpoints, base)

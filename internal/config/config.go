@@ -40,6 +40,10 @@ func DefaultFile() string {
 	if _, err := os.Stat(LegacyPath); !errors.Is(err, os.ErrNotExist) {
 		return LegacyPath
 	}
+	if dir, err := WorkspaceDir(); err == nil {
+		return filepath.Join(dir, DefaultPath)
+	}
+	// Load reports the underlying user-directory error before any write.
 	return DefaultPath
 }
 
@@ -423,8 +427,9 @@ type WorkflowsConfig struct {
 }
 
 type DecisionConfig struct {
-	Runtime         string `yaml:"runtime"`        // laya or native system_one, never inferred from the checkpoint name
-	Path            string `yaml:"path,omitempty"` // optional downloaded local assets bound to Model
+	Disabled        bool   `yaml:"disabled,omitempty"` // retain selection while disabling decision inference and automatic service startup
+	Runtime         string `yaml:"runtime"`            // laya or native system_one, never inferred from the checkpoint name
+	Path            string `yaml:"path,omitempty"`     // optional downloaded local assets bound to Model
 	Revision        string `yaml:"revision,omitempty"`
 	TrustRemoteCode bool   `yaml:"trust_remote_code"` // opt in to downloaded checkpoint Python
 
@@ -539,7 +544,10 @@ func Save(path string, cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("cannot save config: %v", err)
 	}
-	if err := os.WriteFile(path, out, 0644); err != nil {
+	if err := CreateWorkspaceConfigDir(path); err != nil {
+		return fmt.Errorf("cannot create config directory: %w", err)
+	}
+	if err := writeConfig(path, out); err != nil {
 		return fmt.Errorf("cannot save config file %s: %s", path, plainIO(err))
 	}
 	return nil
@@ -550,6 +558,9 @@ func Save(path string, cfg Config) error {
 // values are plain-language errors.
 func Load(path string) (cfg Config, usedFile bool, err error) {
 	cfg = Defaults()
+	if err := workspaceDefaults(&cfg); err != nil {
+		return Config{}, false, err
+	}
 	if err := loadConnections(&cfg); err != nil {
 		return Config{}, false, err
 	}

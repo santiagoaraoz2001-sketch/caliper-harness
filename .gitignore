@@ -38,3 +38,7 @@ __pycache__/
 /specific-harness-inventory.md
 /internal/run/data/
 /RELEASE-NOTES-*.md
+
+# npm distribution development dependencies
+scripts/npm/node_modules/
+scripts/npm/*.tgz

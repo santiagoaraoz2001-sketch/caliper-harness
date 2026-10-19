@@ -47,10 +47,11 @@ type Deps struct {
 	Wf           config.WorkflowsConfig
 	// Judge and Threshold drive the launch ready-check; In/Out carry
 	// its unsure-prompt. A nil Judge refuses every launch.
-	Judge     func(context.Context, decision.Request) (decision.Verdict, error)
-	Threshold float64
-	In        io.Reader
-	Out       io.Writer
+	ManualReadiness bool // explicit decision opt-out uses human approval, never a fabricated judge verdict
+	Judge           func(context.Context, decision.Request) (decision.Verdict, error)
+	Threshold       float64
+	In              io.Reader
+	Out             io.Writer
 	// CoherenceMaxChars caps the ready-check question; LoopRepeat and
 	// LoopStall arm subagent loop detection (0 disables each).
 	CoherenceMaxChars int
@@ -469,17 +470,21 @@ func childGate(d Deps, next agent.Exec) agent.Exec {
 // roleRunner creates a headless role. Its owning worker/reviewer path adds
 // task-bound persistence and per-call authorization before running it.
 func roleRunner(d Deps, window int) *agent.Runner {
-	return &agent.Runner{Prompts: d.Prompts,
+	r := &agent.Runner{Prompts: d.Prompts,
 		WorkspaceExcludes: d.WorkspaceExcludes,
 		Model:             d.NewModel(), Registry: d.NewRegistry(), Exec: agent.Direct,
 		MaxSteps: d.MaxSteps, MaxRunSeconds: d.MaxRunSeconds, Out: io.Discard, MaxTokens: window,
-		Judge: d.Judge, Threshold: d.Threshold,
+		Judge: d.Judge, Threshold: d.Threshold, ManualDecisions: d.ManualReadiness,
 		LoopRepeat: d.LoopRepeat, LoopStall: d.LoopStall,
 		ThinkingLoop: d.ThinkingLoop,
 		Compaction:   d.Compaction, TemplatesDir: d.TemplatesDir,
 		Prune: d.Prune, Behavior: d.Behavior,
-		// Ask nil: headless subagents stop on unsure confirms.
+		// Optional human confirmations are wired only for explicit decision opt-out.
 	}
+	if d.ManualReadiness {
+		r.Ask = d.Ask
+	}
+	return r
 }
 func runSubagent(ctx context.Context, d Deps, prompt string, window int) (string, []llm.Message, outcome.Outcome, error) {
 	sub := roleRunner(d, window)

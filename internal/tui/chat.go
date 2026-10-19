@@ -1190,8 +1190,8 @@ func (m *Model) compactChat() tea.Cmd {
 	}
 	server, model, runtime := m.Server, m.ModelName, cfg.Model.Runtime
 	params := run.ModelParams(cfg.Params)
-	dj := decision.New(cfg.Decision.Server, cfg.Decision.Model, cfg.Decision.Device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(decision.SelectionFor(cfg.Decision)).WithPrompts(pc).WithInputLimit(cfg.Decision.MaxInputTokens).WithParams(run.ModelParams(cfg.Params))
-	r := agent.Runner{Prompts: pc, ModelKey: m.contextKey(), Model: llm.New(server, model).WithPlainTimeout(time.Duration(cfg.Model.PlainRequestTimeoutSeconds) * time.Second).WithRuntime(runtime).WithParams(params), MaxTokens: m.St.CtxWindow, TemplatesDir: cfg.TemplatesDir(), Compaction: agent.Compaction{Summary: cfg.Context.Summary, Step: cfg.Context.SummaryStep, Max: cfg.Context.SummaryMax, WordsPerToken: cfg.Context.SummaryWordsPerToken}, Judge: dj.Judge, Threshold: cfg.Decision.RiskThreshold, JudgmentContextChars: cfg.Decision.JudgmentContextChars}
+	dj := decision.New(cfg.Decision.Server, cfg.Decision.Model, cfg.Decision.Device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithDisabled(cfg.Decision.Disabled).WithSelection(decision.SelectionFor(cfg.Decision)).WithPrompts(pc).WithInputLimit(cfg.Decision.MaxInputTokens).WithParams(run.ModelParams(cfg.Params))
+	r := agent.Runner{ManualDecisions: cfg.Decision.Disabled, Ask: m.askYesNo(m.Chat.Seq), Prompts: pc, ModelKey: m.contextKey(), Model: llm.New(server, model).WithPlainTimeout(time.Duration(cfg.Model.PlainRequestTimeoutSeconds) * time.Second).WithRuntime(runtime).WithParams(params), MaxTokens: m.St.CtxWindow, TemplatesDir: cfg.TemplatesDir(), Compaction: agent.Compaction{Summary: cfg.Context.Summary, Step: cfg.Context.SummaryStep, Max: cfg.Context.SummaryMax, WordsPerToken: cfg.Context.SummaryWordsPerToken}, Judge: dj.Judge, Threshold: cfg.Decision.RiskThreshold, JudgmentContextChars: cfg.Decision.JudgmentContextChars}
 	r.ThinkingLoop = run.ThinkingLoopPolicy(cfg)
 	var ctx context.Context
 	var cancel context.CancelFunc

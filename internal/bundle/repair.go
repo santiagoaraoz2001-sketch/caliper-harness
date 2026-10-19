@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -189,15 +190,20 @@ func extractPython(archive, dst string) error {
 		if err != nil {
 			return fmt.Errorf("cannot read Python archive: %w", err)
 		}
-		rel := path.Clean(header.Name)
-		rel = strings.TrimPrefix(rel, "python/")
+		if strings.ContainsAny(header.Name, "\\:\x00") || (header.Name != "python" && !strings.HasPrefix(header.Name, "python/")) {
+			return fmt.Errorf("invalid Python archive path: %q", header.Name)
+		}
+		rel := path.Clean(strings.TrimPrefix(header.Name, "python/"))
 		if rel == "." || rel == "python" {
 			continue
 		}
 		if rel == ".." || strings.HasPrefix(rel, "../") || path.IsAbs(rel) {
 			return fmt.Errorf("Python archive entry escapes its folder: %q", header.Name)
 		}
-		target := filepath.Join(dst, filepath.FromSlash(rel))
+		target, err := containedPath(dst, rel)
+		if err != nil {
+			return err
+		}
 		switch header.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(target, 0755); err != nil {
@@ -215,16 +221,35 @@ func extractPython(archive, dst string) error {
 				return err
 			}
 		case tar.TypeSymlink, tar.TypeLink:
-			// Standalone builds link python -> python3.x; Windows archives
-			// ship real files instead, and unprivileged symlinks may fail.
-			if runtime.GOOS == "windows" {
-				continue
-			}
+			// Unix standalone builds link python -> python3.x. Validate link
+			// destinations on every OS; never silently omit an archive entry.
 			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 				return err
 			}
-			os.Remove(target)
-			if err := os.Symlink(header.Linkname, target); err != nil {
+			link := header.Linkname
+			if strings.ContainsAny(link, "\\:\x00") || path.IsAbs(link) {
+				return fmt.Errorf("Python archive link escapes its folder: %q", link)
+			}
+			resolved := path.Clean(path.Join(path.Dir(rel), link))
+			if header.Typeflag == tar.TypeLink {
+				if !strings.HasPrefix(link, "python/") {
+					return fmt.Errorf("invalid Python archive hard link: %q", link)
+				}
+				resolved = path.Clean(strings.TrimPrefix(link, "python/"))
+			}
+			if resolved == ".." || strings.HasPrefix(resolved, "../") {
+				return fmt.Errorf("Python archive link escapes its folder: %q", link)
+			}
+			linked, err := containedPath(dst, resolved)
+			if err != nil {
+				return err
+			}
+			if header.Typeflag == tar.TypeLink {
+				err = os.Link(linked, target)
+			} else {
+				err = os.Symlink(link, target)
+			}
+			if err != nil {
 				return err
 			}
 		}
@@ -316,12 +341,32 @@ func extractTarFile(archive, base, dst string) (bool, error) {
 // which the caller must have verified against the install inventory first.
 // On success the runtime manifest is regenerated, the structural check
 // passes, and a fresh inventory describes the verified tree.
-func Repair(root string, failures []Failure, note Reporter) error {
+func Repair(root string, failures []Failure, note Reporter) (result error) {
 	if note == nil {
 		note = func(string) {}
 	}
 	if _, unrepairable := ClassifyFailures(failures); len(unrepairable) > 0 {
 		return fmt.Errorf("%s cannot be downloaded; replace the complete Caliper folder", unrepairable[0].Path)
+	}
+	// Recheck at the mutation boundary, including every trust anchor and script.
+	// The caller's earlier inventory result may no longer describe these bytes.
+	_, current, err := VerifyManifest(root)
+	if err != nil {
+		return err
+	}
+	if _, broken := ClassifyFailures(current); len(broken) > 0 {
+		return fmt.Errorf("repair source changed: %s; replace the complete Caliper folder", broken[0])
+	}
+	failures = current
+	if len(failures) == 0 {
+		return nil
+	}
+	originalInventory, err := os.ReadFile(filepath.Join(root, ManifestFile))
+	if err != nil {
+		return err
+	}
+	if err := repairAnchorsInventoried(originalInventory); err != nil {
+		return err
 	}
 	sources, err := loadSources(root)
 	if err != nil {
@@ -340,14 +385,20 @@ func Repair(root string, failures []Failure, note Reporter) error {
 			}
 		}
 	}
-	stage := filepath.Join(root, ".runtime-repair")
-	if err := os.RemoveAll(stage); err != nil {
+	stage, err := os.MkdirTemp(root, ".runtime-repair-")
+	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(stage, 0755); err != nil {
-		return err
-	}
-	defer os.RemoveAll(stage)
+	tx := &repairTransaction{stage: stage}
+	defer func() {
+		if result != nil {
+			if err := tx.rollback(); err != nil {
+				result = errors.Join(result, err)
+				return
+			}
+		}
+		os.RemoveAll(stage)
+	}()
 	client := &http.Client{Timeout: 30 * time.Minute}
 
 	if needRipgrep {
@@ -356,10 +407,11 @@ func Repair(root string, failures []Failure, note Reporter) error {
 		if err := downloadVerified(client, sources.Ripgrep.URL, sources.Ripgrep.SHA256, archive); err != nil {
 			return err
 		}
-		if err := installRipgrep(root, archive, sources.Ripgrep.URL); err != nil {
+		freshRoot := filepath.Join(stage, "ripgrep")
+		if err := installRipgrep(freshRoot, archive, sources.Ripgrep.URL); err != nil {
 			return err
 		}
-		note("ripgrep restored")
+		note("ripgrep download verified")
 	}
 
 	if len(profiles) > 0 {
@@ -378,6 +430,24 @@ func Repair(root string, failures []Failure, note Reporter) error {
 				return err
 			}
 		}
+	}
+	// Prepare every requested dependency before changing the installed tree.
+	if needRipgrep {
+		if err := tx.activate(filepath.Join(stage, "ripgrep", "bin", rgFileName()), filepath.Join(root, "bin", rgFileName())); err != nil {
+			return err
+		}
+	}
+	for _, profile := range requiredProfiles() {
+		if profiles[profile] {
+			if err := tx.activate(filepath.Join(stage, "new-"+profile), filepath.Join(root, "runtime", profile)); err != nil {
+				return err
+			}
+		}
+	}
+	if len(profiles) > 0 {
+		if err := tx.backup(filepath.Join(root, Marker)); err != nil {
+			return err
+		}
 		if err := regenerateManifest(root); err != nil {
 			return err
 		}
@@ -388,7 +458,10 @@ func Repair(root string, failures []Failure, note Reporter) error {
 	// Everything restored came from hash-checked pinned sources and passed
 	// the runtime import verification above, so re-inventory the tree as
 	// the new verified state for later startups.
-	if err := WriteManifest(root); err != nil {
+	if err := tx.backup(filepath.Join(root, ManifestFile)); err != nil {
+		return err
+	}
+	if err := writeRepairedInventory(root, originalInventory, profiles, needRipgrep); err != nil {
 		return fmt.Errorf("cannot record the repaired installation: %w", err)
 	}
 	if _, remaining, err := VerifyManifest(root); err != nil || len(remaining) > 0 {
@@ -402,7 +475,7 @@ func Repair(root string, failures []Failure, note Reporter) error {
 }
 
 // repairProfile rebuilds one runtime/<profile> interpreter in staging and
-// swaps it into place, restoring the old folder if the swap fails.
+// leaves activation to the transaction after every profile is prepared.
 func repairProfile(root, stage, pythonArchive, profile string, note Reporter) error {
 	installed := filepath.Join(root, "runtime", profile)
 	lock := filepath.Join(installed, "requirements.lock")
@@ -429,34 +502,20 @@ func repairProfile(root, stage, pythonArchive, profile string, note Reporter) er
 	if err := os.WriteFile(filepath.Join(fresh, "requirements.lock"), lockBytes, 0644); err != nil {
 		return err
 	}
-	backup := filepath.Join(stage, "old-"+profile)
-	if err := os.Rename(installed, backup); err != nil {
-		return fmt.Errorf("cannot stage the repaired %s runtime: %w", profile, err)
-	}
-	if err := os.Rename(fresh, installed); err != nil {
-		os.Rename(backup, installed)
-		return fmt.Errorf("cannot activate the repaired %s runtime: %w", profile, err)
-	}
-	os.RemoveAll(backup)
-	note(fmt.Sprintf("%s Python runtime restored", profile))
+	note(fmt.Sprintf("%s Python runtime prepared", profile))
 	return nil
 }
 
 // regenerateManifest reruns the bundled runtime verifier with the repaired
 // interpreters and republishes runtime/manifest.json from its report.
 func regenerateManifest(root string) error {
-	var script string
-	for _, candidate := range []string{
-		filepath.Join(root, "python", "windows", "verify_runtime.py"),
-		filepath.Join(root, "python", "macos", "verify_runtime.py"),
-	} {
-		if _, err := os.Stat(candidate); err == nil {
-			script = candidate
-			break
-		}
+	directory := runtime.GOOS
+	if directory == "darwin" {
+		directory = "macos"
 	}
-	if script == "" {
-		return fmt.Errorf("bundled runtime verifier missing; replace the complete Caliper folder")
+	script := filepath.Join(root, "python", directory, "verify_runtime.py")
+	if _, err := os.Stat(script); err != nil {
+		return fmt.Errorf("bundled runtime verifier missing: %s; replace the complete Caliper folder", script)
 	}
 	profile := "decision"
 	if runtime.GOOS == "darwin" {
@@ -466,11 +525,101 @@ func regenerateManifest(root string) error {
 	command.Env = PythonEnv(os.Environ(), nil)
 	output, err := command.Output()
 	if err != nil {
-		return fmt.Errorf("repaired runtime failed verification: %s failed: %w", filepath.Base(command.Path), err)
+		var exit *exec.ExitError
+		detail := ""
+		if errors.As(err, &exit) {
+			detail = strings.TrimSpace(string(exit.Stderr))
+		}
+		return fmt.Errorf("repaired runtime failed verification: %s failed: %w\n%s", filepath.Base(command.Path), err, detail)
 	}
-	pending := filepath.Join(root, Marker+".tmp")
-	if err := os.WriteFile(pending, output, 0644); err != nil {
+	pending, err := os.CreateTemp(filepath.Dir(filepath.Join(root, Marker)), ".manifest-*")
+	if err != nil {
 		return err
 	}
-	return replaceFile(pending, filepath.Join(root, Marker))
+	defer os.Remove(pending.Name())
+	if _, err := pending.Write(output); err != nil {
+		pending.Close()
+		return err
+	}
+	if err := pending.Sync(); err != nil {
+		pending.Close()
+		return err
+	}
+	if err := pending.Close(); err != nil {
+		return err
+	}
+	return replaceFile(pending.Name(), filepath.Join(root, Marker))
+}
+
+// Keep the previous dependency until the complete repaired tree is verified.
+// A failed import, inventory write, or later profile swap restores all earlier
+// swaps, instead of deleting the only usable copy during a partial repair.
+type repairTransaction struct {
+	stage    string
+	previous []struct{ target, backup string }
+}
+
+func (tx *repairTransaction) backup(target string) error {
+	backup := filepath.Join(tx.stage, fmt.Sprintf("previous-%d", len(tx.previous)))
+	if _, err := os.Lstat(target); os.IsNotExist(err) {
+		backup = ""
+	} else if err != nil {
+		return err
+	} else if err := os.Rename(target, backup); err != nil {
+		return err
+	}
+	tx.previous = append(tx.previous, struct{ target, backup string }{target, backup})
+	return nil
+}
+func (tx *repairTransaction) activate(fresh, target string) error {
+	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+		return err
+	}
+	if err := tx.backup(target); err != nil {
+		return err
+	}
+	return os.Rename(fresh, target)
+}
+func (tx *repairTransaction) rollback() error {
+	var failures []error
+	for i := len(tx.previous) - 1; i >= 0; i-- {
+		item := tx.previous[i]
+		if err := os.RemoveAll(item.target); err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		if item.backup != "" {
+			if err := os.Rename(item.backup, item.target); err != nil {
+				failures = append(failures, fmt.Errorf("restore %s from preserved %s: %w", item.target, item.backup, err))
+			}
+		}
+	}
+	return errors.Join(failures...)
+}
+
+func repairAnchorsInventoried(inventory []byte) error {
+	entries := map[string]bool{}
+	for _, line := range strings.Split(string(inventory), "\n") {
+		if len(line) >= 67 {
+			rel, err := manifestRel(line[66:])
+			if err != nil {
+				return err
+			}
+			entries[rel] = true
+		}
+	}
+	directory := runtime.GOOS
+	if directory == "darwin" {
+		directory = "macos"
+	}
+	anchors := []string{"runtime/sources.json", Marker, "python/" + directory + "/verify_runtime.py"}
+	for _, profile := range requiredProfiles() {
+		anchors = append(anchors, "runtime/"+profile+"/requirements.lock")
+	}
+	for _, rel := range anchors {
+		if !entries[rel] {
+			return fmt.Errorf("repair trust anchor %s is not inventoried; replace the complete Caliper folder", rel)
+		}
+	}
+	return nil
 }

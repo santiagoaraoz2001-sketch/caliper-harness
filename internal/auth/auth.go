@@ -54,15 +54,16 @@ type Judge func(context.Context, decision.Request) (decision.Verdict, error)
 // displayed arg values (0 = unlimited). Log takes one judgment event per
 // verdict (nil skips); JudgmentContextChars caps its context (0 = whole).
 type Gate struct {
-	Prompts     *prompts.Catalog
-	Mode        string
-	In          io.Reader
-	Out         io.Writer
-	Judge       Judge
-	Threshold   float64
-	Judged      []string
-	Free        []string
-	MaxArgChars int
+	DecisionDisabled bool // explicit opt-out asks the user for non-free risky calls
+	Prompts          *prompts.Catalog
+	Mode             string
+	In               io.Reader
+	Out              io.Writer
+	Judge            Judge
+	Threshold        float64
+	Judged           []string
+	Free             []string
+	MaxArgChars      int
 	// AskFunc answers y/n prompts. Nil means stdin/stdout transport.
 	AskFunc              func(ctx context.Context, prompt string) bool
 	Log                  func(kind, text string)
@@ -120,6 +121,10 @@ func (g *Gate) Wrap(next agent.Exec) agent.Exec {
 	if g.Mode == config.AuthRisky {
 		return g.risky(next)
 	}
+	return g.manual(next)
+}
+
+func (g *Gate) manual(next agent.Exec) agent.Exec {
 	return func(ctx context.Context, def tool.Definition, args tool.Args) (tool.Result, error) {
 		if err := ctx.Err(); err != nil {
 			return tool.Result{}, err
@@ -128,7 +133,11 @@ func (g *Gate) Wrap(next agent.Exec) agent.Exec {
 		if err != nil {
 			return tool.Result{Text: fmt.Sprintf("blocked: cannot encode complete approval action: %v", err), Blocked: true}, nil
 		}
-		allowed := g.ask(ctx, manualPrompt(fmt.Sprintf("run %s?", def.Name), args, g.MaxArgChars, action))
+		lead := fmt.Sprintf("run %s?", def.Name)
+		if g.DecisionDisabled {
+			lead = "Decision model disabled — approve " + def.Name + "?"
+		}
+		allowed := g.ask(ctx, manualPrompt(lead, args, g.MaxArgChars, action))
 		if err := ctx.Err(); err != nil {
 			return tool.Result{}, err
 		}
@@ -155,6 +164,9 @@ func (g *Gate) risky(next agent.Exec) agent.Exec {
 		}
 		if g.free(def.Name) || def.Bound && def.Label == "plan" {
 			return next(ctx, def, args)
+		}
+		if g.DecisionDisabled {
+			return g.manual(next)(ctx, def, args)
 		}
 		if g.Judge == nil {
 			return tool.Result{Text: "blocked: authorize-risky has no decision judge wired — set auth.mode to yolo or authorize-all", Blocked: true}, nil

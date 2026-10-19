@@ -6,13 +6,18 @@ Keep the folder intact: `caliper.exe`, any `*.dll` beside it, `bin\`, `runtime\`
 
 ## Install so `caliper` works in every terminal
 
+With Node.js 20 or newer, `npm install -g caliper-harness` installs the complete
+managed application and the `caliper` command. `/update` stages an available
+release for the next launch; your active run and previous work remain intact.
+You can also use the downloadable folder:
+
 From inside the bundle folder, run:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install-windows.ps1
 ```
 
-This copies the folder to `%LOCALAPPDATA%\Caliper` and adds it to your user `PATH`. Open a **new** terminal (cmd, PowerShell or Windows Terminal) and run `caliper`. Terminals that were already open keep the old PATH. Re-running the installer stages the full replacement before switching folders and keeps the previous installation in a named sibling backup. Close Caliper before updating. `-TargetDirectory C:\path\Caliper` selects another location; `-NoPath` leaves PATH management to you. Windows SmartScreen may flag the unsigned development executable on first run; confirm the hash above before allowing it.
+This copies the application into a separate folder under `%LOCALAPPDATA%\Caliper\applications` and registers `%LOCALAPPDATA%\Caliper\commands` on your user `PATH`. Open a **new** terminal (cmd, PowerShell or Windows Terminal) and run `caliper`. Re-running the installer selects a new intact copy without moving the user-data directory, replacing active executables or deleting previous versions. `-TargetDirectory C:\path\Caliper` selects another application root; central user data stays in its original location. `-NoPath` leaves PATH management to you. Windows SmartScreen may flag the unsigned development executable on first run; confirm the hash above before allowing it.
 
 Install a compatible Bash on PATH (for example Git for Windows Bash). Shell tools and coding checks use Bash even when the interactive terminal is PowerShell. Project check tools and inference servers remain external.
 
@@ -30,7 +35,7 @@ The self-contained Windows bundle supplies private standalone Python, the pinned
 
 ## Configure and run
 
-Work from the project directory you want the model to edit and run `caliper`. When no worker is configured, Setup opens automatically. Select a Worker and a Judge, optionally set a project check, then review and save. Press `a` on either model page to add an existing endpoint or local checkpoint/launcher. Connections are reusable across projects; checks and state stay in the project. Native decision models are recommended, and compatible chat judges can also be selected. See [Server and model connections](SERVER-MODELS.md) for supported runtimes, launch controls and precedence. For manual configuration, copy `caliper-harness.yaml.example` into your project as `caliper-harness.yaml` and set:
+Work from the project directory you want the model to edit and run `caliper`. When no worker is configured, Setup opens automatically. Select a Worker and a Judge, optionally set a project check, then review and save. Press `a` on either model page to add an existing endpoint or local checkpoint/launcher. Connections are reusable across projects; new project settings and state are kept under `%LOCALAPPDATA%\caliper\workspaces`, keyed by the project path. Existing project-local files and explicit paths remain in use. Native decision models are recommended, and compatible chat judges can also be selected. See [Server and model connections](SERVER-MODELS.md) for supported runtimes, launch controls and precedence. For manual configuration, copy `caliper-harness.yaml.example` into your project as `caliper-harness.yaml` and set:
 
 - `model.runtime`: `ollama`, or `openai` for a generic compatible server (`mlx` is macOS only).
 - `model.server`: the worker's actual API base, e.g. `http://127.0.0.1:11434/v1` for Ollama.
@@ -38,7 +43,7 @@ Work from the project directory you want the model to edit and run `caliper`. Wh
 - `decision.runtime`, `decision.model`, `decision.path`, `decision.server`, `decision.device`: same meaning as on macOS.
 - `coding.check_command`: a real project check, such as `npm test`, `go test ./...` or `powershell -File scripts\test.ps1`.
 
-Use `/help`, `/status`, `/settings` and `/sessions` exactly as on macOS. New terminal tabs require Windows Terminal (the `wt.exe` on your PATH); in other consoles Caliper prints the resume command instead of opening a tab.
+Use `/help`, `/status`, `/settings` and `/sessions` exactly as on macOS. In Settings, disabling the decision model uses human approval for readiness and Risky actions, preserves checks and independent review, and disables automatic progress advice and recovery. New terminal tabs require Windows Terminal (the `wt.exe` on your PATH); in other consoles Caliper prints the resume command instead of opening a tab.
 
 ## Building from source (developers)
 

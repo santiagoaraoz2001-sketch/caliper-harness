@@ -1,0 +1,26 @@
+{
+  "name": "caliper-harness",
+  "version": "0.1.2",
+  "description": "A local coding harness with tools, planning and durable project memory",
+  "license": "MIT",
+  "repository": "github:santiagoaraoz2001-sketch/caliper-harness",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "caliper": "bin.cjs"
+  },
+  "files": [
+    "bin.cjs",
+    "install.cjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "postinstall": "node install.cjs",
+    "test": "node --test test.cjs"
+  },
+  "dependencies": {
+    "tar": "7.5.22"
+  }
+}

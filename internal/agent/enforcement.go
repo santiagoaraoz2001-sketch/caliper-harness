@@ -330,6 +330,9 @@ func (r *Runner) assignmentExec(next Exec) Exec {
 }
 
 func (r *Runner) enforce(ctx context.Context, final bool, provisional string, log func(string, string) error) (string, error) {
+	if r.ManualDecisions {
+		return "", nil
+	} // Explicit opt-out skips advice, never coding admission.
 	if r.Assigned == nil || !r.PlanningActive() || !final && r.enforcement.latest == nil {
 		return "", nil
 	}

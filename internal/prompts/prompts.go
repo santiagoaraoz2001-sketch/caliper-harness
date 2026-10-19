@@ -327,3 +327,23 @@ func (c *Catalog) YAML() string {
 	}
 	return string(bytes)
 }
+
+// CompatibleWith validates an edited catalog against the next release's keys
+// and template inputs before an updater activates that release. No prompt text
+// is merged or replaced automatically.
+func CompatibleWith(path, nextPath string) error {
+	next, err := os.ReadFile(nextPath)
+	if err != nil {
+		return err
+	}
+	expected, err := decode(next, nextPath, nil)
+	if err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	_, err = decode(raw, path, expected)
+	return err
+}

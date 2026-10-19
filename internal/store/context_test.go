@@ -14,7 +14,14 @@ func TestNativeRemainingDeadlineAndReset(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	// Keep native interruption granularity well below the distinction being
+	// tested: ~2s total with a remaining budget, ~3.5s if the second statement
+	// reuses the original 2s admission timeout. The former 300/200ms timeline
+	// left only 150ms for native settlement and flaked under concurrent suites.
+	const budget = 2 * time.Second
+	const consumed = 1500 * time.Millisecond
+	const latestRemaining = budget + consumed/2
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 	start := time.Now()
 	err = s.UpdateContext(ctx, func(tx *Tx) error {
@@ -22,13 +29,13 @@ func TestNativeRemainingDeadlineAndReset(t *testing.T) {
 			return err
 		}
 		// Consume most of the transaction budget before a second actual native call.
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(consumed)
 		_, err := tx.Query(`UNWIND range(1, 100000) AS a UNWIND range(1, 100000) AS b RETURN sum(a+b) AS n`, nil)
 		return err
 	})
 	elapsed := time.Since(start)
 	t.Logf("writer elapsed=%s error=%v", elapsed, err)
-	if !errors.Is(err, context.DeadlineExceeded) || elapsed > 450*time.Millisecond {
+	if !errors.Is(err, context.DeadlineExceeded) || elapsed > latestRemaining {
 		t.Fatalf("statement reused admission timeout: %s %v", elapsed, err)
 	}
 	rows, err := s.Query(`MATCH(p:Plan) WHERE p.id='deadline' RETURN p.id AS id`, nil)

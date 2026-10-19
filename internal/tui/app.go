@@ -128,6 +128,7 @@ type Model struct {
 	St                  Status
 	StorePath           string
 	Cfg                 config.Config
+	Updater             *updateState
 	Version             string
 	SessionsPath        string
 	Server              string
@@ -185,6 +186,7 @@ func New(cfg config.Config, version string) Model {
 		StorePath:     cfg.Store.Path,
 		Cfg:           cfg,
 		Version:       version,
+		Updater:       &updateState{},
 		SessionsPath:  cfg.Sessions.Path,
 		Server:        cfg.Model.Server,
 		ModelName:     cfg.Model.Name,
@@ -319,6 +321,7 @@ func (m *Model) closeTab() {
 // footer data once immediately.
 func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{textarea.Blink, tickStatus(), fetchLive(m.StorePath, uint64(m.Cfg.Store.BufferPoolBytes)), m.watchFeed(), m.journeyRead()}
+	cmds = append(cmds, m.checkUpdate(false))
 	if m.setupActive() {
 		cmds = append(cmds, m.probeServe())
 	}
@@ -546,6 +549,8 @@ func (m *Model) submit(raw string) tea.Cmd {
 		return nil
 	}
 	switch c.Name {
+	case "update":
+		return m.checkUpdate(true)
 	case "setup":
 		m.OpenSetup()
 		if m.setupActive() {
@@ -663,6 +668,15 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, cmd tea.Cmd) {
 		}
 	}()
 	switch msg := msg.(type) {
+	case updateCheckedMsg:
+		cmd := m.updateChecked(msg)
+		return m, cmd
+	case updatePreparedMsg:
+		cmd := m.updatePrepared(msg)
+		return m, cmd
+	case updateFinishedMsg:
+		cmd := m.updateFinished(msg)
+		return m, cmd
 	case activityTickMsg:
 		m.ActivityTickPending = false
 		if m.activityAnimating() {
@@ -1616,6 +1630,12 @@ func placeholderView(t Tab) string {
 // requestQuit keeps the UI alive until owned work has released its leases.
 func (m *Model) requestQuit() tea.Cmd {
 	m.quitPending = true
+	if m.Updater != nil && m.Updater.cancel != nil {
+		m.Updater.cancel()
+	}
+	if m.Updater != nil && m.Updater.busy {
+		return nil
+	}
 	if m.Chat.Running {
 		m.stopChat()
 	}

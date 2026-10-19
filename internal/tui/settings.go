@@ -37,6 +37,7 @@ func settingFields() []SettingField {
 		{"params", "max_output_tokens", "output tokens including reasoning (0 = runtime policy unknown)", "int"},
 		{"auth", "mode", "auth mode", "auth"},
 		{"context", "window", "context window (0 = auto)", "int"},
+		{"decision", "disabled", "decision model disabled (readiness/risky ask you)", "bool"},
 		{"decision", "server", "decision server URL", "text"},
 		{"decision", "runtime", "decision runtime", "runtime"},
 		{"decision", "path", "decision assets path (optional)", "text"},
@@ -106,6 +107,8 @@ func (m *Model) settingValue(f SettingField) string {
 		return c.Auth.Mode
 	case "context/window":
 		return strconv.Itoa(c.Context.Window)
+	case "decision/disabled":
+		return strconv.FormatBool(c.Decision.Disabled)
 	case "decision/server":
 		return c.Decision.Server
 	case "decision/runtime":
@@ -233,6 +236,8 @@ func (m *Model) applyField(f SettingField, val string) {
 		next.Auth.Mode = val
 	case "context/window":
 		setInt(&next.Context.Window)
+	case "decision/disabled":
+		next.Decision.Disabled = val == "true"
 	case "decision/server":
 		next.Decision.Server = strings.TrimSpace(val)
 	case "decision/runtime":
@@ -267,6 +272,22 @@ func (m *Model) applyField(f SettingField, val string) {
 	}
 	if verr := next.Validate(); verr != nil {
 		m.alert("err", fmt.Sprintf("refusing %s=%q: %s", f.Label, val, verr.Error()))
+		return
+	}
+	if f.Section == "decision" && f.Key == "disabled" {
+		if m.Chat.Running || m.modelWorkActive() || m.Settings.Applying {
+			m.alert("err", "wait for active work to settle before changing decision availability")
+			return
+		}
+		m.Cfg.Decision.Disabled = next.Decision.Disabled
+		if m.Setup.Started {
+			m.Setup.Judge.Disabled = next.Decision.Disabled
+		}
+		if m.Settings.DecisionDraft != nil {
+			m.Settings.DecisionDraft.Disabled = next.Decision.Disabled
+		}
+		m.Settings.DecisionNotice = "decision availability changed for future runs; selected model preserved; s saves"
+		m.alert("info", m.Settings.DecisionNotice)
 		return
 	}
 	if f.Section == "decision" {
@@ -335,7 +356,7 @@ func (m *Model) saveSettings() {
 		return
 	}
 	if m.Settings.DecisionDraft != nil {
-		if m.decisionOwner() != nil {
+		if !m.Cfg.Decision.Disabled && m.decisionOwner() != nil {
 			m.alert("err", "decision selection is staged — press a before saving")
 			return
 		}

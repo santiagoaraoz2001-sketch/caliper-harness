@@ -166,6 +166,10 @@ func (m *Model) setupSave() {
 		m.Setup.Err = err.Error()
 		return
 	}
+	if err := config.CreateWorkspaceConfigDir(m.Setup.Path); err != nil {
+		m.Setup.Err = err.Error()
+		return
+	}
 	if err := os.WriteFile(m.Setup.Path, saved, 0644); err != nil {
 		m.Setup.Err = err.Error()
 		return
@@ -281,7 +285,11 @@ func (m Model) setupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 
 func (s SetupState) reviewRows(width int) []string {
 	var rows []string
-	for _, kv := range [][2]string{{"Model", s.Model.Name}, {"Runtime", s.Model.Runtime}, {"Endpoint", s.Model.Server}, {"Judge", s.Judge.Model + " · " + s.Judge.Runtime}, {"Judge endpoint", s.Judge.Server}, {"Project check (optional)", s.Check.Value()}, {"Save to", s.Path}} {
+	judge := s.Judge.Model + " · " + s.Judge.Runtime
+	if s.Judge.Disabled {
+		judge += " (disabled; required decisions ask you)"
+	}
+	for _, kv := range [][2]string{{"Model", s.Model.Name}, {"Runtime", s.Model.Runtime}, {"Endpoint", s.Model.Server}, {"Judge", judge}, {"Judge endpoint", s.Judge.Server}, {"Project check (optional)", s.Check.Value()}, {"Save to", s.Path}} {
 		for _, line := range Wrap(kv[0]+": "+kv[1], width) {
 			rows = append(rows, Body.Render(line))
 		}
@@ -304,7 +312,11 @@ func (m Model) renderSetup(w, h int) string {
 	switch s.Stage {
 	case 0, 1:
 		if s.Stage == 1 && h > 6 {
-			body = append(body, Guidance.Render("Decision-trained models recommended. Chat-model confidence is self-reported."))
+			if s.Judge.Disabled {
+				body = append(body, Guidance.Render("Decision model disabled. Selection is retained; enable it in Settings."))
+			} else {
+				body = append(body, Guidance.Render("Decision-trained models recommended. Chat-model confidence is self-reported."))
+			}
 		}
 		choices := m.currentSetupChoices()
 		selected := m.setupIndex(choices)

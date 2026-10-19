@@ -91,10 +91,11 @@ func New(d Deps, prompt string) (*agent.Runner, []string, error) {
 	reg := tool.NewRegistry(pc)
 	var r *agent.Runner
 	tools.RegisterAt(reg, d.Cfg, d.In, d.Out, d.Ask, w, func() *tool.Registry { return r.Registry })
-	dj := decision.New(d.Cfg.Decision.Server, d.Cfg.Decision.Model, d.Cfg.Decision.Device, time.Duration(d.Cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(decision.SelectionFor(d.Cfg.Decision)).WithPrompts(pc).WithInputLimit(d.Cfg.Decision.MaxInputTokens).WithParams(ModelParams(d.Cfg.Params))
-	// Execution and decisions share the owning run context.
-	judgeFunc := func(ctx context.Context, r decision.Request) (decision.Verdict, error) { return dj.Judge(ctx, r) }
-	gate := &auth.Gate{Prompts: pc, Mode: d.Cfg.Auth.Mode, In: d.In, Out: d.Out, AskFunc: d.AskYesNo,
+	judgeFunc := configuredJudge(d.Cfg)
+	if d.Cfg.Decision.Disabled {
+		notes = append(notes, "note: decision model disabled; progress advice and call recovery off; PAT readiness and authorize-risky non-free tools ask for your approval; summary compaction also asks for your approval.")
+	}
+	gate := &auth.Gate{DecisionDisabled: d.Cfg.Decision.Disabled, Prompts: pc, Mode: d.Cfg.Auth.Mode, In: d.In, Out: d.Out, AskFunc: d.AskYesNo,
 		Judge: judgeFunc, Threshold: d.Cfg.Decision.RiskThreshold,
 		Judged: d.Cfg.Auth.JudgedTools, Free: d.Cfg.Auth.FreeTools, MaxArgChars: d.Cfg.Auth.MaxArgChars}
 	// Judgment logging is best-effort observability: a failed append
@@ -140,10 +141,11 @@ func New(d Deps, prompt string) (*agent.Runner, []string, error) {
 		Model:             client, Registry: reg, CodingRequired: true, Workspace: w.Path, CheckCommand: d.Cfg.Coding.CheckCommand,
 		Exec:     gate.Wrap(agent.Direct),
 		MaxSteps: d.MaxSteps, MaxRunSeconds: int(d.Cfg.Agent.MaxRunSeconds), Out: d.ReplyOut,
-		SessionID: d.SessionID,
-		Session:   d.Session,
-		MaxTokens: d.Window,
-		Judge:     judgeFunc, Threshold: d.Cfg.Decision.RiskThreshold,
+		SessionID:       d.SessionID,
+		Session:         d.Session,
+		MaxTokens:       d.Window,
+		ManualDecisions: d.Cfg.Decision.Disabled,
+		Judge:           judgeFunc, Threshold: d.Cfg.Decision.RiskThreshold,
 		LoopRepeat: d.Cfg.Agent.LoopRepeat, LoopStall: d.Cfg.Agent.LoopStall,
 		ThinkingLoop:         ThinkingLoopPolicy(d.Cfg),
 		Ask:                  gate.Confirm,
@@ -602,7 +604,7 @@ func LaunchDeps(cfg config.Config, s *store.Store, server, model string, maxStep
 	}
 	d := launchDeps(cfg, s, server, model, maxSteps, window, in, out, w, behavior)
 	d.BehaviorNote = note
-	gate := &auth.Gate{Prompts: pc, Mode: cfg.Auth.Mode, In: in, Out: out, Judge: d.Judge, Threshold: cfg.Decision.RiskThreshold, Judged: cfg.Auth.JudgedTools, Free: cfg.Auth.FreeTools, MaxArgChars: cfg.Auth.MaxArgChars}
+	gate := &auth.Gate{DecisionDisabled: cfg.Decision.Disabled, Prompts: pc, Mode: cfg.Auth.Mode, In: in, Out: out, Judge: d.Judge, Threshold: cfg.Decision.RiskThreshold, Judged: cfg.Auth.JudgedTools, Free: cfg.Auth.FreeTools, MaxArgChars: cfg.Auth.MaxArgChars}
 	if len(confirms) > 0 {
 		gate.AskFunc = confirms[0]
 	}
@@ -618,7 +620,6 @@ func LaunchDeps(cfg config.Config, s *store.Store, server, model string, maxStep
 	return d, nil
 }
 func launchDeps(cfg config.Config, s *store.Store, server, model string, maxSteps, window int, in io.Reader, out io.Writer, w *files.Workspace, behavior string) launch.Deps {
-	dj := decision.New(cfg.Decision.Server, cfg.Decision.Model, cfg.Decision.Device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(decision.SelectionFor(cfg.Decision)).WithPrompts(cfg.PromptCatalog).WithInputLimit(cfg.Decision.MaxInputTokens).WithParams(ModelParams(cfg.Params))
 	return launch.Deps{Prompts: cfg.PromptCatalog,
 		WorkspaceExcludes: workspaceExcludes(cfg, s),
 		Workspace:         w.Path, Store: s, Behavior: behavior,
@@ -644,7 +645,8 @@ func launchDeps(cfg config.Config, s *store.Store, server, model string, maxStep
 		ParentWindow:      window,
 		Sub:               cfg.Subagents,
 		Wf:                cfg.Workflows,
-		Judge:             func(ctx context.Context, r decision.Request) (decision.Verdict, error) { return dj.Judge(ctx, r) },
+		Judge:             configuredJudge(cfg),
+		ManualReadiness:   cfg.Decision.Disabled,
 		Threshold:         cfg.Decision.RiskThreshold,
 		In:                in,
 		Out:               out,
@@ -666,6 +668,9 @@ func pruneFromConfig(cfg config.Config) agent.Prune {
 
 // ThinkingLoopPolicy shares validated limits with ordinary, child and manual summary runs.
 func ThinkingLoopPolicy(cfg config.Config) agent.ThinkingLoop {
+	if cfg.Decision.Disabled {
+		return agent.ThinkingLoop{}
+	}
 	t := cfg.Agent.ThinkingLoop
 	return agent.ThinkingLoop{Repeat: t.Repeat, MinUnitBytes: t.MinUnitBytes, MaxUnitBytes: t.MaxUnitBytes, SampleBytes: t.SampleBytes, MaxInputBytes: t.MaxInputBytes}
 }
@@ -752,4 +757,14 @@ func workspaceExcludes(cfg config.Config, s *store.Store) []string {
 		paths = append(paths, s.Identity(), s.Identity()+".wal", s.Identity()+".lock")
 	}
 	return paths
+}
+
+// A nil judge disables optional advice without inventing a verdict. Required
+// admission/authorization owners use explicit manual approval when disabled.
+func configuredJudge(cfg config.Config) func(context.Context, decision.Request) (decision.Verdict, error) {
+	if cfg.Decision.Disabled {
+		return nil
+	}
+	c := decision.New(cfg.Decision.Server, cfg.Decision.Model, cfg.Decision.Device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(decision.SelectionFor(cfg.Decision)).WithPrompts(cfg.PromptCatalog).WithInputLimit(cfg.Decision.MaxInputTokens).WithParams(ModelParams(cfg.Params))
+	return c.Judge
 }

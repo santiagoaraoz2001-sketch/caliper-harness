@@ -60,6 +60,32 @@ claimed result outrun an observed one.
 
 ## Quick start
 
+### Install with npm
+
+With Node.js 20 or newer:
+
+```sh
+npm install -g caliper-harness
+cd /path/to/your/project
+caliper
+```
+
+The package installs the complete application for your operating system, including
+its private runtimes and ripgrep. Model weights and project build tools remain
+separate. Linux includes the CUDA runtime upfront, so its download is several GB.
+The supported packages are macOS arm64, Windows amd64, and Linux amd64/arm64.
+
+Caliper offers available updates at startup. Accept the offer or use `/update` to
+prepare the new version; close and reopen Caliper to use it. Active runs keep their
+current executable. `npm install -g caliper-harness@latest` also updates the command.
+Previous application folders are retained, along with your configuration, graph,
+sessions and custom prompts. Older executables may not understand settings added
+by a newer release; retaining a folder does not guarantee arbitrary downgrades.
+
+New workspaces store application state in Caliper's OS user-data directory, keyed
+by the project path. Existing project-local state and explicit configuration paths
+remain in use. Launching from a directory does not add application files to it.
+
 ### Managed bundle
 
 Extract the complete application folder to a permanent location. On macOS or
@@ -72,7 +98,7 @@ sh ./install.sh
 
 Open a new terminal, enter your project directory, and run `caliper`. The command
 opens the TUI; `caliper help` lists CLI commands. Keep the application folder
-intact. Run its installer again after moving it or selecting a new version.
+intact. Run its installer again after moving it. Updates selected inside Caliper take effect on the next launch.
 The installer needs no administrator rights and does not download runtimes or
 models. See [FIRST-USE.md](FIRST-USE.md) for macOS prerequisites.
 
@@ -104,6 +130,9 @@ Judge, optionally enter your project check (for example `npm test`), then review
 and save. Press `a` on either model page to add an existing server or local
 checkpoint. Connections can be reused across projects; checks stay local.
 `/setup` reopens it; `/status` inspects or loads models; `/help` lists commands.
+In `/settings`, switch the decision model off to use human approval for PAT
+readiness and Risky actions. Checks and independent review remain required;
+automatic progress advice and tool-call recovery are disabled.
 See [Server and model connections](SERVER-MODELS.md) for details.
 
 ## Commands

@@ -135,6 +135,9 @@ func (c *Client) WithSelection(s Selection) *Client {
 	return c
 }
 func (c *Client) Health(ctx context.Context) (Health, error) {
+	if c.disabled {
+		return Health{}, ErrDisabled
+	}
 	if c.expected != nil && !NativeRuntime(c.expected.Runtime) {
 		return c.chatHealth(ctx)
 	}
@@ -153,6 +156,9 @@ func (c *Client) Health(ctx context.Context) (Health, error) {
 	return DecodeHealth(resp.Body)
 }
 func (c *Client) Activate(ctx context.Context, s Selection) (Health, error) {
+	if c.disabled {
+		return Health{}, ErrDisabled
+	}
 	if !NativeRuntime(s.Runtime) || c.expected != nil && !NativeRuntime(c.expected.Runtime) {
 		return Health{}, fmt.Errorf("chat judge activation belongs to its selected server lifecycle")
 	}

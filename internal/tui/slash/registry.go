@@ -59,6 +59,7 @@ func Commands() []Command {
 		{Name: "changes", Desc: "recent observed history for the open file", Usage: "/changes [path]"},
 		{Name: "turns", Desc: "scroll to an earlier turn or return to latest", Usage: "/turns [-N|0|current]"},
 		{Name: "help", Desc: "this list", Usage: "/help"},
+		{Name: "update", Desc: "check and install an update for next launch", Usage: "/update"},
 		{Name: "setup", Desc: "choose an existing model and project check", Usage: "/setup"},
 		{Name: "quit", Desc: "exit", Usage: "/quit"},
 	}
@@ -152,7 +153,7 @@ func (r *Registry) Help() string {
 		{"CONTEXT", []string{"compact", "context", "clear", "turns"}},
 		{"COMMENT", []string{"comment", "goto"}},
 		{"CHANGES", []string{"open-diff", "changes"}},
-		{"META", []string{"help", "setup", "quit"}},
+		{"META", []string{"help", "setup", "update", "quit"}},
 	}
 	var b strings.Builder
 	for gi, g := range groups {

@@ -11,6 +11,7 @@ import (
 
 // Connections contains reusable machine choices, never project state or checks.
 type Connections struct {
+	Prompts  PromptsConfig  `yaml:"prompts,omitempty"` // machine-wide edited shipped catalog; project overrides remain local
 	Model    ModelConfig    `yaml:"model"`
 	Decision DecisionConfig `yaml:"decision"`
 	Serve    ServeConfig    `yaml:"serve"`
@@ -35,7 +36,7 @@ func loadConnections(c *Config) error {
 	if err != nil {
 		return err
 	}
-	v := Connections{c.Model, c.Decision, c.Serve}
+	v := Connections{Model: c.Model, Decision: c.Decision, Serve: c.Serve}
 	d := yaml.NewDecoder(bytes.NewReader(raw))
 	d.KnownFields(true)
 	if err = d.Decode(&v); err != nil {
@@ -46,12 +47,22 @@ func loadConnections(c *Config) error {
 		return fmt.Errorf("connections %s contains trailing YAML documents", path)
 	}
 	c.Model, c.Decision, c.Serve = v.Model, v.Decision, v.Serve
+	c.Prompts = v.Prompts
 	return c.Validate()
 }
 
 // SaveConnections atomically saves the reusable selections. Project config is
 // separate and continues to override these machine defaults.
-func SaveConnections(c Config) error {
+func SaveConnections(c Config) error { return saveConnections(c, nil) }
+
+func saveConnections(c Config, preservedPrompts *PromptsConfig) error {
+	if preservedPrompts == nil {
+		current := Defaults()
+		if err := loadConnections(&current); err != nil {
+			return err
+		}
+		preservedPrompts = &current.Prompts
+	}
 	if err := c.Validate(); err != nil {
 		return err
 	}
@@ -59,7 +70,7 @@ func SaveConnections(c Config) error {
 	if err != nil {
 		return err
 	}
-	raw, err := yaml.Marshal(Connections{c.Model, c.Decision, c.Serve})
+	raw, err := yaml.Marshal(Connections{Prompts: *preservedPrompts, Model: c.Model, Decision: c.Decision, Serve: c.Serve})
 	if err != nil {
 		return err
 	}
@@ -123,11 +134,28 @@ func SaveEffective(path string, c Config) error {
 	if err != nil {
 		return err
 	}
-	if err = os.WriteFile(path, out, 0644); err != nil {
+	if err = writeConfig(path, out); err != nil {
 		return err
 	}
 	if err = SaveConnections(c); err != nil {
 		return fmt.Errorf("project saved but reusable connections failed: %w", err)
 	}
 	return nil
+}
+
+// A failed write leaves the previous settings file intact on all platforms.
+func writeConfig(path string, raw []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(path), ".caliper-config-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err = f.Write(raw); err != nil {
+		f.Close()
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), path)
 }

@@ -1,9 +1,13 @@
 # Editing model instructions
 
-Edit `prompts.yaml` in the application folder. In the source checkout it points
-to `internal/prompts/prompts.yaml`, the single canonical catalog. The next run
-loads your edits automatically; an admitted run, its workers and its reviewers
-keep one immutable snapshot. The session’s model-control notice names the source.
+Copy the shipped `prompts.yaml` to a permanent location outside the application
+folder, edit that copy, and set `prompts.path` to its absolute path in Settings YAML.
+The application folder is integrity-checked at startup, so editing its inventoried
+files prevents launch. In a source checkout, `internal/prompts/prompts.yaml` is the
+canonical catalog. The next run loads your selected edits; an admitted run, its
+workers and reviewers keep one immutable snapshot. The model-control notice names
+the source. Updates retain the external catalog. The npm upgrade path also preserves
+historical edits to a shipped catalog outside the version folder before activation.
 Only the active role, current help section and advertised tool descriptions enter
 context; the full catalog is never inserted into every request.
 
