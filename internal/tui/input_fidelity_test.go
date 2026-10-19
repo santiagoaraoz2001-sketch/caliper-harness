@@ -228,6 +228,17 @@ func TestInputFidelityPromptWireAndNativeSession(t *testing.T) {
 			}
 			requests := make(chan []byte, 2)
 			fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Other running Caliper instances discover loopback listeners. Their
+				// catalog GETs are not inference and must not fill the wire channel.
+				if r.Method == http.MethodGet {
+					http.NotFound(w, r)
+					return
+				}
+				if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
+					t.Errorf("unexpected inference route %s %s", r.Method, r.URL.Path)
+					http.NotFound(w, r)
+					return
+				}
 				data, err := io.ReadAll(r.Body)
 				if err != nil {
 					http.Error(w, err.Error(), 500)
@@ -256,6 +267,16 @@ func TestInputFidelityPromptWireAndNativeSession(t *testing.T) {
 				}
 			}))
 			defer fixture.Close()
+			for _, route := range []string{"/api/ps", "/api/tags", "/v1/models", "/health"} {
+				response, err := fixture.Client().Get(fixture.URL + route)
+				if err != nil {
+					t.Fatal(err)
+				}
+				response.Body.Close()
+				if response.StatusCode != http.StatusNotFound || len(requests) != 0 {
+					t.Fatalf("discovery entered inference fixture: %s status%d queued%d", route, response.StatusCode, len(requests))
+				}
+			}
 			cfg := config.Defaults()
 			cfg.Model.Server = fixture.URL + "/v1"
 			cfg.Model.Name = "explicit-fixture"
@@ -284,6 +305,11 @@ func TestInputFidelityPromptWireAndNativeSession(t *testing.T) {
 			cfg.Decision.Model, cfg.Decision.Runtime, cfg.Decision.Device = "component", "laya", "cpu"
 			selection := decision.SelectionFor(cfg.Decision)
 			judge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Keep native health visible; unrelated discovery is not a judgment.
+				if r.Method == http.MethodGet && r.URL.Path != "/health" {
+					http.NotFound(w, r)
+					return
+				}
 				switch r.URL.Path {
 				case "/health":
 					json.NewEncoder(w).Encode(map[string]any{"status": "ok", "pid": 1, "loaded": true, "ready": true, "loading": false, "model": "component", "active": decision.Identity{Model: "component", Runtime: "laya", Source: "component", Path: "/component", Device: "cpu", NativeDevice: "cpu", Architecture: "component", Parameters: 1, Selection: selection}, "backends": []string{"cpu"}})

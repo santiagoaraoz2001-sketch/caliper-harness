@@ -53,6 +53,11 @@ func codingFixture(t *testing.T, protocol string, calls []codingCall, firstBatch
 	t.Helper()
 	n := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Live Caliper discovery may GET any loopback listener; only inference belongs in this fixture.
+		if r.Method == http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
 		if r.URL.Path != "/chat/completions" {
 			t.Errorf("wrong fixture origin/path %s", r.URL.Path)
 		}

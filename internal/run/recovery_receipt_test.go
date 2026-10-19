@@ -75,6 +75,11 @@ func TestPreparationRecoveryCurrentNextWire(t *testing.T) {
 				})
 				n, taskID := 0, ""
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+					// Live Caliper discovery may GET any loopback listener; only inference belongs in this fixture.
+					if req.Method == http.MethodGet {
+						http.NotFound(w, req)
+						return
+					}
 					var body struct{ Messages []llm.Message }
 					if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 						t.Error(err)
@@ -286,6 +291,11 @@ func TestPreparationRecoveryPartialEffectsNextWire(t *testing.T) {
 	})
 	n, planID, taskID := 0, "", ""
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// Live Caliper discovery may GET any loopback listener; only inference belongs in this fixture.
+		if req.Method == http.MethodGet {
+			http.NotFound(w, req)
+			return
+		}
 		var body struct{ Messages []llm.Message }
 		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 			t.Error(err)

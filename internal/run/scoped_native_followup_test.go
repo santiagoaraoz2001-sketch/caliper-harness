@@ -37,6 +37,11 @@ func TestScopedHostConfiguredCheckUsesOwningDefinition(t *testing.T) {
 			}
 			requests := 0
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				// Live Caliper discovery may GET any loopback listener; only inference belongs in this fixture.
+				if req.Method == http.MethodGet {
+					http.NotFound(w, req)
+					return
+				}
 				if req.URL.Path == "/api/show" {
 					fmt.Fprint(w, `{"capabilities":["completion","tools","thinking"]}`)
 					return
@@ -230,6 +235,11 @@ func TestScopedCreationWireExplicitFocusAndGuide(t *testing.T) {
 	var requests []request
 	var ids []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// Live Caliper discovery may GET any loopback listener; only inference belongs in this fixture.
+		if req.Method == http.MethodGet {
+			http.NotFound(w, req)
+			return
+		}
 		if req.URL.Path == "/api/show" {
 			fmt.Fprint(w, `{"capabilities":["completion","tools","thinking"]}`)
 			return

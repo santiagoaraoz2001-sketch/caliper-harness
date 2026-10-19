@@ -54,6 +54,11 @@ func TestContextTitleOriginRevisionAndConfig(t *testing.T) {
 func TestManualCompactionCancellationHoldsOwnerAndNextRun(t *testing.T) {
 	entered := make(chan struct{}, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Live Caliper discovery may GET any loopback listener; only inference belongs in this fixture.
+		if r.Method == http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
 		io.Copy(io.Discard, r.Body)
 		entered <- struct{}{}
 		<-r.Context().Done()

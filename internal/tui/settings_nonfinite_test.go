@@ -92,6 +92,11 @@ func assertSettingsRequestEncodes(t *testing.T, cfg config.Config) {
 	t.Helper()
 	received := make(chan map[string]any, 2)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Live Caliper discovery may GET any loopback listener; only inference belongs in this fixture.
+		if r.Method == http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
 		var got map[string]any
 		raw, err := io.ReadAll(r.Body)
 		if err != nil {

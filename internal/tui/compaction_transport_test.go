@@ -26,6 +26,11 @@ func transportCompactModel(t *testing.T, endpoint string) Model {
 	cfg.Decision.Model, cfg.Decision.Runtime, cfg.Decision.Device = "component", "laya", "cpu"
 	selection := decision.SelectionFor(cfg.Decision)
 	judge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Live Caliper discovery may GET any loopback listener; only inference belongs in this fixture.
+		if r.Method == http.MethodGet && r.URL.Path != "/health" {
+			http.NotFound(w, r)
+			return
+		}
 		if r.URL.Path == "/health" {
 			json.NewEncoder(w).Encode(map[string]any{"status": "ok", "pid": 1, "loaded": true, "ready": true, "loading": false, "model": "component", "active": decision.Identity{Model: "component", Runtime: "laya", Source: "component", Path: "/component", Device: "cpu", NativeDevice: "cpu", Architecture: "component", Parameters: 1, Selection: selection}, "backends": []string{"cpu"}})
 			return
@@ -67,6 +72,11 @@ func TestManualCompactionPublicCommandCapacityTargetPublishAndContinuedRun(t *te
 	summary := "Work remains pending. Preserve the original request and the exact user comment. The recorded write receipt names main.go and hash actual; it does not establish correctness. The check exited7, and independent review remains missing. Historical model drafts are unverified proposals. Current source and settled tool associations stay available separately. Continue from the current files, inspect the relevant source before any edit, then execute the approved behavioral check and configured project check. Report their actual results, retain failures and denied operations, and request a real independent review when the checks justify it. No summary statement grants approval, changes task ownership, or records a PASS."
 	var requests [][]llm.Message
 	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// Live Caliper discovery may GET any loopback listener; only inference belongs in this fixture.
+		if req.Method == http.MethodGet {
+			http.NotFound(w, req)
+			return
+		}
 		var body struct {
 			Messages []llm.Message
 			Tools    []llm.ToolDefinition
@@ -162,6 +172,11 @@ func TestManualCompactionPublicCommandCapacityTargetPublishAndContinuedRun(t *te
 
 func TestManualCompactionTransportBudget(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Live Caliper discovery may GET any loopback listener; only inference belongs in this fixture.
+		if r.Method == http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
 		if body["stream"] == true {
@@ -201,6 +216,11 @@ func TestManualCompactionTransportConfiguredTimeoutAndCancel(t *testing.T) {
 		t.Run(fmt.Sprint(cancelled), func(t *testing.T) {
 			entered := make(chan struct{}, 1)
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Live Caliper discovery may GET any loopback listener; only inference belongs in this fixture.
+				if r.Method == http.MethodGet {
+					http.NotFound(w, r)
+					return
+				}
 				json.NewDecoder(r.Body).Decode(&map[string]any{})
 				entered <- struct{}{}
 				w.Header().Set("Content-Type", "text/event-stream")
@@ -256,6 +276,11 @@ func TestManualCompactionSelectedJudgeOriginalSession(t *testing.T) {
 	for _, disposition := range []string{"accept", "reject", "uncertain", "stale", "cancel"} {
 		t.Run(disposition, func(t *testing.T) {
 			model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Live Caliper discovery may GET any loopback listener; only inference belongs in this fixture.
+				if r.Method == http.MethodGet {
+					http.NotFound(w, r)
+					return
+				}
 				var body map[string]any
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 					t.Error(err)
@@ -268,6 +293,11 @@ func TestManualCompactionSelectedJudgeOriginalSession(t *testing.T) {
 			entered := make(chan struct{}, 1)
 			calls := 0
 			judge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Live Caliper discovery may GET any loopback listener; only inference belongs in this fixture.
+				if r.Method == http.MethodGet && r.URL.Path != "/health" {
+					http.NotFound(w, r)
+					return
+				}
 				if r.URL.Path == "/health" {
 					json.NewEncoder(w).Encode(map[string]any{"status": "ok", "pid": 1, "loaded": true, "ready": true, "loading": false, "model": "component", "active": decision.Identity{Model: "component", Runtime: "laya", Source: "component", Path: "/component", Device: "cpu", NativeDevice: "cpu", Architecture: "component", Parameters: 1, Selection: selection}, "backends": []string{"cpu"}})
 					return

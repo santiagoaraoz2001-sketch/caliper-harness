@@ -345,6 +345,11 @@ func TestTypedPreparationNativeAndTextCorrelation(t *testing.T) {
 			})
 			n, taskID := 0, ""
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				// Live Caliper discovery may GET any loopback listener; only inference belongs in this fixture.
+				if request.Method == http.MethodGet {
+					http.NotFound(w, request)
+					return
+				}
 				var body struct {
 					Messages []llm.Message
 					Tools    []llm.ToolDefinition

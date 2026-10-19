@@ -43,6 +43,11 @@ func TestReceiptAdviceExplicitFullNextWire(t *testing.T) {
 	n, planID, approachID, taskID := 0, "", "", ""
 	var rr *agent.Runner
 	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// Live Caliper discovery may GET any loopback listener; only inference belongs in this fixture.
+		if req.Method == http.MethodGet {
+			http.NotFound(w, req)
+			return
+		}
 		var body struct {
 			Messages []struct{ Role, Content string }
 		}
@@ -382,6 +387,11 @@ func TestPrepareTaskExplicitFullReceiptReadyClaim(t *testing.T) {
 	n, p, a, task := 0, "", "", ""
 	var rr *agent.Runner
 	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// Live Caliper discovery may GET any loopback listener; only inference belongs in this fixture.
+		if req.Method == http.MethodGet {
+			http.NotFound(w, req)
+			return
+		}
 		var body struct {
 			Messages []struct{ Role, Content string }
 		}

@@ -79,6 +79,11 @@ func bindDecisionFixture(t *testing.T, cfg *config.Config, observe func(decision
 		conf = confidence[0]
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Live Caliper discovery may GET any loopback listener; only inference belongs in this fixture.
+		if r.Method == http.MethodGet && r.URL.Path != "/health" {
+			http.NotFound(w, r)
+			return
+		}
 		switch r.URL.Path {
 		case "/health":
 			json.NewEncoder(w).Encode(map[string]any{"status": "ok", "pid": 1, "loaded": true, "ready": true, "loading": false, "model": "component", "active": decision.Identity{Model: "component", Runtime: "laya", Source: "component", Path: "/component", Device: "cpu", NativeDevice: "cpu", Architecture: "component", Parameters: 1, Selection: selection}, "backends": []string{"cpu"}})
