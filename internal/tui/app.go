@@ -35,6 +35,7 @@ const (
 	ViewChanges   ViewID = "changes"
 	ViewSettings  ViewID = "settings"
 	ViewStatus    ViewID = "status"
+	ViewManage    ViewID = "manage"
 	ViewSetup     ViewID = "setup"
 )
 
@@ -59,7 +60,8 @@ var Views = []View{
 	{ViewWorkflows, "Workflows", "launches + retries", "T6.8"},
 	{ViewFiles, "Files", "browse files", "T6.9"},
 	{ViewSettings, "Settings", "edit configuration", "T6.10"},
-	{ViewStatus, "Status", "servers, models, runtime", "T6.5"},
+	{ViewStatus, "Status", "read-only runtime dashboard", "T6.5"},
+	{ViewManage, "Models & Servers", "saved connections and runtime controls", "T6.5"},
 	{ViewSetup, "Setup", "configure this project", ""},
 }
 
@@ -518,6 +520,9 @@ func (m *Model) submit(raw string) tea.Cmd {
 			return m.refreshPlans(target)
 		}
 		if ViewID(c.View) == ViewStatus {
+			return tea.Batch(m.fetchRuntimeMetrics(), m.probeServe())
+		}
+		if ViewID(c.View) == ViewManage {
 			if c.Name == "models" {
 				_, exact, _ := m.Reg.Parse(raw)
 				if len(exact) > 0 {
@@ -733,6 +738,11 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, cmd tea.Cmd) {
 			}
 		}
 		return m, tea.Batch(cmds...)
+	case runtimeMetricsMsg:
+		if chat, _ := m.originChat(msg.Owner); chat != nil && !chat.Running && !chat.Compacting && chat.Seq == msg.Seq {
+			chat.Runtime = msg.Metrics
+		}
+		return m, nil
 	case statusLiveMsg:
 		if msg.haveGit {
 			m.St.Branch, m.St.Dir = msg.branch, msg.dir
@@ -777,6 +787,9 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, cmd tea.Cmd) {
 		return m, nil
 	case plansLoadedMsg:
 		m.onPlansLoaded(msg)
+		return m, nil
+	case managedTestMsg:
+		m.onManagedTest(msg)
 		return m, nil
 	case connectionTestMsg:
 		if m.Setup.Add == msg.Form {
@@ -978,7 +991,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if m.setupActive() && m.Setup.Add != nil && m.Chat.Dialog == nil && m.Input.Value() == "" && msg.Type != tea.KeyEsc && msg.Type != tea.KeyCtrlC {
+	if (m.setupActive() || m.serveActive()) && m.Setup.Add != nil && m.Chat.Dialog == nil && m.Input.Value() == "" && msg.Type != tea.KeyEsc && msg.Type != tea.KeyCtrlC {
 		um, cmd, _ := m.connectionKey(msg)
 		return um, cmd
 	}
@@ -989,6 +1002,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyCtrlC:
 		return m, m.requestQuit()
 	case tea.KeyEsc:
+		if m.serveActive() && m.Setup.Add != nil {
+			m.Setup.Add = nil
+			return m, nil
+		}
 		if m.Chat.Dialog != nil {
 			m.declineDialog()
 			return m, nil
@@ -1051,7 +1068,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.Alerts = m.Alerts[:len(m.Alerts)-1]
 			return m, nil
 		}
-		if m.diffActive() || m.plansActive() || m.serveActive() || m.sessionsActive() || m.decisionsActive() || m.workflowsActive() || m.filesActive() || m.settingsActive() {
+		if m.diffActive() || m.plansActive() || m.serveActive() || m.Tabs[m.Active].at.view == ViewStatus || m.sessionsActive() || m.decisionsActive() || m.workflowsActive() || m.filesActive() || m.settingsActive() {
 			m.showChat()
 			return m, nil
 		}
@@ -1261,7 +1278,8 @@ func keyHelp() string {
 		{"chat", "pgup/pgdn scroll"},
 		{"diff", "↑↓ select · enter open · f comment · esc chat"},
 		{"plans", "↑↓ move · →← expand · enter dive · f comment · r refresh · esc chat"},
-		{"status", "↑↓ select · u use · s start · x unload · l load · d device · m model · r refresh · esc chat"},
+		{"status", "read-only runtime metrics · /manage connections · esc chat"},
+		{"manage", "n Add server · + Add model · e Edit · backspace Remove · t Test · u Coding · j Judge · s start · x unload · l load"},
 		{"sessions", "↑↓ select · enter open · r refresh · esc chat"},
 		{"slash menu", "↑↓ move · enter complete · esc close"},
 		{"dialogs", "y/n answer · esc dismiss"},
@@ -1302,6 +1320,8 @@ func (m Model) View() string {
 	} else if m.Tabs[m.Active].at.view == ViewPlans {
 		b.WriteString(m.renderPlans(m.Width, vh) + "\n")
 	} else if m.Tabs[m.Active].at.view == ViewStatus {
+		b.WriteString(m.renderRuntimeStatus(m.Width, vh) + "\n")
+	} else if m.Tabs[m.Active].at.view == ViewManage {
 		b.WriteString(m.renderServe(m.Width, vh) + "\n")
 	} else if m.Tabs[m.Active].at.view == ViewSessions {
 		b.WriteString(m.renderSessions(m.Width, vh) + "\n")

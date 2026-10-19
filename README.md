@@ -129,11 +129,13 @@ an offline developer folder using installed Go, mingw-w64 GCC, Bash and ripgrep.
 Private runtime acquisition is a separate explicit command documented in
 [PORTABILITY.md](PORTABILITY.md); neither Windows packaging mode is natively qualified.
 
-On first run with an unconfigured worker, Setup opens: choose a Worker and
-Judge, optionally enter your project check (for example `npm test`), then review
-and save. Press `a` on either model page to add an existing server or local
-checkpoint. Connections can be reused across projects; checks stay local.
-`/setup` reopens it; `/status` inspects or loads models; `/help` lists commands.
+On first run with no coding model configured, Setup opens. Add your server
+and model, choose the Coding and Judge roles, optionally enter your project
+check (for example `npm test`), then review and save. Connections are reusable
+across projects; checks stay local. `/manage` opens Models & Servers to add,
+edit, test, select, load or unload saved connections. `/status` shows runtime
+activity and measured usage. Caliper does not scan your computer for models
+or servers. `/setup` reopens setup; `/help` lists commands.
 In `/settings`, switch the decision model off to use human approval for PAT
 readiness and Risky actions. Checks and independent review remain required;
 automatic progress advice and tool-call recovery are disabled.

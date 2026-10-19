@@ -156,7 +156,7 @@ func TestObservedCapturePinnedSourceAndNativeBoundary(t *testing.T) {
 
 func TestStatusWheelScrollsPastSelectedRuntime(t *testing.T) {
 	m := journeyFixture(80, 24)
-	m.navigate(ViewStatus, "")
+	m.navigate(ViewManage, "")
 	m.Serve.Rows = []ServeRow{{Ep: serve.Endpoint{Label: "fixture", URL: "http://127.0.0.1:8080"}, Have: true, Health: serve.Health{Up: true}}}
 	m.Serve.Warnings = []string{strings.Repeat("saved inventory detail ", 50) + "FINAL_STATUS_DETAIL"}
 	m = viewportUpdate(m, tea.MouseMsg{X: 8, Y: len(m.tabChrome()) + 3, Button: tea.MouseButtonWheelDown})

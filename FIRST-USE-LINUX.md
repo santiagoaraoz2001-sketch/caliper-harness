@@ -17,7 +17,7 @@ GPU runtime is downloaded upfront; model weights, GPU drivers, your worker
 server and project build tools remain separate. Linux does not run the MLX
 worker. Select an installed Ollama or compatible server in Setup.
 
-Use `/status` to inspect servers and models, `/settings` to configure the harness,
+Use `/manage` to inspect servers and models, `/settings` to configure the harness,
 and `/update` to prepare an available update for the next launch. Updates keep
 the running version intact. Turning D1 off replaces required readiness and Risky
 decisions with human approval; checks and independent review still apply.
@@ -46,3 +46,5 @@ parts automatically. Keep the extracted application folder intact. Its native
 library dependencies are listed in `notices/NATIVE-DEPENDENCIES.txt`; a complete
 runtime import check does not establish compatibility with every Linux driver
 or model. See `SERVER-MODELS.md` for connection and loading controls.
+
+Use `/manage` for explicitly saved server/model connections and lifecycle controls; `/status` is the read-only activity and usage screen. Caliper does not scan model folders or listening ports. See [Models & Servers](SERVER-MODELS.md) for adding a connection.

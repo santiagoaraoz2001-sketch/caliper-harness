@@ -364,17 +364,26 @@ func (n *BufferPoolBytes) UnmarshalYAML(node *yaml.Node) error {
 // cover ollama, mlx, and the sidecar; a same-name entry here
 // replaces its built-in.
 type RecipeConfig struct {
-	Runtime string   `yaml:"runtime,omitempty"` // explicit worker wire contract; never inferred from its name
-	Name    string   `yaml:"name"`
-	Kind    string   `yaml:"kind"` // ollama, openai, or sidecar
-	URL     string   `yaml:"url"`
-	Argv    []string `yaml:"argv,omitempty"`
-	Dir     string   `yaml:"dir"`
+	Launcher string   `yaml:"launcher,omitempty"` // optional explicit preset or executable entered by the user
+	Runtime  string   `yaml:"runtime,omitempty"`  // explicit worker wire contract; never inferred from its name
+	Name     string   `yaml:"name"`
+	Kind     string   `yaml:"kind"` // ollama, openai, or sidecar
+	URL      string   `yaml:"url"`
+	Argv     []string `yaml:"argv,omitempty"`
+	Dir      string   `yaml:"dir"`
+}
+
+// SavedModel is an explicit model choice associated with one saved endpoint.
+type SavedModel struct {
+	Server string `yaml:"server"`
+	Name   string `yaml:"name"`
+	Path   string `yaml:"path,omitempty"`
 }
 
 type ServeConfig struct {
-	ProbeTimeoutSeconds int      `yaml:"probe_timeout_seconds"`
-	ModelDirs           []string `yaml:"model_dirs,omitempty"` // explicit existing local roots; metadata discovery only
+	ProbeTimeoutSeconds int          `yaml:"probe_timeout_seconds"`
+	ModelDirs           []string     `yaml:"model_dirs,omitempty"` // deprecated; retained for compatibility, never enumerated
+	Models              []SavedModel `yaml:"models,omitempty"`
 	// Recipes are extra start recipes beyond the built-ins.
 	Recipes []RecipeConfig `yaml:"recipes,omitempty"`
 }
@@ -731,7 +740,7 @@ func (c Config) Validate() error {
 		return fmt.Errorf("params.repetition_penalty cannot be negative, got %v", c.Params.RepetitionPenalty)
 	}
 	switch c.Model.Runtime {
-	case "", "openai", "ollama", "mlx", "rulith": // Empty retains the generic contract for programmatic legacy configs.
+	case "", "openai", "ollama", "mlx", "rulith": // Empty retains the generic contract for legacy configs.
 	default:
 		return fmt.Errorf("model.runtime must be openai, ollama, mlx, or rulith, got %q", c.Model.Runtime)
 	}
@@ -874,6 +883,14 @@ func (c Config) Validate() error {
 	if c.Tabs.TitleEvery < 0 {
 		return fmt.Errorf("tabs.title_every cannot be negative, got %d", c.Tabs.TitleEvery)
 	}
+	for i, model := range c.Serve.Models {
+		if model.Name == "" {
+			return fmt.Errorf("serve.models[%d] needs a model name", i)
+		}
+		if u, err := url.ParseRequestURI(model.Server); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("serve.models[%d] needs an http(s) server URL", i)
+		}
+	}
 	recipeNames := map[string]bool{}
 	for i, r := range c.Serve.Recipes {
 		if recipeNames[r.Name] {
@@ -889,9 +906,12 @@ func (c Config) Validate() error {
 			return fmt.Errorf("serve.recipes[%d] kind must be auto, ollama, openai, sidecar, or rulith, got %q", i, r.Kind)
 		}
 		switch r.Runtime {
-		case "", "openai", "ollama", "mlx", "rulith":
+		case "", "openai", "ollama", "mlx", "rulith", "laya", "system_one":
+			if (r.Runtime == "laya" || r.Runtime == "system_one") && r.Kind != "sidecar" {
+				return fmt.Errorf("serve.recipes[%d] native decision runtime requires sidecar kind", i)
+			}
 		default:
-			return fmt.Errorf("serve.recipes[%d] runtime must be openai, ollama, mlx, or rulith, got %q", i, r.Runtime)
+			return fmt.Errorf("serve.recipes[%d] runtime must be openai, ollama, mlx, rulith, or a native sidecar runtime, got %q", i, r.Runtime)
 		}
 		if u, err := url.ParseRequestURI(r.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			return fmt.Errorf("serve.recipes[%d] needs an http(s) url", i)

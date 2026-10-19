@@ -6,8 +6,8 @@ import (
 )
 
 func TestRegistryHas31Commands(t *testing.T) {
-	if got := len(Commands()); got != 31 {
-		t.Fatalf("registry holds %d commands, want 31", got)
+	if got := len(Commands()); got != 32 {
+		t.Fatalf("registry holds %d commands, want 32", got)
 	}
 	seen := map[string]bool{}
 	for _, c := range Commands() {
@@ -43,8 +43,8 @@ func TestParse(t *testing.T) {
 
 func TestComplete(t *testing.T) {
 	r := New()
-	if got := r.Complete("/", Context{}); len(got) != 31 {
-		t.Errorf("/ completes to %d, want 31", len(got))
+	if got := r.Complete("/", Context{}); len(got) != 32 {
+		t.Errorf("/ completes to %d, want 32", len(got))
 	}
 	got := r.Complete("/p", Context{})
 	if len(got) != 1 || got[0] != "/plans" {
@@ -104,7 +104,7 @@ func TestModelsRawArgumentAndLiveView(t *testing.T) {
 	r := New()
 	for _, raw := range []string{"/absolute/name with  spaces  ", "installed:exact"} {
 		c, args, ok := r.Parse("/models " + raw)
-		if !ok || c.View != "status" || c.Lands != "" || len(args) != 1 || args[0] != raw {
+		if !ok || c.View != "manage" || c.Lands != "" || len(args) != 1 || args[0] != raw {
 			t.Fatalf("%+v %q", c, args)
 		}
 	}

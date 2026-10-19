@@ -280,7 +280,8 @@ func TestD09DiskCandidatesAndExactNameFocus(t *testing.T) {
 		os.WriteFile(filepath.Join(path, name), []byte(body), 0600)
 	}
 	m := New(testCfg(), "test")
-	m.Cfg.Serve.ModelDirs = []string{root}
+	m.Cfg.Serve.Models = []config.SavedModel{{Server: m.Cfg.Model.Server, Name: path, Path: path}}
+	m.Cfg.Serve.Recipes = []config.RecipeConfig{{Name: "my-mlx", Kind: "openai", Runtime: "mlx", URL: m.Cfg.Model.Server, Launcher: "preset"}}
 	msg := m.probeServeWith(&http.Client{Transport: &pathStub{}})().(serveProbedMsg)
 	var found ServeRow
 	for _, r := range msg.rows {

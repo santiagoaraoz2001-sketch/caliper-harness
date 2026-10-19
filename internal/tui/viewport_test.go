@@ -85,7 +85,7 @@ func TestViewportHelpOwnsAsk(t *testing.T) {
 
 func viewportServeFixture(w, h int) Model {
 	m := viewportUpdate(New(testCfg(), "test"), tea.WindowSizeMsg{Width: w, Height: h})
-	m = submit(m, "/status")
+	m = submit(m, "/manage")
 	for i := 0; i < 32; i++ {
 		m.Serve.Rows = append(m.Serve.Rows, ServeRow{Ep: serve.Endpoint{Label: "local", URL: "http://fixture.invalid", Model: fmt.Sprintf("ROW_%02d", i)}, IsModel: true, Have: true})
 	}
@@ -132,7 +132,7 @@ func TestViewportStatusReachability(t *testing.T) {
 						collecting = true
 						continue
 					}
-					if collecting && strings.HasPrefix(line, "│ ↑↓ select") {
+					if collecting && strings.HasPrefix(line, "│ n Add server") {
 						break
 					}
 					if collecting {
@@ -241,15 +241,15 @@ func TestViewportStatusLoadingDetails(t *testing.T) {
 				collecting := false
 				index := 0
 				for _, line := range strings.Split(v, "\n") {
-					if strings.HasPrefix(line, "┌─ Status · ") {
-						fmt.Sscanf(strings.TrimPrefix(line, "┌─ Status · "), "%d-%d/%d", &start, &end, &currentTotal)
+					if strings.HasPrefix(line, "┌─ Models & Servers · ") {
+						fmt.Sscanf(strings.TrimPrefix(line, "┌─ Models & Servers · "), "%d-%d/%d", &start, &end, &currentTotal)
 					}
 					if strings.HasPrefix(line, "│ selected") {
 						collecting = true
 						index = start
 						continue
 					}
-					if collecting && strings.HasPrefix(line, "│ ↑↓ select") {
+					if collecting && strings.HasPrefix(line, "│ n Add server") {
 						break
 					}
 					if collecting && index <= end {

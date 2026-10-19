@@ -40,8 +40,9 @@ func Commands() []Command {
 		{Name: "workflows", Desc: "approach launches + retries", Usage: "/workflows", View: "workflows"},
 		{Name: "files", Desc: "browse files", Usage: "/files", View: "files"},
 		{Name: "settings", Desc: "edit configuration", Usage: "/settings", View: "settings"},
-		{Name: "status", Desc: "servers, models, runtime", Usage: "/status", View: "status"},
-		{Name: "models", Desc: "list + switch worker model", Usage: "/models [exact name/path]", View: "status"},
+		{Name: "status", Desc: "read-only runtime dashboard", Usage: "/status", View: "status"},
+		{Name: "manage", Desc: "Models & Servers: saved connections and controls", Usage: "/manage", View: "manage"},
+		{Name: "models", Desc: "Models & Servers shortcut", Usage: "/models [exact name/path]", View: "manage"},
 		{Name: "new", Desc: "new session", Usage: "/new"},
 		{Name: "stop", Desc: "stop the run", Usage: "/stop"},
 		{Name: "retry", Desc: "re-run last prompt", Usage: "/retry"},
@@ -145,7 +146,7 @@ func (r *Registry) Help() string {
 		title string
 		names []string
 	}{
-		{"VIEWS", []string{"chat", "diff", "plans", "sessions", "decisions", "workflows", "files", "settings", "status"}},
+		{"VIEWS", []string{"chat", "diff", "plans", "sessions", "decisions", "workflows", "files", "settings", "status", "manage"}},
 		{"MODELS", []string{"models"}},
 		{"RUN", []string{"new", "stop", "retry", "btw", "tools", "workflow"}},
 		{"AUTH", []string{"auth"}},

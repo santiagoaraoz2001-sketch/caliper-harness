@@ -34,19 +34,27 @@ type setupChoice struct {
 	judge             *config.DecisionConfig
 }
 
+// Keep the retained Setup editor aligned with writes made through Manage.
+// Its project check and staged choices remain in the editor.
+func (m *Model) syncSetupAfterSave() {
+	if !m.Setup.Started {
+		return
+	}
+	m.Setup.Serve = m.Cfg.Serve
+	if m.Setup.Path == m.CfgPath {
+		raw, err := os.ReadFile(m.CfgPath)
+		if err == nil {
+			m.Setup.Original, m.Setup.Existed = raw, true
+		}
+	}
+}
+
 func (m Model) setupActive() bool { return m.Tabs[m.Active].at.view == ViewSetup }
 func (m Model) setupChoices() []setupChoice {
 	out := append([]setupChoice(nil), m.Setup.Added...)
 	seen := map[string]bool{}
 	for _, r := range m.Serve.Rows {
 		if r.Sidecar || !r.IsModel || r.Ep.Model == "" {
-			continue
-		}
-		if r.Asset != nil {
-			if !r.Asset.LoadCandidate() {
-				continue
-			}
-		} else if !r.Have || !r.Health.Up {
 			continue
 		}
 		candidate := m.Cfg.Model
@@ -65,7 +73,7 @@ func (m Model) setupChoices() []setupChoice {
 		if r.Asset != nil {
 			candidate.Runtime = r.Asset.Runtime
 		}
-		if candidate.Runtime == "" && r.Ours && r.Recipe != nil {
+		if candidate.Runtime == "" && r.Recipe != nil {
 			candidate.Runtime = r.Recipe.Runtime
 		}
 		if candidate.Runtime == "" && r.Ep.URL == m.Cfg.Model.Server {
@@ -74,14 +82,17 @@ func (m Model) setupChoices() []setupChoice {
 		if candidate.Runtime == "" {
 			candidate.Runtime = "openai"
 		}
+		if candidate.Runtime == "mlx" && r.Asset != nil && r.Recipe != nil && r.Recipe.HasModelPlaceholder() {
+			candidate.Name = r.Asset.Path
+		}
 		key := candidate.Server + "\x00" + candidate.Name + "\x00" + candidate.Runtime
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		state := "endpoint found"
+		state := "saved model · availability unchecked"
 		if r.Asset != nil {
-			state = "installed · load in Status"
+			state = "saved checkpoint · load in Manage"
 		}
 		out = append(out, setupChoice{key: key, label: candidate.Name, state: state, model: candidate})
 	}
@@ -138,7 +149,7 @@ func (m *Model) setupSave() {
 		found = found || c.key == m.Setup.Pick
 	}
 	if !found {
-		m.Setup.Err = "Selected model is no longer available · return to Model and rescan"
+		m.Setup.Err = "Selected model is not saved · return to Model and add it"
 		return
 	}
 	raw, err := os.ReadFile(m.Setup.Path)
@@ -188,7 +199,7 @@ func (m *Model) setupSave() {
 	m.Setup.Original, m.Setup.Existed = saved, true
 	m.Setup.Model, m.Setup.Err = candidate.Model, ""
 	m.focusChat()
-	m.alert("info", "Connections saved for all projects · inference unchecked · /status to load or inspect")
+	m.alert("info", "Connections saved for all projects · inference unchecked · /manage to load or inspect")
 }
 func (m Model) setupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	if !m.setupActive() || m.Chat.Dialog != nil || m.Input.Value() != "" {
@@ -239,7 +250,7 @@ func (m Model) setupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			return m, nil, true
 		}
 		if i < 0 {
-			m.Setup.Err = "No available model · r rescans · /settings configures another endpoint"
+			m.Setup.Err = "No saved model · a Add server / model"
 			return m, nil, true
 		}
 		if m.Setup.Stage == 0 {
@@ -308,7 +319,7 @@ func (m Model) renderSetup(w, h int) string {
 	if h > 6 {
 		body = append(body, Title.Render(titles[s.Stage]))
 	}
-	hint := "↑↓ select · enter continue · a add server/model · r rescan · esc back"
+	hint := "↑↓ select · enter continue · a add server/model · r Test saved endpoints · esc back"
 	switch s.Stage {
 	case 0, 1:
 		if s.Stage == 1 && h > 6 {
@@ -331,7 +342,7 @@ func (m Model) renderSetup(w, h int) string {
 			}
 		}
 		if len(rows) == 0 {
-			body = append(body, Guidance.Render("No models found · a add endpoint or checkpoint · r rescan"))
+			body = append(body, Guidance.Render("No saved models · a Add server / model · r Test saved endpoints"))
 		} else {
 			body = append(body, listWindow(rows, selected, max(1, h-8))...)
 			if selected >= 0 {

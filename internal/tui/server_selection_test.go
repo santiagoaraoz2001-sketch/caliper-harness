@@ -20,6 +20,7 @@ func TestGGUFCandidateListedForEachConfiguredServer(t *testing.T) {
 	m := settingsModel(t)
 	m.Cfg.Serve.ModelDirs = []string{dir}
 	for _, name := range []string{"first", "second"} {
+		m.Cfg.Serve.Models = append(m.Cfg.Serve.Models, config.SavedModel{Server: "http://127.0.0.1/" + name, Name: filepath.Join(dir, "model.gguf"), Path: filepath.Join(dir, "model.gguf")})
 		m.Cfg.Serve.Recipes = append(m.Cfg.Serve.Recipes, config.RecipeConfig{Name: name, Kind: "openai", Runtime: "openai", URL: "http://127.0.0.1/" + name, Argv: []string{"server", "--model", "{model}"}})
 	}
 	got := m.probeServeWith(probeClient())().(serveProbedMsg)
@@ -91,7 +92,7 @@ func TestNativeJudgeCatalogStagesExactLocalIdentity(t *testing.T) {
 				t.Fatalf("native candidates = %d", len(rows))
 			}
 			row := rows[0]
-			if row.Resident || row.Ours || row.Asset.Runtime != runtime || row.Ep.Model != path {
+			if row.Resident || row.Ours || row.Asset.Runtime != runtime || row.Ep.Model != before.Model {
 				t.Fatalf("metadata became readiness: %+v", row)
 			}
 			m.Serve.Rows, m.Serve.Sel = rows, 0

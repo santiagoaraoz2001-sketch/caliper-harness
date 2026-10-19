@@ -105,6 +105,7 @@ type Chat struct {
 	LastIn        int
 	LastOut       int
 	LastUnknown   bool
+	Runtime       runtimeMetrics
 	LastCostKnown bool // settled new-run accounting; prior totals are unavailable after resume
 	Recalled      int
 	Dialog        *Dialog
@@ -131,6 +132,7 @@ type Chat struct {
 func (m *Model) noteSession(id string) {
 	m.Chat.SessionIDs = append(m.Chat.SessionIDs, id)
 	if len(m.Chat.SessionIDs) > m.Cfg.UI.MaxRunIDs {
+		m.Chat.Runtime.Incomplete = true
 		m.Chat.SessionIDs = m.Chat.SessionIDs[len(m.Chat.SessionIDs)-m.Cfg.UI.MaxRunIDs:]
 	}
 }
@@ -529,6 +531,14 @@ func (m *Model) startRun(raw string) {
 			m.alert("info", strings.TrimPrefix(n, "note: "))
 		}
 	}
+	if client, ok := r.Model.(*llm.Client); ok {
+		client.WithRequestObserver(func(measurement llm.RequestMeasurement) {
+			raw, _ := json.Marshal(measurement)
+			if err := fanout.Append(context.WithoutCancel(ctx), id, "model_request", string(raw)); err != nil {
+				send(eventMsg{seq: seq, kind: "measurement_error", text: err.Error()})
+			}
+		})
+	}
 	r.GenerationInterrupt = box.generating
 	r.UserCommentPending = box.pending
 	go func() {
@@ -713,6 +723,11 @@ func (m *Model) onEvent(msg eventMsg) {
 		return
 	}
 	switch msg.kind {
+	case "measurement_error":
+		m.Chat.Runtime.Incomplete = true
+		m.alert("err", "Runtime measurement could not be recorded: "+msg.text)
+	case "model_request":
+		m.Chat.Runtime.observe(msg.text)
 	case "context":
 		var reading session.Continuation
 		if json.Unmarshal([]byte(msg.text), &reading) == nil {
@@ -722,6 +737,7 @@ func (m *Model) onEvent(msg eventMsg) {
 	case "task_settled":
 		m.alert("info", msg.text)
 	case "tool":
+		m.Chat.Runtime.Tools++
 		m.flushStream()
 		m.Chat.appendLine(lineTool, msg.text)
 		at := len(m.Chat.Lines) - 1

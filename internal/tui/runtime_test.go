@@ -67,8 +67,8 @@ func TestRuntimeServeSelectionDoesNotGuessFromLabel(t *testing.T) {
 		row  ServeRow
 		want string
 	}{
-		{"unowned mlx recipe", ServeRow{Ep: serve.Endpoint{URL: "http://external.invalid/v1", Label: "mlx"}, Have: true, Health: serve.Health{Up: true, Kind: "openai"}, Recipe: &serve.Recipe{Name: "mlx", Runtime: "mlx"}}, "openai"},
-		{"unproven owned mlx recipe", ServeRow{Ep: serve.Endpoint{URL: "http://owned.invalid/v1", Label: "custom"}, Have: true, Ours: true, Health: serve.Health{Up: true, Kind: "openai"}, Recipe: &serve.Recipe{Name: "unrelated", Runtime: "mlx"}}, "openai"},
+		{"unowned mlx recipe", ServeRow{Ep: serve.Endpoint{URL: "http://external.invalid/v1", Label: "mlx"}, Have: true, Health: serve.Health{Up: true, Kind: "openai"}, Recipe: &serve.Recipe{Name: "mlx", Runtime: "mlx"}}, "mlx"},
+		{"unproven owned mlx recipe", ServeRow{Ep: serve.Endpoint{URL: "http://owned.invalid/v1", Label: "custom"}, Have: true, Ours: true, Health: serve.Health{Up: true, Kind: "openai"}, Recipe: &serve.Recipe{Name: "unrelated", Runtime: "mlx"}}, "mlx"},
 		{"validated native", ServeRow{Ep: serve.Endpoint{URL: "http://native.invalid/v1", Model: "chosen"}, Have: true, IsModel: true, Health: serve.Health{Up: true, Kind: "ollama", Runtime: "ollama"}}, "ollama"},
 	}
 	for _, tc := range cases {
@@ -93,6 +93,7 @@ func TestRuntimeServeSelectionDoesNotGuessFromLabel(t *testing.T) {
 }
 func TestRuntimeNativeDiscoveredModelRowsRetainDescriptor(t *testing.T) {
 	m := settingsModel(t)
+	m.Cfg.Serve.Recipes = []config.RecipeConfig{{Name: "my-ollama", Kind: serve.KindOllama, Runtime: "ollama", URL: serve.OllamaURL}}
 	m.CfgPath = filepath.Join(t.TempDir(), "runtime.yaml")
 	msg := m.probeServeWith(probeClient())().(serveProbedMsg)
 	found := false

@@ -37,7 +37,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-const version = "0.1.3"
+const version = "0.1.4"
 
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "install-activate" {
@@ -240,7 +240,7 @@ func runTUI(args cliArgs) {
 	if cfg.Model.Name != "" && !cfg.Decision.Disabled {
 		boot.begin("Decision service", "Checking the configured service")
 		sidecar = ensureSidecarContext(startupCtx, cfg, boot.detail)
-		state, message := "info", "Preparation complete · inspect readiness in Status"
+		state, message := "info", "Preparation complete · inspect readiness in Models & Servers (/manage)"
 		if strings.Contains(boot.message, "unavailable") || strings.Contains(boot.message, "not confirmed") {
 			state, message = "warn", boot.message
 		}
@@ -316,6 +316,13 @@ func ensureSidecarContext(ctx context.Context, cfg config.Config, note func(stri
 	custom := false
 	for _, r := range cfg.Serve.Recipes {
 		if r.Kind == serve.KindSidecar && r.URL == srv {
+			if r.Launcher == "preset" {
+				continue // Use the native preset bound to the selected Judge above.
+			}
+			if len(r.Argv) == 0 {
+				note("Configured decision server is external · start it in its owning application")
+				return nil
+			}
 			recipe = serve.Recipe{Name: r.Name, Kind: r.Kind, URL: r.URL, Argv: r.Argv, Dir: r.Dir}
 			ok, custom = true, true
 		}
@@ -354,7 +361,7 @@ func ensureSidecarContext(ctx context.Context, cfg config.Config, note func(stri
 			return proc
 		}
 	}
-	note("Decision selection not confirmed · inspect Status")
+	note("Decision selection not confirmed · inspect Models & Servers (/manage)")
 	return proc
 }
 

@@ -159,7 +159,7 @@ func TestSettingsSlashDisarmsArmedEdit(t *testing.T) {
 	if m.Settings.Editing != nil {
 		t.Error("a slash command must disarm the pending edit")
 	}
-	if !m.serveActive() {
+	if m.Tabs[m.Active].at.view != ViewStatus {
 		t.Error("the slash command must still run")
 	}
 }

@@ -5,7 +5,7 @@ on:
       version:
         description: Immutable release version
         required: true
-        default: '0.1.3'
+        default: '0.1.4'
       platform:
         description: Platform to build and validate
         type: choice
@@ -79,6 +79,10 @@ jobs:
           & "$env:RUNNER_TEMP/Caliper/caliper.exe" version
           if ($LASTEXITCODE -ne 0) { throw 'native product launch failed without compiler/module PATH' }
           $env:PATH = $builderPath
+          & "$env:pythonLocation\python.exe" -m pip install --only-binary=:all: pywinpty==2.0.15
+          if ($LASTEXITCODE -ne 0) { throw 'Windows native terminal test dependency failed' }
+          & "$env:pythonLocation\python.exe" scripts/test-manage-status.py "$env:RUNNER_TEMP/Caliper" "$env:RUNNER_TEMP/manage-status-proof" --component-tests
+          if ($LASTEXITCODE -ne 0) { throw 'Windows /status and /manage native validation failed' }
           $package = & "$env:pythonLocation\python.exe" scripts/package-release.py "$env:RUNNER_TEMP/Caliper" --version "$env:RELEASE_VERSION" --out dist
           if ($LASTEXITCODE -ne 0) { throw 'release packaging failed' }
           $package | Set-Content "$env:RUNNER_TEMP/release.json"
@@ -101,6 +105,7 @@ jobs:
           GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go test -count=1 ./internal/update ./internal/bundle ./internal/config ./internal/session ./internal/tools/bash ./internal/store
           bash scripts/bundle-linux.sh "$RUNNER_TEMP/Caliper"
           LD_LIBRARY_PATH="$RUNNER_TEMP/Caliper/lib" "$RUNNER_TEMP/Caliper/caliper-harness" version
+          python scripts/test-manage-status.py "$RUNNER_TEMP/Caliper" "$RUNNER_TEMP/manage-status-proof" --component-tests
           python scripts/package-release.py "$RUNNER_TEMP/Caliper" --version "$RELEASE_VERSION" --out dist > "$RUNNER_TEMP/release.json"
           asset=$(python -c 'import json,sys; p=json.load(open(sys.argv[1])); print(p["archive"] or p["parts_manifest"])' "$RUNNER_TEMP/release.json")
           test -f "$asset"
@@ -115,3 +120,10 @@ jobs:
           name: caliper-${{ inputs.version }}-${{ matrix.platform }}
           path: dist/*
           if-no-files-found: error
+      - name: Upload native UI evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: caliper-${{ inputs.version }}-${{ matrix.platform }}-ui-proof
+          path: ${{ runner.temp }}/manage-status-proof
+          if-no-files-found: warn

@@ -80,7 +80,7 @@ func TestR13SettingsKeysSaveReopenFooter(t *testing.T) {
 func TestR13NextEscapeActualPriority(t *testing.T) {
 	t.Run("status-alert-clear", func(t *testing.T) {
 		m := New(testCfg(), "test")
-		m.navigate(ViewStatus, "")
+		m.navigate(ViewManage, "")
 		m.alert("warn", "owned notice")
 		if s := ansi.Strip(m.renderServe(120, 25)); !strings.Contains(s, "esc dismisses alert") || strings.Contains(s, "esc chat") {
 			t.Fatalf("status promise %q", s)
@@ -102,7 +102,7 @@ func TestR13NextEscapeActualPriority(t *testing.T) {
 	})
 	t.Run("help-over-dialog", func(t *testing.T) {
 		m := New(testCfg(), "test")
-		m.navigate(ViewStatus, "")
+		m.navigate(ViewManage, "")
 		m.Chat.Dialog = &Dialog{Kind: "auth", Answer: make(chan string, 1)}
 		m = submit(m, "/help")
 		if !strings.Contains(ansi.Strip(m.View()), "closes") {
@@ -122,7 +122,7 @@ func TestR13NextEscapeActualPriority(t *testing.T) {
 	})
 	t.Run("ask-comment-before-alert", func(t *testing.T) {
 		m := New(testCfg(), "test")
-		m.navigate(ViewStatus, "")
+		m.navigate(ViewManage, "")
 		m.alert("warn", "owned")
 		m.Chat.Dialog = &Dialog{Kind: "ask", Questions: []ask.Question{{Text: "pick", Options: []string{"one"}}}, Commenting: true, AskDone: make(chan []ask.Answer, 1)}
 		if !strings.Contains(ansi.Strip(m.footer()), "esc leaves comment") {
@@ -156,7 +156,7 @@ func TestR13NextEscapeActualPriority(t *testing.T) {
 	})
 	t.Run("picker-before-alert", func(t *testing.T) {
 		m := New(testCfg(), "test")
-		m.navigate(ViewStatus, "")
+		m.navigate(ViewManage, "")
 		m.alert("warn", "owned")
 		m.Input.SetValue("/sta")
 		if !strings.Contains(ansi.Strip(m.footer()), "esc closes menu") {
@@ -170,7 +170,7 @@ func TestR13NextEscapeActualPriority(t *testing.T) {
 }
 func TestR13NonchatCurrentGuidance(t *testing.T) {
 	m := New(testCfg(), "test")
-	m.navigate(ViewStatus, "")
+	m.navigate(ViewManage, "")
 	m = submit(m, "ordinary text")
 	s := lastAlert(m).Text
 	if strings.Contains(s, "lands in") || strings.Contains(s, "T6.") || !strings.Contains(s, "/chat") || !strings.Contains(s, "esc dismisses alert") {
@@ -188,7 +188,7 @@ func TestR13NonchatCurrentGuidance(t *testing.T) {
 
 func TestR13RunAndDetailEscapePriority(t *testing.T) {
 	m := New(testCfg(), "test")
-	m.navigate(ViewStatus, "")
+	m.navigate(ViewManage, "")
 	cancelled := false
 	m.Chat.Running = true
 	m.Chat.cancel = func() { cancelled = true }

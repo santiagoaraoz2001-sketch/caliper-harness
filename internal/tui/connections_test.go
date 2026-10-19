@@ -96,7 +96,7 @@ func TestCustomSafetensorsRecipeGetsLoadableAsset(t *testing.T) {
 		os.WriteFile(filepath.Join(dir, name), []byte(value), 0600)
 	}
 	os.WriteFile(filepath.Join(dir, "config.json"), []byte("{\"model_type\":\"fixture\"}"), 0600)
-	m.Cfg.Serve.ModelDirs = []string{dir}
+	m.Cfg.Serve.Models = []config.SavedModel{{Server: "http://127.0.0.1:19998/v1", Name: dir, Path: dir}}
 	m.Cfg.Serve.Recipes = []config.RecipeConfig{{Name: "custom", Kind: "openai", Runtime: "openai", URL: "http://127.0.0.1:19998/v1", Argv: []string{"custom", "--model", "{model}"}}}
 	msg := m.probeServeWith(&http.Client{Transport: offlineTransport{}})().(serveProbedMsg)
 	found := false

@@ -66,7 +66,7 @@ func TestFeatureTabsBrowseAndCloseDuringStreamWithoutOrphan(t *testing.T) {
 	m.Chat.Running, m.Chat.Streaming, m.Chat.Seq = true, true, 5
 	m = submit(m, "/settings")
 	m = submit(m, "/status")
-	if !m.serveActive() || len(m.Tabs) != 3 || m.Chat.ID != owner {
+	if m.Tabs[m.Active].at.view != ViewStatus || len(m.Tabs) != 3 || m.Chat.ID != owner {
 		t.Fatal("could not inspect workspace during owned run")
 	}
 	m = viewportUpdate(m, tokenMsg{seq: 5, delta: "STREAM_STAYS_WITH_OWNER"})

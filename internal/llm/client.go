@@ -47,15 +47,16 @@ type Usage struct {
 
 // Client uses the selected runtime contract; URLs do not select a dialect.
 type Client struct {
-	baseURL       string
-	model         string
-	http          *http.Client
-	runtime       string
-	toolProtocol  string
-	idleTimeout   time.Duration
-	thinkingMu    sync.Mutex
-	thinkingMeta  *thinkingMetadata
-	thinkingReady chan struct{}
+	requestObserver func(RequestMeasurement)
+	baseURL         string
+	model           string
+	http            *http.Client
+	runtime         string
+	toolProtocol    string
+	idleTimeout     time.Duration
+	thinkingMu      sync.Mutex
+	thinkingMeta    *thinkingMetadata
+	thinkingReady   chan struct{}
 	// Sampling knobs (nil = unset, sends nothing).
 	Temperature       *float64
 	TopK              *int
@@ -80,7 +81,7 @@ func New(server, model string) *Client {
 func (c *Client) WithoutThinking() *Client {
 	off := false
 	return &Client{
-		baseURL: c.baseURL, model: c.model, http: c.http, runtime: c.runtime,
+		baseURL: c.baseURL, model: c.model, http: c.http, runtime: c.runtime, requestObserver: c.requestObserver,
 		toolProtocol: c.toolProtocol, idleTimeout: c.idleTimeout,
 		Temperature: c.Temperature, TopK: c.TopK,
 		RepetitionPenalty: c.RepetitionPenalty, Thinking: &off,
@@ -195,7 +196,9 @@ func (c *Client) request(msgs []Message, stream bool) chatRequest {
 
 // Chat sends messages and returns the reply text, the serving model's
 // self-reported identity, and the exchange's server-reported usage.
-func (c *Client) Chat(ctx context.Context, msgs []Message) (string, string, Usage, error) {
+func (c *Client) Chat(ctx context.Context, msgs []Message) (reply, served string, usage Usage, err error) {
+	started := time.Now()
+	defer func() { c.observeRequest(started, served, usage, err) }()
 	return c.chatPlain(ctx, msgs, nil, nil)
 }
 func (c *Client) chatPlain(ctx context.Context, msgs []Message, tools []ToolDefinition, capture *Reply) (reply, servedModel string, usage Usage, err error) {
@@ -299,7 +302,9 @@ func (c *Client) chatPlain(ctx context.Context, msgs []Message, tools []ToolDefi
 // arrives, then returns the full assembled reply and served identity.
 // On failure the returned text and usage preserve partial evidence; callers
 // must not treat the nonnil error as a completed answer or execute its text.
-func (c *Client) ChatStream(ctx context.Context, msgs []Message, onDelta func(string)) (string, string, Usage, error) {
+func (c *Client) ChatStream(ctx context.Context, msgs []Message, onDelta func(string)) (reply, served string, usage Usage, err error) {
+	started := time.Now()
+	defer func() { c.observeRequest(started, served, usage, err) }()
 	return c.chatStream(ctx, msgs, onDelta, nil, nil)
 }
 func (c *Client) chatStream(ctx context.Context, msgs []Message, onDelta func(string), tools []ToolDefinition, capture *Reply) (reply, servedModel string, usage Usage, err error) {

@@ -105,7 +105,7 @@ type serveLoadMsg struct {
 }
 
 func (m *Model) serveActive() bool {
-	return m.Tabs[m.Active].at.view == ViewStatus
+	return m.Tabs[m.Active].at.view == ViewManage
 }
 
 // sameServeURL matches the root/API-base alternatives already accepted by Probe.
@@ -115,225 +115,168 @@ func sameServeURL(a, b string) bool {
 	return root(a) == root(b)
 }
 
-// serveEndpoints lists active roles, conventional endpoints and launch recipes.
-func (m *Model) serveEndpoints() (result []serve.Endpoint) {
-	defer func() {
-		if !m.Cfg.Decision.Disabled {
+// serveEndpoints includes only saved endpoints, selected legacy roles and owned children.
+func (m *Model) serveEndpoints() []serve.Endpoint {
+	var out []serve.Endpoint
+	add := func(ep serve.Endpoint) {
+		if ep.URL == "" {
 			return
 		}
-		kept := result[:0]
-		for _, ep := range result {
-			if ep.Kind != serve.KindSidecar && (!sameServeURL(ep.URL, m.Cfg.Decision.Server) || sameServeURL(ep.URL, m.Cfg.Model.Server)) {
-				kept = append(kept, ep)
+		for _, e := range out {
+			if sameServeURL(e.URL, ep.URL) {
+				return
 			}
 		}
-		result = kept
-	}()
-	worker := m.Cfg.Model.Server
-	for _, rec := range m.serveRecipes() {
-		if rec.Kind != serve.KindSidecar && sameServeURL(rec.URL, worker) {
-			worker = rec.URL
-			break
-		}
+		out = append(out, ep)
 	}
-	out := []serve.Endpoint{{Kind: serve.KindAuto, Label: "worker", URL: worker, Model: m.Cfg.Model.Name}}
-	for _, alt := range []serve.Endpoint{
-		{Kind: serve.KindOllama, Label: "ollama", URL: serve.OllamaURL},
-		{Kind: serve.KindOpenAI, Label: "mlx", URL: serve.MLXURL},
-	} {
-		if !sameServeURL(alt.URL, worker) {
-			out = append(out, alt)
-		}
+	for _, r := range m.Cfg.Serve.Recipes {
+		add(serve.Endpoint{Kind: r.Kind, Label: r.Name, URL: r.URL})
 	}
-	for _, rec := range m.serveRecipes() {
-		if rec.URL == m.Cfg.Decision.Server {
-			continue
-		}
-		found := false
-		for _, ep := range out {
-			found = found || sameServeURL(ep.URL, rec.URL)
-		}
-		if !found && rec.URL != "" {
-			out = append(out, serve.Endpoint{Kind: rec.Kind, Label: rec.Name, URL: rec.URL})
-		}
+	for _, model := range m.Cfg.Serve.Models {
+		add(serve.Endpoint{Kind: serve.KindOpenAI, Label: "saved server", URL: model.Server})
 	}
-
-	// Owned children remain visible even when neither current role selects them.
-	for endpoint, p := range m.Serve.Spawned {
-		if decision.NativeRuntime(m.Cfg.Decision.Runtime) && sameServeURL(endpoint, m.Cfg.Decision.Server) {
+	kind := serve.KindOpenAI
+	if m.Cfg.Model.Runtime == "ollama" {
+		kind = serve.KindOllama
+	}
+	if m.Cfg.Model.Runtime == "rulith" {
+		kind = serve.KindRulith
+	}
+	if m.Cfg.Model.Name != "" {
+		add(serve.Endpoint{Kind: kind, Label: m.Cfg.Model.Runtime, URL: m.Cfg.Model.Server, Model: m.Cfg.Model.Name})
+	}
+	if !m.Cfg.Decision.Disabled && (m.Cfg.Model.Name != "" || m.Cfg.Decision.Path != "" || m.Cfg.Decision.Model != config.Defaults().Decision.Model || m.Cfg.Decision.Server != config.Defaults().Decision.Server) {
+		kind = serve.KindOpenAI
+		if decision.NativeRuntime(m.Cfg.Decision.Runtime) {
+			kind = serve.KindSidecar
+		} else if m.Cfg.Decision.Runtime == "ollama" {
+			kind = serve.KindOllama
+		} else if m.Cfg.Decision.Runtime == "rulith" {
+			kind = serve.KindRulith
+		}
+		add(serve.Endpoint{Kind: kind, Label: m.Cfg.Decision.Runtime, URL: m.Cfg.Decision.Server, Model: m.Cfg.Decision.Model})
+	}
+	for endpoint, proc := range m.Serve.Spawned {
+		if proc.PID() == 0 {
 			continue
 		}
-		if p.PID() == 0 {
-			continue
-		}
-		found := false
-		for _, e := range out {
-			found = found || sameServeURL(e.URL, endpoint)
-		}
-		if found {
-			continue
-		}
-		kind := serve.KindAuto
+		kind, label := serve.KindAuto, "owned server"
 		for _, row := range m.Serve.Rows {
-			if row.Ep.URL == endpoint && row.Sidecar {
-				kind = serve.KindSidecar
+			if sameServeURL(row.Ep.URL, endpoint) && !row.IsModel {
+				kind, label = row.Ep.Kind, row.Ep.Label
 				break
 			}
 		}
-		out = append(out, serve.Endpoint{Kind: kind, Label: "owned server", URL: endpoint})
+		add(serve.Endpoint{Kind: kind, Label: label, URL: endpoint})
 	}
-	if !decision.NativeRuntime(m.Cfg.Decision.Runtime) {
-		kind := serve.KindOpenAI
-		if m.Cfg.Decision.Runtime == "ollama" {
-			kind = serve.KindOllama
-		}
-		if m.Cfg.Decision.Runtime == "rulith" {
-			kind = serve.KindRulith
-		}
-		for _, e := range out {
-			if sameServeURL(e.URL, m.Cfg.Decision.Server) {
-				return out
-			}
-		}
-		return append(out, serve.Endpoint{Kind: kind, Label: "judge", URL: m.Cfg.Decision.Server, Model: m.Cfg.Decision.Model})
-	}
-	return append(out, serve.Endpoint{Kind: serve.KindSidecar, Label: "sidecar", URL: m.Cfg.Decision.Server, Model: m.Cfg.Decision.Model})
+	return out
 }
 
-// serveRecipes merges built-ins with the user's extras.
-func (m *Model) serveRecipes() (result []serve.Recipe) {
-	defer func() {
-		if !m.Cfg.Decision.Disabled {
-			return
-		}
-		kept := result[:0]
-		for _, rec := range result {
-			if rec.Kind != serve.KindSidecar && (!sameServeURL(rec.URL, m.Cfg.Decision.Server) || sameServeURL(rec.URL, m.Cfg.Model.Server)) {
-				kept = append(kept, rec)
-			}
-		}
-		result = kept
-	}()
-	extra := make([]serve.Recipe, 0, len(m.Cfg.Serve.Recipes))
+// Resolve launchers only for explicitly saved recipes or the selected legacy role.
+func (m *Model) serveRecipes() []serve.Recipe {
+	var out []serve.Recipe
 	for _, r := range m.Cfg.Serve.Recipes {
 		rec := serve.Recipe{Name: r.Name, Kind: r.Kind, Runtime: r.Runtime, URL: r.URL, Argv: r.Argv, Dir: r.Dir}
-		if len(r.Argv) == 0 && r.Kind == serve.KindSidecar && decision.NativeRuntime(m.Cfg.Decision.Runtime) {
-			if known, ok := serve.SidecarRecipe(serve.FindHarnessDir(), r.URL, m.Cfg.Decision.Model, decision.SelectionFor(m.Cfg.Decision)); ok {
-				rec = known
-				rec.Name = r.Name
-			}
-		}
-		if len(r.Argv) == 0 {
+		if r.Launcher == "preset" {
 			if known, ok := serve.LocalRecipe(serve.FindHarnessDir(), r.Runtime, r.URL, "{model}"); ok {
 				rec = known
 				rec.Name = r.Name
 			}
 		}
-		extra = append(extra, rec)
-	}
-	built := serve.DefaultRecipes(serve.FindHarnessDir(), m.Cfg.Model.Name, m.Cfg.Decision.Model, decision.SelectionFor(m.Cfg.Decision))
-	if !decision.NativeRuntime(m.Cfg.Decision.Runtime) {
-		filtered := built[:0]
-		for _, r := range built {
-			if r.Kind != serve.KindSidecar {
-				filtered = append(filtered, r)
+		if r.Launcher == "preset" && len(rec.Argv) == 0 && r.Kind == serve.KindSidecar && (decision.NativeRuntime(r.Runtime) || r.Runtime == "" && decision.NativeRuntime(m.Cfg.Decision.Runtime)) {
+			selected := m.Cfg.Decision
+			if r.Runtime != "" {
+				selected.Runtime = r.Runtime
+			}
+			selected.Server = r.URL
+			if known, ok := serve.SidecarRecipe(serve.FindHarnessDir(), r.URL, selected.Model, decision.SelectionFor(selected)); ok {
+				rec = known
+				rec.Runtime = selected.Runtime
+				rec.Name = r.Name
 			}
 		}
-		built = filtered
+		out = append(out, rec)
 	}
-	built = append(built, serve.InstalledRecipes(m.Cfg.Model.Server)...)
-	if !decision.NativeRuntime(m.Cfg.Decision.Runtime) && !sameServeURL(m.Cfg.Decision.Server, m.Cfg.Model.Server) {
-		built = append(built, serve.InstalledRecipes(m.Cfg.Decision.Server)...)
-	}
-	for i := range built {
-		if built[i].Kind == serve.KindSidecar {
-			built[i].URL = m.Cfg.Decision.Server
+	legacy := func(runtime, url, model string, native bool) {
+		for _, r := range out {
+			if sameServeURL(r.URL, url) {
+				return
+			}
+		}
+		var rec serve.Recipe
+		var ok bool
+		if native {
+			rec, ok = serve.SidecarRecipe(serve.FindHarnessDir(), url, model, decision.SelectionFor(m.Cfg.Decision))
+		} else {
+			rec, ok = serve.LocalRecipe(serve.FindHarnessDir(), runtime, url, model)
+		}
+		if ok {
+			out = append(out, rec)
 		}
 	}
-	if rec, ok := serve.SidecarRecipe(serve.FindHarnessDir(), m.Cfg.Decision.Server, m.Cfg.Decision.Model, decision.SelectionFor(m.Cfg.Decision)); ok && decision.NativeRuntime(m.Cfg.Decision.Runtime) {
-		built = serve.MergeRecipes(built, []serve.Recipe{rec})
+	legacy(m.Cfg.Model.Runtime, m.Cfg.Model.Server, m.Cfg.Model.Name, false)
+	if !m.Cfg.Decision.Disabled {
+		legacy(m.Cfg.Decision.Runtime, m.Cfg.Decision.Server, m.Cfg.Decision.Model, decision.NativeRuntime(m.Cfg.Decision.Runtime))
 	}
-	return serve.MergeRecipes(built, extra)
+	return out
 }
 
-// probeServe checks every endpoint off the event loop.
 func (m *Model) probeServe() tea.Cmd {
-	excluded := ""
-	if m.Cfg.Decision.Disabled && !sameServeURL(m.Cfg.Decision.Server, m.Cfg.Model.Server) {
-		excluded = m.Cfg.Decision.Server
-	}
-	return m.probeServeWithDiscovery(&http.Client{Timeout: time.Duration(m.Cfg.Serve.ProbeTimeoutSeconds) * time.Second}, func(ctx context.Context, client *http.Client) ([]serve.DiscoveredServer, error) {
-		return serve.DiscoverServersExcept(ctx, client, excluded)
-	})
+	return m.probeServeWith(&http.Client{Timeout: time.Duration(m.Cfg.Serve.ProbeTimeoutSeconds) * time.Second})
 }
-
-// probeServeWith is the injectable core: tests fake the transport.
 func (m *Model) probeServeWith(client *http.Client) tea.Cmd {
 	return m.probeServeWithDiscovery(client, nil)
 }
-func (m *Model) probeServeWithDiscovery(client *http.Client, discover func(context.Context, *http.Client) ([]serve.DiscoveredServer, error)) tea.Cmd {
-	endpoints := m.serveEndpoints()
-	recipes := m.serveRecipes()
+
+// The obsolete discovery hook remains test-injectable to prove it is never called.
+func (m *Model) probeServeWithDiscovery(client *http.Client, _ func(context.Context, *http.Client) ([]serve.DiscoveredServer, error)) tea.Cmd {
+	endpoints, recipes := m.serveEndpoints(), m.serveRecipes()
 	spawned := make(map[string]*serve.Proc, len(m.Serve.Spawned))
-	for url, p := range m.Serve.Spawned {
-		spawned[url] = p
+	for u, p := range m.Serve.Spawned {
+		spawned[u] = p
 	}
-	worker, sidecar := m.Cfg.Model.Server, m.Cfg.Decision.Server
-	judge := m.Cfg.Decision
-	home, _ := os.UserHomeDir()
-	roots := serve.ModelRoots(home)
-	for _, p := range m.Cfg.Serve.ModelDirs {
-		roots = append(roots, serve.ModelRoot{Path: p})
-	}
-	var explicit []string
-	for _, name := range append([]string{m.Cfg.Model.Name, judge.Path, judge.Model}, recipeModels(recipes)...) {
-		if _, err := os.Stat(name); err == nil {
-			explicit = append(explicit, name)
+	coding, judge := m.Cfg.Model, m.Cfg.Decision
+	models := append([]config.SavedModel(nil), m.Cfg.Serve.Models...)
+	if coding.Name != "" {
+		found := false
+		for _, model := range models {
+			if sameServeURL(model.Server, coding.Server) && (model.Name == coding.Name || model.Path == coding.Name) {
+				found = true
+			}
+		}
+		if !found {
+			path := ""
+			if _, err := os.Stat(coding.Name); err == nil {
+				path = coding.Name
+			}
+			models = append(models, config.SavedModel{Server: coding.Server, Name: coding.Name, Path: path})
 		}
 	}
-	probeTimeout := time.Duration(m.Cfg.Serve.ProbeTimeoutSeconds) * time.Second
+	if !judge.Disabled {
+		found := false
+		for _, model := range models {
+			if sameServeURL(model.Server, judge.Server) && (model.Name == judge.Model || judge.Path != "" && model.Path == judge.Path) {
+				found = true
+			}
+		}
+		if !found {
+			models = append(models, config.SavedModel{Server: judge.Server, Name: judge.Model, Path: judge.Path})
+		}
+	}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
-		defer cancel()
 		health := serve.ProbeAll(client, endpoints)
-		assets, warnings := serve.Discover(roots, explicit)
-		// Live discovery: every loopback listener that answers like a
-		// model server joins the table read-only; discovery grants no ownership.
-		if discover != nil {
-			if found, derr := discover(ctx, client); derr != nil {
-				warnings = append(warnings, "server discovery: "+derr.Error())
-			} else {
-				for _, d := range found {
-					covered := false
-					for _, e := range endpoints {
-						covered = covered || sameServerPort(e.URL, d.URL)
-					}
-					if !covered {
-						endpoints = append(endpoints, serve.Endpoint{Kind: d.Kind, Label: d.Kind, URL: d.URL})
-						health = append(health, d.Health)
-					}
-				}
-			}
-		}
-		if install, ok := serve.LocateRulith(); ok {
-			if ra, err := serve.RulithAssets(ctx, install); err == nil {
-				assets = append(assets, ra...)
-			} else {
-				warnings = append(warnings, "rulith catalog: "+err.Error())
-			}
-		}
 		var rows []ServeRow
+		var warnings []string
 		for i, e := range endpoints {
-			r := ServeRow{Ep: e, Health: health[i], Have: true,
-				Worker:  sameServeURL(e.URL, worker) && e.Kind != serve.KindSidecar,
-				Sidecar: e.Kind == serve.KindSidecar}
-			for j, rec := range recipes {
-				if rec.URL == e.URL && (r.Recipe == nil || rec.Name == e.Label) {
+			r := ServeRow{Ep: e, Health: health[i], Have: true, Worker: sameServeURL(e.URL, coding.Server), Sidecar: e.Kind == serve.KindSidecar}
+			for j := range recipes {
+				if sameServeURL(recipes[j].URL, e.URL) {
 					r.Recipe = &recipes[j]
+					break
 				}
 			}
-			if _, ok := spawned[e.URL]; ok {
-				r.Ours = spawned[e.URL].PID() != 0 && (!r.Sidecar || serve.Loopback(e.URL) && health[i].Decision != nil && spawned[e.URL].PID() != 0 && spawned[e.URL].PID() == health[i].Decision.PID)
+			if p := spawned[e.URL]; p != nil {
+				r.Ours = p.PID() != 0 && (!r.Sidecar || health[i].Decision != nil && health[i].Decision.PID == p.PID())
 			}
 			if r.Ours && spawned[e.URL].Runtime() == "mlx" {
 				h, err := serve.OwnedMLXReady(context.Background(), client, spawned[e.URL])
@@ -342,98 +285,49 @@ func (m *Model) probeServeWithDiscovery(client *http.Client, discover func(conte
 				}
 				r.Health = h
 				r.Ours = err == nil
-				health[i] = h
 			}
 			rows = append(rows, r)
-			if r.Sidecar && e.URL == sidecar && (judge.Runtime == "laya" || judge.Runtime == "system_one") {
-				for _, asset := range assets {
-					if !asset.Complete || asset.Format != "safetensors" {
-						continue
-					}
-					a := asset
-					a.Runtime = judge.Runtime // Explicit selection; compatibility remains unconfirmed.
-					ep := e
-					ep.Model = a.Path
-					rows = append(rows, ServeRow{Ep: ep, Asset: &a, Sidecar: true, IsModel: true, Have: true})
-				}
+			saved := append([]config.SavedModel(nil), models...)
+			for _, name := range append(append([]string(nil), r.Health.Loaded...), r.Health.Available...) {
+				saved = append(saved, config.SavedModel{Server: e.URL, Name: name})
 			}
-			// Ollama servers list each model: resident rows unload
-			// one, available rows load installed weights.
-			if health[i].Up && (e.Kind == serve.KindOllama ||
-				(e.Kind == serve.KindAuto && health[i].Kind == serve.KindOllama)) {
-				for _, name := range health[i].Loaded {
-					rows = append(rows, ServeRow{
-						Ep:     serve.Endpoint{Kind: serve.KindOllama, Label: e.Label, URL: e.URL, Model: name},
-						Health: health[i],
-						Have:   true, IsModel: true, Resident: true,
-					})
-				}
-				for _, name := range health[i].Available {
-					rows = append(rows, ServeRow{
-						Ep:     serve.Endpoint{Kind: serve.KindOllama, Label: e.Label, URL: e.URL, Model: name},
-						Health: health[i],
-						Have:   true, IsModel: true,
-					})
-				}
-			}
-			if health[i].Up && health[i].Kind != serve.KindOllama && e.Kind != serve.KindSidecar {
-				for _, name := range health[i].Available {
-					rows = append(rows, ServeRow{Ep: serve.Endpoint{Kind: serve.KindOpenAI, Label: e.Label, URL: e.URL, Model: name}, Health: health[i], Have: true, IsModel: true})
-				}
-			}
-		}
-		// Multiple installed/configured recipes may target one endpoint. Keep
-		// each explicit choice without probing or launching an extra server.
-		for j := range recipes {
-			rec := &recipes[j]
-			if rec.Kind == serve.KindSidecar {
-				continue
-			}
-			for _, server := range rows {
-				if server.IsModel || server.Sidecar || server.Ep.URL != rec.URL {
+			seen := map[string]bool{}
+			for _, model := range saved {
+				if !sameServeURL(model.Server, e.URL) || model.Name == "" || seen[model.Name] {
 					continue
 				}
-				if server.Recipe == nil || server.Recipe.Name != rec.Name {
-					choice := server
-					choice.Recipe, choice.Ep.Label = rec, rec.Name
-					rows = append(rows, choice)
-				}
-				break
-			}
-		}
-		for i := range assets {
-			asset := assets[i]
-			matched := false
-			for j := range recipes {
-				rec := &recipes[j]
-				compatible := asset.Runtime == "rulith" && rec.Kind == serve.KindRulith || asset.Format == "safetensors" && (rec.Runtime == "mlx" || rec.Kind == serve.KindOpenAI && !rec.Discovered && rec.HasModelPlaceholder()) || asset.Runtime == "ollama" && rec.Kind == serve.KindOllama || asset.Format == "gguf" && rec.Kind == serve.KindOpenAI && rec.Runtime != "mlx" && rec.HasModelPlaceholder()
-				if !compatible || !serve.Loopback(rec.URL) {
-					continue
-				}
-				matched = true
-				a := asset
-				a.Runtime = rec.Runtime // selected recipe; never checkpoint compatibility proof
-				if a.Runtime == "" {
-					a.Runtime = "openai"
-				}
-				r := ServeRow{Ep: serve.Endpoint{Kind: rec.Kind, Label: rec.Name, URL: rec.URL, Model: serve.AssetModelName(a)}, Recipe: rec, Asset: &a, IsModel: true, Have: true}
-				for _, server := range rows {
-					if !server.IsModel && server.Ep.URL == rec.URL {
-						r.Health, r.Ours = server.Health, server.Ours
-						for _, name := range r.Health.Loaded {
-							r.Resident = r.Resident || (r.Ours || rec.Kind == serve.KindRulith) && name == r.Ep.Model
+				seen[model.Name] = true
+				mr := r
+				mr.IsModel = true
+				mr.Ep.Model = model.Name
+				path := model.Path
+				if path != "" {
+					assets, notes := serve.Discover(nil, []string{path})
+					warnings = append(warnings, notes...)
+					if len(assets) == 1 {
+						a := assets[0]
+						if r.Recipe != nil {
+							a.Runtime = r.Recipe.Runtime
 						}
-						break
+						if r.Sidecar {
+							a.Runtime = judge.Runtime
+							if r.Recipe != nil && decision.NativeRuntime(r.Recipe.Runtime) {
+								a.Runtime = r.Recipe.Runtime
+							}
+						}
+						mr.Asset = &a
 					}
 				}
-				rows = append(rows, r)
-			}
-			if !matched {
-				warnings = append(warnings, asset.Path+": no local launch recipe for this format")
+				for _, name := range r.Health.Loaded {
+					if name == model.Name || mr.Asset != nil && name == mr.Asset.Path {
+						mr.Resident = r.Health.Kind == serve.KindOllama || r.Ours
+					}
+				}
+				rows = append(rows, mr)
 			}
 		}
 		mem, err := hw.Detect()
-		msg := serveProbedMsg{rows: groupServeRows(rows), mem: mem, warnings: warnings, installed: serve.InstalledServers()}
+		msg := serveProbedMsg{rows: groupServeRows(rows), mem: mem, warnings: warnings}
 		if err != nil {
 			msg.memErr = err.Error()
 		}
@@ -560,7 +454,7 @@ func (m *Model) onServeProbed(msg serveProbedMsg) {
 		if len(matches) == 1 {
 			m.Serve.Sel = matches[0]
 		} else if len(matches) == 0 {
-			m.alert("err", "model/path not discovered: "+wanted)
+			m.alert("err", "model/path not saved or in the selected server catalog: "+wanted)
 		} else {
 			m.alert("err", "model identity is ambiguous — select an exact server/path row")
 		}
@@ -626,7 +520,11 @@ func (m *Model) persist() error {
 	if m.CfgPath == "" {
 		return fmt.Errorf("no config file in use — relaunch with --config to persist")
 	}
-	return config.SaveEffective(m.CfgPath, m.Cfg)
+	if err := config.SaveEffective(m.CfgPath, m.Cfg); err != nil {
+		return err
+	}
+	m.syncSetupAfterSave()
+	return nil
 }
 
 // serveUse switches the worker runtime to the selected row. A model
@@ -640,20 +538,25 @@ func (m *Model) serveUse() {
 		m.alert("err", "the sidecar is not a worker runtime")
 		return
 	}
-	if r.Asset != nil && (!r.Asset.LoadCandidate() || r.Asset.Runtime != "mlx" && r.Asset.Runtime != "rulith" && (r.Recipe == nil || !r.Recipe.HasModelPlaceholder())) {
-		m.alert("err", r.Asset.Reason)
-		return
-	}
-	if r.Asset == nil && (!r.Have || !r.Health.Up) {
-		m.alert("err", fmt.Sprintf("%s is down — start it first", labelOf(r)))
+	if !r.IsModel && (!r.Have || !r.Health.Up) {
+		m.alert("err", "select a saved model row to assign Coding while offline")
 		return
 	}
 	runtime := r.Health.Runtime
 	if runtime == "" && r.Ours {
 		runtime = m.Serve.Spawned[r.Ep.URL].Runtime()
 	}
+	if runtime == "" && r.Recipe != nil {
+		runtime = r.Recipe.Runtime
+	}
 	if runtime == "" && sameServeURL(r.Ep.URL, m.Cfg.Model.Server) {
 		runtime = m.Cfg.Model.Runtime
+	}
+	if r.Ep.Kind == serve.KindOllama {
+		runtime = "ollama"
+	}
+	if r.Ep.Kind == serve.KindRulith {
+		runtime = "rulith"
 	}
 	if runtime == "" {
 		runtime = "openai"
@@ -663,13 +566,16 @@ func (m *Model) serveUse() {
 	if base == "" {
 		base = r.Ep.URL
 	}
-	if r.Asset != nil {
+	if r.Asset != nil && r.Asset.Runtime != "" {
 		runtime = r.Asset.Runtime
 	}
 	m.Cfg.Model.Runtime = runtime
 	m.Cfg.Model.Server = base
 	if r.IsModel {
 		m.Cfg.Model.Name = r.Ep.Model
+		if runtime == "mlx" && r.Asset != nil && r.Recipe != nil && r.Recipe.HasModelPlaceholder() {
+			m.Cfg.Model.Name = r.Asset.Path
+		}
 	}
 	if err := m.persist(); err != nil {
 		m.Cfg.Model = old
@@ -678,8 +584,8 @@ func (m *Model) serveUse() {
 	}
 	m.Server = base
 	if r.IsModel {
-		m.ModelName = r.Ep.Model
-		m.St.Model = r.Ep.Model
+		m.ModelName = m.Cfg.Model.Name
+		m.St.Model = m.Cfg.Model.Name
 		m.alert("info", fmt.Sprintf("runtime: %s on %s (next run)", r.Ep.Model, r.Ep.Label))
 		return
 	}
@@ -698,6 +604,9 @@ func (m *Model) serveUseJudge() {
 			next.Decision = *m.Settings.DecisionDraft
 		}
 		a := r.Asset
+		if r.Recipe != nil && decision.NativeRuntime(r.Recipe.Runtime) {
+			next.Decision.Runtime = r.Recipe.Runtime
+		}
 		if !a.Complete || a.Format != "safetensors" || a.Runtime != next.Decision.Runtime || (a.Runtime != "laya" && a.Runtime != "system_one") {
 			m.alert("err", "select a native decision runtime in Settings, then refresh its local candidates")
 			return
@@ -706,6 +615,10 @@ func (m *Model) serveUseJudge() {
 		if err != nil || !filepath.IsAbs(path) || path != a.Path {
 			m.alert("err", "judge candidate path changed or unavailable — refresh inventory")
 			return
+		}
+		next.Decision.Disabled = false
+		if r.Ep.URL != "" {
+			next.Decision.Server = r.Ep.URL
 		}
 		next.Decision.Model, next.Decision.Path, next.Decision.Revision = a.ID, path, a.Revision
 		if err := next.Validate(); err != nil {
@@ -718,8 +631,29 @@ func (m *Model) serveUseJudge() {
 		m.alert("info", m.Settings.DecisionNotice)
 		return
 	}
+	if r.IsModel && r.Sidecar {
+		next := m.Cfg
+		next.Decision.Disabled = false
+		next.Decision.Server = r.Ep.URL
+		next.Decision.Model = r.Ep.Model
+		next.Decision.Path = ""
+		next.Decision.Revision = ""
+		if r.Recipe != nil && decision.NativeRuntime(r.Recipe.Runtime) {
+			next.Decision.Runtime = r.Recipe.Runtime
+		}
+		if err := next.Validate(); err != nil {
+			m.alert("err", err.Error())
+			return
+		}
+		m.Settings.DecisionDraft = &next.Decision
+		m.Settings.DecisionSeq++
+		m.Settings.DecisionNotice = "Native Judge selection staged · availability unconfirmed · a apply · Settings s save"
+		m.alert("info", m.Settings.DecisionNotice)
+		return
+	}
 	if r.IsModel && !r.Sidecar {
 		next := m.Cfg
+		next.Decision.Disabled = false
 		next.Decision.Server = r.Health.APIBase
 		if next.Decision.Server == "" {
 			next.Decision.Server = r.Ep.URL
@@ -743,6 +677,9 @@ func (m *Model) serveUseJudge() {
 		}
 		if next.Decision.Runtime == "" {
 			next.Decision.Runtime = "openai"
+		}
+		if next.Decision.Runtime == "mlx" && r.Asset != nil && r.Recipe != nil && r.Recipe.HasModelPlaceholder() {
+			next.Decision.Model = r.Asset.Path
 		}
 		if err := next.Validate(); err != nil {
 			m.alert("err", err.Error())
@@ -822,7 +759,7 @@ func (m *Model) serveStart() {
 		return
 	}
 	rec := m.recipeFor(r)
-	if rec == nil {
+	if rec == nil || len(rec.Argv) == 0 {
 		m.alert("err", fmt.Sprintf("no start recipe for %s", r.Ep.URL))
 		return
 	}
@@ -1116,8 +1053,8 @@ func (m *Model) TrackSidecar(p *serve.Proc, h serve.Health) {
 }
 
 // Ownership needs both a live child and its validated HTTP identity.
-func (m *Model) decisionOwner() *serve.Proc {
-	url := m.Cfg.Decision.Server
+func (m *Model) decisionOwner() *serve.Proc { return m.decisionOwnerAt(m.Cfg.Decision.Server) }
+func (m *Model) decisionOwnerAt(url string) *serve.Proc {
 	p := m.Serve.Spawned[url]
 	if !serve.Loopback(url) || p.PID() == 0 {
 		return nil
@@ -1162,7 +1099,7 @@ func (m *Model) applyDecisionSelection() tea.Cmd {
 		m.alert("info", "no staged decision selection")
 		return nil
 	}
-	if m.Cfg.Decision.Disabled {
+	if m.Settings.DecisionDraft.Disabled {
 		m.Cfg.Decision = *m.Settings.DecisionDraft
 		m.Settings.DecisionDraft = nil
 		m.Settings.DecisionNotice = "decision model disabled; selection retained without activation"
@@ -1177,7 +1114,7 @@ func (m *Model) applyDecisionSelection() tea.Cmd {
 		m.alert("info", m.Settings.DecisionNotice)
 		return nil
 	}
-	p := m.decisionOwner()
+	p := m.decisionOwnerAt(m.Settings.DecisionDraft.Server)
 	if p == nil {
 		m.commitExternalDecision()
 		return nil
@@ -1226,6 +1163,12 @@ func (m Model) serveKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			m.followServe()
 		}
 		return m, nil, true
+	case tea.KeyBackspace, tea.KeyDelete:
+		if m.Input.Value() != "" {
+			return m, nil, false
+		}
+		m.removeManaged()
+		return m, m.probeServe(), true
 	case tea.KeyHome, tea.KeyEnd:
 		m.Serve.Sel = 0
 		if msg.Type == tea.KeyEnd {
@@ -1243,6 +1186,17 @@ func (m Model) serveKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			return m, nil, false
 		}
 		switch s := msg.String(); s {
+		case "n", "N":
+			m.openManagedForm("server")
+			return m, nil, true
+		case "+":
+			m.openManagedForm("model")
+			return m, nil, true
+		case "e", "E":
+			m.openManagedForm("edit")
+			return m, nil, true
+		case "t", "T":
+			return m, m.testManaged(), true
 		case "j", "J":
 			m.serveUseJudge()
 		case "u", "U":
@@ -1287,6 +1241,10 @@ func (m *Model) serveEnter() tea.Cmd {
 		return nil
 	}
 	if r.IsModel && r.Asset == nil && r.Have && r.Health.Up && r.Ep.Kind != serve.KindOllama && r.Health.Kind != serve.KindOllama {
+		m.serveUse()
+		return nil
+	}
+	if r.IsModel && r.Asset == nil && !r.Health.Up {
 		m.serveUse()
 		return nil
 	}
@@ -1363,8 +1321,8 @@ func serveModelRow(m Model, i int, r ServeRow, inner int) string {
 	if i+1 >= len(m.Serve.Rows) || !m.Serve.Rows[i+1].IsModel {
 		branch = "└─"
 	}
-	state := "served — residency unknown"
-	if r.Health.Kind == serve.KindOllama || r.Ep.Kind == serve.KindOllama {
+	state := "saved · availability/residency unknown"
+	if r.Health.Up && (r.Health.Kind == serve.KindOllama || r.Ep.Kind == serve.KindOllama) {
 		state = "available — l load"
 	}
 	if r.Asset != nil {
@@ -1380,7 +1338,7 @@ func serveModelRow(m Model, i int, r ServeRow, inner int) string {
 	if m.Serve.Loading == serveKeyOf(r) {
 		tags += " " + WarnSt.Render("[loading/releasing]")
 	}
-	if sameServeURL(r.Ep.URL, m.Cfg.Model.Server) && r.Ep.Model == m.Cfg.Model.Name && m.Cfg.Model.Name != "" {
+	if sameServeURL(r.Ep.URL, m.Cfg.Model.Server) && (r.Ep.Model == m.Cfg.Model.Name || r.Asset != nil && r.Asset.Path == m.Cfg.Model.Name) && m.Cfg.Model.Name != "" {
 		tags += " " + InfoSt.Render("[requested next]")
 	}
 	display := r.Ep.Model
@@ -1410,9 +1368,13 @@ func serveModelRow(m Model, i int, r ServeRow, inner int) string {
 // serveHints is the full key list, wrapped to fit any frame —
 // discoverability never depends on terminal width.
 func (m Model) serveHints(inner int) []string {
+	text := "n Add server · + Add model · e Edit · ⌫ Remove · t Test · ↑↓ select\nu Coding · j Judge · s start · l load · x unload/stop · r refresh · " + m.escapeHint()
+	if r := m.serveCur(); r != nil && r.Sidecar {
+		text += "\nd device · m model · a apply Judge"
+	}
 	var out []string
-	for _, l := range Wrap(m.ownedHint("↑↓ select · home/end rows · pgup/pgdn full details · enter "+m.serveEnterLabel()+" · u use worker · j judge · s start · x unload · l load · d stage device · m edit model · a apply decision · r refresh · "+m.escapeHint()), inner) {
-		out = append(out, Guidance.Render(l))
+	for _, line := range Wrap(m.ownedHint(text), inner) {
+		out = append(out, Guidance.Render(line))
 	}
 	return out
 }
@@ -1423,7 +1385,7 @@ func (m Model) serveContent(w int) ([]string, int) {
 	inner := BoxInner(w)
 	var lines []string
 	selected := 0
-	lines = append(lines, Title.Render("Status — runtimes and model readiness"))
+	lines = append(lines, Title.Render("Models & Servers"))
 	if !decision.NativeRuntime(m.Cfg.Decision.Runtime) {
 		for _, line := range Wrap("Judge: "+m.Cfg.Decision.Model+" · "+m.Cfg.Decision.Runtime+" · self-reported confidence; native input-token cap unconfirmed; server context admission", inner) {
 			lines = append(lines, Guidance.Render(line))
@@ -1433,7 +1395,7 @@ func (m Model) serveContent(w int) ([]string, int) {
 		lines = append(lines, WarnSt.Render("loading/releasing — awaiting native receipt"))
 	}
 	if len(m.Serve.Rows) == 0 {
-		lines = append(lines, Muted.Render("probing…"))
+		lines = append(lines, Muted.Render("No saved connections · n Add server"))
 	}
 	section := ""
 	for i, r := range m.Serve.Rows {
@@ -1504,7 +1466,10 @@ func (m Model) serveContent(w int) ([]string, int) {
 		}
 		tags := ""
 		if r.Worker {
-			tags += " " + InfoSt.Render("[worker]")
+			tags += " " + InfoSt.Render("[Coding]")
+		}
+		if !m.Cfg.Decision.Disabled && sameServeURL(r.Ep.URL, m.Cfg.Decision.Server) {
+			tags += " " + InfoSt.Render("[Judge]")
 		}
 		if r.Ours {
 			tags += " " + WarnSt.Render("[ours]")
@@ -1597,12 +1562,15 @@ func (m Model) servePageHeight() int { return viewHeight(m) - 3 - len(m.serveHin
 func (m *Model) followServe()        { _, row := m.serveContent(m.Width); m.Serve.Scroll = row }
 
 func (m Model) renderServe(w, vh int) string {
+	if m.Setup.Add != nil {
+		return m.renderConnection(w, vh)
+	}
 	inner := BoxInner(w)
 	lines, _ := m.serveContent(w)
 	hints := m.serveHints(inner)
 	page := vh - 3 - len(hints)
 	if page < 1 {
-		return Box("Status", ansi.Truncate("enlarge terminal to select or act", inner, "…"), w)
+		return Box("Models & Servers", ansi.Truncate("enlarge terminal to select or act", inner, "…"), w)
 	}
 	start := min(max(0, m.Serve.Scroll), max(0, len(lines)-page))
 	end := min(len(lines), start+page)
@@ -1612,7 +1580,7 @@ func (m Model) renderServe(w, vh int) string {
 		if name == "" {
 			name = r.Ep.Label
 		}
-		pinned = fmt.Sprintf("selected %d/%d · ", m.Serve.Sel+1, len(m.Serve.Rows)) + PathSt.Render(name)
+		pinned = fmt.Sprintf("selected %d/%d · ", m.Serve.Sel+1, len(m.Serve.Rows)) + PathSt.Render(name) + " · Enter " + m.serveEnterLabel()
 	}
 	body := []string{ansi.Truncate(pinned, inner, "…")}
 	body = append(body, lines[start:end]...)
@@ -1620,5 +1588,5 @@ func (m Model) renderServe(w, vh int) string {
 		body = append(body, "")
 	}
 	body = append(body, hints...)
-	return Box(fmt.Sprintf("Status · %d-%d/%d", start+1, end, len(lines)), strings.Join(body, "\n"), w)
+	return Box(fmt.Sprintf("Models & Servers · %d-%d/%d", start+1, end, len(lines)), strings.Join(body, "\n"), w)
 }

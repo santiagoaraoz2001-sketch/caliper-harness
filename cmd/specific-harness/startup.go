@@ -184,7 +184,7 @@ func (s *startupDisplay) dependencies() bool {
 			s.finish("error", err.Error())
 			return false
 		}
-		s.finish("ok", "Private Python runtimes and ripgrep found · readiness checked in Status")
+		s.finish("ok", "Private Python runtimes and ripgrep found · readiness checked in Models & Servers (/manage)")
 	}
 	s.begin("Tools", "Checking command availability")
 	var missing []string

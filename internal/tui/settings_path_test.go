@@ -41,7 +41,7 @@ func TestArmedSettingsLiteralPathsAndCommands(t *testing.T) {
 			}
 			switch command {
 			case "/status":
-				if !m.serveActive() {
+				if m.Tabs[m.Active].at.view != ViewStatus {
 					t.Fatal("status command not dispatched")
 				}
 			case "/auth risky":

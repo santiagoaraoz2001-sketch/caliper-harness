@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"specific-harness/internal/config"
+	"specific-harness/internal/decision"
 	"specific-harness/internal/serve"
 	"specific-harness/internal/tui/thirdparty/textarea"
 	"strings"
@@ -18,12 +19,14 @@ import (
 // The ordinary path requires an endpoint and model. Launch argv is an optional
 // advanced setting for servers whose installation Caliper does not recognize.
 type connectionForm struct {
-	Field        int
-	Values       [7]textarea.Model
-	Err, Receipt string
+	Field                                                        int
+	Values                                                       [8]textarea.Model
+	Mode, OriginalName, OriginalURL, OriginalModel, OriginalPath string
+	Advanced                                                     bool
+	Err, Receipt                                                 string
 }
 
-var connectionLabels = []string{"Name", "Server type (openai, mlx, ollama, gufo, llama.cpp, rulith, laya, system_one)", "Server URL", "Model ID", "Checkpoint folder or GGUF file (optional)", "Launch argv as JSON array (optional, advanced)", "Launch directory (optional)"}
+var connectionLabels = []string{"Name", "Preset (←/→ to choose)", "Server URL", "Model ID (leave blank for checkpoint)", "Checkpoint folder or first GGUF shard (optional)", "Launch argv as JSON array (optional, advanced)", "Launch directory (optional)", "Local launcher (blank: external; preset; or executable path)"}
 
 type connectionTestMsg struct {
 	Form    *connectionForm
@@ -32,7 +35,7 @@ type connectionTestMsg struct {
 
 func (m *Model) openConnectionForm() {
 	f := &connectionForm{}
-	values := []string{"my-server", "openai", "http://127.0.0.1:8080/v1", "", "", "", ""}
+	values := []string{"my-server", "openai", "http://127.0.0.1:8080/v1", "", "", "", "", ""}
 	if m.Setup.Stage == 1 {
 		values[0] = "my-judge"
 	}
@@ -53,12 +56,20 @@ func (f *connectionForm) candidate(base config.Config) (config.Config, error) {
 	if vals[3] == "" && vals[4] != "" {
 		vals[3] = filepath.Base(vals[4])
 	}
-	if vals[0] == "" || vals[2] == "" || vals[3] == "" {
-		return base, fmt.Errorf("Name, server URL and model ID are required")
+	serverOnly := f.Mode == "server" || f.Mode == "edit" && f.OriginalModel == ""
+	if vals[0] == "" || vals[2] == "" || (vals[3] == "" && !serverOnly) {
+		return base, fmt.Errorf("Name and server URL are required; add a model ID or checkpoint for a model")
+	}
+	if serverOnly {
+		for _, saved := range base.Serve.Recipes {
+			if saved.Name == vals[0] && (f.Mode == "server" || saved.Name != f.OriginalName) {
+				return base, fmt.Errorf("server name %q already exists; edit that connection or choose another name", vals[0])
+			}
+		}
 	}
 	runtime := strings.ToLower(vals[1])
 	brand := runtime
-	if runtime == "gufo" || runtime == "llama.cpp" || runtime == "llama-server" {
+	if runtime == "custom" || runtime == "gufo" || runtime == "llama.cpp" || runtime == "llama-server" {
 		runtime = "openai"
 	}
 	if brand == "llama.cpp" {
@@ -106,16 +117,41 @@ func (f *connectionForm) candidate(base config.Config) (config.Config, error) {
 		if !assets[0].LoadCandidate() {
 			return base, fmt.Errorf("checkpoint: %s", assets[0].Reason)
 		}
-		base.Serve.ModelDirs = appendUnique(base.Serve.ModelDirs, path)
 	}
-	if len(argv) == 0 && serve.Loopback(vals[2]) {
-
-		if runtime == "openai" {
-			for _, r := range serve.InstalledRecipes(vals[2]) {
-				if r.Name == brand || r.Name == vals[0] {
-					argv = r.Argv
-					break
-				}
+	if len(argv) == 0 && vals[7] != "" {
+		if !serve.Loopback(vals[2]) {
+			return base, fmt.Errorf("local launcher requires a loopback URL")
+		}
+		if vals[7] == "preset" {
+			var rec serve.Recipe
+			var ok bool
+			if kind == serve.KindSidecar {
+				selected := base.Decision
+				selected.Runtime, selected.Server = runtime, vals[2]
+				rec, ok = serve.SidecarRecipe(serve.FindHarnessDir(), vals[2], selected.Model, decision.SelectionFor(selected))
+			} else {
+				rec, ok = serve.LocalRecipe(serve.FindHarnessDir(), runtime, vals[2], "{model}")
+			}
+			if !ok {
+				return base, fmt.Errorf("preset launcher unavailable; enter its executable path or use an existing server URL")
+			}
+			argv = rec.Argv
+		} else {
+			u, _ := url.Parse(vals[2])
+			if u.Port() == "" {
+				return base, fmt.Errorf("local launcher URL needs an explicit port")
+			}
+			switch brand {
+			case "mlx":
+				argv = []string{vals[7], "--host", u.Hostname(), "--port", u.Port(), "--model", "{model}"}
+			case "ollama":
+				return base, fmt.Errorf("Ollama launcher: enter preset (binds OLLAMA_HOST) or advanced argv")
+			case "llama-server":
+				argv = []string{vals[7], "--host", u.Hostname(), "--port", u.Port(), "--model", "{model}"}
+			case "gufo":
+				argv = []string{vals[7], "serve", "--host", u.Hostname(), "--port", u.Port(), "llm", "--model", "{model}"}
+			default:
+				argv = []string{vals[7]}
 			}
 		}
 	}
@@ -132,10 +168,11 @@ func (f *connectionForm) candidate(base config.Config) (config.Config, error) {
 			return base, fmt.Errorf("launch directory is not a directory: %s", vals[6])
 		}
 	}
-	recipe := config.RecipeConfig{Name: vals[0], Kind: kind, Runtime: runtime, URL: vals[2], Argv: argv, Dir: vals[6]}
-	if kind == serve.KindSidecar {
-		recipe.Runtime = ""
+	if vals[7] == "preset" {
+		argv = nil
 	}
+	recipe := config.RecipeConfig{Launcher: vals[7], Name: vals[0], Kind: kind, Runtime: runtime, URL: vals[2], Argv: argv, Dir: vals[6]}
+
 	found := false
 	base.Serve.Recipes = append([]config.RecipeConfig(nil), base.Serve.Recipes...)
 	for i := range base.Serve.Recipes {
@@ -147,13 +184,34 @@ func (f *connectionForm) candidate(base config.Config) (config.Config, error) {
 	if !found {
 		base.Serve.Recipes = append(base.Serve.Recipes, recipe)
 	}
-	base.Model.Server, base.Model.Name, base.Model.Runtime = vals[2], vals[3], runtime
-	if modelFromPath && path != "" && runtime != "ollama" && runtime != "rulith" {
-		base.Model.Name = path
+	if vals[3] != "" {
+		base.Model.Server, base.Model.Name, base.Model.Runtime = vals[2], vals[3], runtime
+		if modelFromPath && path != "" && runtime != "ollama" && runtime != "rulith" {
+			base.Model.Name = path
+		}
+
+	}
+	if vals[3] != "" {
+		name := vals[3]
+		if modelFromPath && path != "" && runtime != "ollama" && runtime != "rulith" {
+			name = path
+		}
+		base.Serve.Models = append([]config.SavedModel(nil), base.Serve.Models...)
+		saved := config.SavedModel{Server: vals[2], Name: name, Path: path}
+		foundModel := false
+		for i, model := range base.Serve.Models {
+			if sameServeURL(model.Server, saved.Server) && model.Name == saved.Name {
+				base.Serve.Models[i] = saved
+				foundModel = true
+			}
+		}
+		if !foundModel {
+			base.Serve.Models = append(base.Serve.Models, saved)
+		}
 	}
 	// Native decision selections use their own config; do not put them through
 	// the worker runtime validator.
-	if kind == serve.KindSidecar {
+	if kind == serve.KindSidecar && vals[3] != "" {
 		base.Model = config.Defaults().Model
 		base.Decision.Server = vals[2]
 		base.Decision.Model = vals[3]
@@ -176,18 +234,60 @@ func appendUnique(xs []string, s string) []string {
 }
 func (m Model) connectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	f := m.Setup.Add
+	if msg.Type == tea.KeyF2 {
+		f.Advanced = !f.Advanced
+		f.Field = f.visibleFields()[0]
+		return m, nil, true
+	}
+	if f.Field == 1 && (msg.Type == tea.KeyLeft || msg.Type == tea.KeyRight) {
+		presets := []string{"custom", "mlx", "ollama", "llama.cpp", "laya", "system_one", "rulith", "gufo"}
+		idx := 0
+		for i, p := range presets {
+			if f.Values[1].Value() == p {
+				idx = i
+			}
+		}
+		if msg.Type == tea.KeyLeft {
+			idx = (idx + len(presets) - 1) % len(presets)
+		} else {
+			idx = (idx + 1) % len(presets)
+		}
+		f.Values[1].SetValue(presets[idx])
+		if (presets[idx] == "mlx" || presets[idx] == "ollama") && (f.Values[7].Value() == "" || f.Values[7].Value() == "preset") {
+			f.Values[7].SetValue("preset")
+		} else if f.Values[7].Value() == "preset" && presets[idx] != "laya" && presets[idx] != "system_one" {
+			f.Values[7].SetValue("")
+		}
+		return m, nil, true
+	}
 	if msg.Type == tea.KeyTab {
-		f.Field = (f.Field + 1) % len(f.Values)
+		fields := f.visibleFields()
+		i := 0
+		for j, n := range fields {
+			if n == f.Field {
+				i = j
+			}
+		}
+		f.Field = fields[(i+1)%len(fields)]
 		return m, nil, true
 	}
 	if msg.Type == tea.KeyShiftTab {
-		f.Field = (f.Field + len(f.Values) - 1) % len(f.Values)
+		fields := f.visibleFields()
+		i := 0
+		for j, n := range fields {
+			if n == f.Field {
+				i = j
+			}
+		}
+		f.Field = fields[(i+len(fields)-1)%len(fields)]
 		return m, nil, true
 	}
 	if msg.Type == tea.KeyCtrlT || msg.Type == tea.KeyCtrlS {
 		base := m.Cfg
-		base.Serve = m.Setup.Serve
-		base.Decision = m.Setup.Judge
+		if f.Mode == "" {
+			base.Serve = m.Setup.Serve
+			base.Decision = m.Setup.Judge
+		}
 		c, err := f.candidate(base)
 		if err != nil {
 			f.Err = err.Error()
@@ -195,17 +295,17 @@ func (m Model) connectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		}
 		runtime := strings.ToLower(strings.TrimSpace(f.Values[1].Value()))
 		native := runtime == "laya" || runtime == "system_one"
-		if native && m.Setup.Stage == 0 {
+		if native && f.Mode == "" && m.Setup.Stage == 0 {
 			f.Err = "Native decision runtimes belong in the Judge step"
 			return m, nil, true
 		}
 		if msg.Type == tea.KeyCtrlT {
-			endpoint := serve.Endpoint{Kind: serve.KindOpenAI, URL: c.Model.Server, Model: c.Model.Name}
-			if c.Model.Runtime == "ollama" {
+			endpoint := serve.Endpoint{Kind: serve.KindOpenAI, URL: strings.TrimSpace(f.Values[2].Value()), Model: strings.TrimSpace(f.Values[3].Value())}
+			if runtime == "ollama" {
 				endpoint.Kind = serve.KindOllama
 			}
 			if native {
-				endpoint = serve.Endpoint{Kind: serve.KindSidecar, URL: c.Decision.Server, Model: c.Decision.Model}
+				endpoint.Kind = serve.KindSidecar
 			}
 			timeout := time.Duration(c.Serve.ProbeTimeoutSeconds) * time.Second
 			f.Receipt = "Checking server catalog…"
@@ -225,6 +325,95 @@ func (m Model) connectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 				}
 				return connectionTestMsg{f, receipt}
 			}, true
+		}
+		if f.Mode != "" {
+			if f.Mode == "model" || f.OriginalModel != "" {
+				c.Serve.Recipes = m.Cfg.Serve.Recipes
+			}
+			// Saving a connection never silently assigns a role.
+			c.Model, c.Decision = m.Cfg.Model, m.Cfg.Decision
+			c.Serve.Models = append([]config.SavedModel(nil), c.Serve.Models...)
+			if f.OriginalURL != "" {
+				if f.OriginalModel != "" {
+					var models []config.SavedModel
+					for _, model := range c.Serve.Models {
+						if sameServeURL(model.Server, f.OriginalURL) && model.Name == f.OriginalModel {
+							continue
+						}
+						models = append(models, model)
+					}
+					c.Serve.Models = models
+					// Candidate may replace an identical model; retain it in that case.
+					name := strings.TrimSpace(f.Values[3].Value())
+					if name == "" {
+						name = filepath.Base(strings.TrimSpace(f.Values[4].Value()))
+					}
+					path := strings.TrimSpace(f.Values[4].Value())
+					if path != "" {
+						path, _ = filepath.Abs(path)
+						path, _ = filepath.EvalSymlinks(path)
+						if strings.TrimSpace(f.Values[3].Value()) == "" {
+							name = path
+						}
+					}
+					nextURL := strings.TrimSpace(f.Values[2].Value())
+					found := false
+					for _, model := range c.Serve.Models {
+						found = found || sameServeURL(model.Server, nextURL) && model.Name == name
+					}
+					if !found {
+						c.Serve.Models = append(c.Serve.Models, config.SavedModel{Server: nextURL, Name: name, Path: path})
+					}
+					if sameServeURL(c.Model.Server, f.OriginalURL) && (c.Model.Name == f.OriginalModel || f.OriginalPath != "" && c.Model.Name == f.OriginalPath) {
+						c.Model.Server = nextURL
+						c.Model.Name = name
+						if c.Model.Runtime == "mlx" && f.OriginalPath != "" && m.Cfg.Model.Name == f.OriginalPath && path != "" {
+							c.Model.Name = path
+						}
+					}
+					if sameServeURL(c.Decision.Server, f.OriginalURL) && (c.Decision.Model == f.OriginalModel || c.Decision.Path == f.OriginalModel || f.OriginalPath != "" && (c.Decision.Path == f.OriginalPath || c.Decision.Model == f.OriginalPath)) {
+						c.Decision.Server = nextURL
+						c.Decision.Model = name
+						if c.Decision.Runtime == "mlx" && f.OriginalPath != "" && m.Cfg.Decision.Model == f.OriginalPath && path != "" {
+							c.Decision.Model = path
+						}
+						if native {
+							c.Decision.Path = path
+						}
+					}
+
+				} else {
+					var recs []config.RecipeConfig
+					for _, r := range c.Serve.Recipes {
+						if r.Name == f.OriginalName && r.Name != strings.TrimSpace(f.Values[0].Value()) {
+							continue
+						}
+						recs = append(recs, r)
+					}
+					c.Serve.Recipes = recs
+					nextURL := strings.TrimSpace(f.Values[2].Value())
+					for i := range c.Serve.Models {
+						if sameServeURL(c.Serve.Models[i].Server, f.OriginalURL) {
+							c.Serve.Models[i].Server = nextURL
+						}
+					}
+					if sameServeURL(c.Model.Server, f.OriginalURL) {
+						c.Model.Server = nextURL
+						c.Model.Runtime = candidateRuntime(runtime)
+					}
+					if sameServeURL(c.Decision.Server, f.OriginalURL) {
+						c.Decision.Server = nextURL
+						c.Decision.Runtime = candidateRuntime(runtime)
+					}
+				}
+			}
+			if err := m.saveManaged(c); err != nil {
+				f.Err = err.Error()
+				return m, nil, true
+			}
+			m.Setup.Add = nil
+			m.alert("info", "Connection saved · roles unchanged · t Test availability")
+			return m, m.probeServe(), true
 		}
 		m.Setup.Serve = c.Serve
 		if m.Setup.Stage == 0 {
@@ -269,7 +458,16 @@ func (m Model) renderConnection(w, h int) string {
 		}
 		return panel(truncate(connectionLabels[f.Field], inner), rows, []string{"Tab · Ctrl+T test · Ctrl+S use · Esc"}, w, h)
 	}
-	for i, label := range connectionLabels {
+	if f.Mode == "model" || f.OriginalModel != "" {
+		rows = append(rows, Guidance.Render("Server: "+f.Values[0].Value()+" · "+f.Values[2].Value()))
+	}
+	fields := f.visibleFields()
+	selected := 0
+	for _, i := range fields {
+		label := connectionLabels[i]
+		if i == f.Field {
+			selected = len(rows)
+		}
 		if i == f.Field {
 			rows = append(rows, Title.Render(label))
 			field := f.Values[i]
@@ -279,12 +477,40 @@ func (m Model) renderConnection(w, h int) string {
 			rows = append(rows, Guidance.Render(truncate(label+": "+f.Values[i].Value(), inner)))
 		}
 	}
-	rows = listWindow(rows, min(len(rows)-1, f.Field), max(1, h-5))
+	rows = listWindow(rows, min(len(rows)-1, selected), max(1, h-5))
 	if f.Err != "" {
 		rows = append(rows, ErrSt.Render(truncate(f.Err, inner)))
 	}
 	if f.Receipt != "" {
 		rows = append(rows, Guidance.Render(truncate(f.Receipt, inner)))
 	}
-	return panel("Add server / model", rows, []string{"Tab fields · Ctrl+T test catalog · Ctrl+S use · Esc cancel"}, w, h)
+	title := "Add server / model"
+	if f.Mode != "" {
+		title = "Models & Servers · " + f.Mode
+	}
+	return panel(title, rows, []string{"Tab fields · ←/→ preset · F2 Advanced · Ctrl+T Test · Ctrl+S Save · Esc"}, w, h)
+}
+
+func (f *connectionForm) visibleFields() []int {
+	var fields []int
+	switch {
+	case f.Mode == "model" || f.OriginalModel != "":
+		fields = []int{3, 4}
+	case f.Mode == "server" || f.Mode == "edit":
+		fields = []int{0, 1, 2, 7}
+	default:
+		fields = []int{0, 1, 2, 3, 4, 7}
+	}
+	if f.Advanced {
+		fields = append(fields, 5, 6)
+	}
+	return fields
+}
+
+func candidateRuntime(runtime string) string {
+	switch runtime {
+	case "custom", "llama.cpp", "llama-server", "gufo":
+		return "openai"
+	}
+	return runtime
 }

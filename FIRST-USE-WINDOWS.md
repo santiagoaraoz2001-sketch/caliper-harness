@@ -49,13 +49,13 @@ On Windows the worker model is served by Ollama ([releases](https://github.com/o
 ollama pull qwen2.5-coder:7b
 ```
 
-Caliper does not download weights and does not switch models on failure. The MLX worker (Apple Silicon only) is unavailable on Windows; the Ollama route covers the same Setup/Status flow. One capability differs: literal continuation of unfinished responses requires the owned MLX worker, so truncated replies on Windows are recorded as failures to continue rather than resumed invisibly.
+Caliper does not download weights and does not switch models on failure. The MLX worker (Apple Silicon only) is unavailable on Windows; the Ollama route covers the same Setup/Manage flow. One capability differs: literal continuation of unfinished responses requires the owned MLX worker, so truncated replies on Windows are recorded as failures to continue rather than resumed invisibly.
 
 The Windows bundle supplies private standalone Python, the pinned decision-sidecar dependencies (both supported adapters and their PyTorch/Transformers dependencies) and ripgrep. Its built-in recipes select those interpreters automatically. Users do not create virtual environments, run pip or install Python for harness dependencies. Nothing changes the system Python or your project environment. Explicit custom recipes retain their original interpreter and environment.
 
 ## Configure and run
 
-Work from the project directory you want the model to edit and run `caliper`. When no worker is configured, Setup opens automatically. Select a Worker and a Judge, optionally set a project check, then review and save. Press `a` on either model page to add an existing endpoint or local checkpoint/launcher. Connections are reusable across projects; new project settings and state are kept under `%LOCALAPPDATA%\caliper\workspaces`, keyed by the project path. Existing project-local files and explicit paths remain in use. Native decision models are recommended, and compatible chat judges can also be selected. See [Server and model connections](SERVER-MODELS.md) for supported runtimes, launch controls and precedence. For manual configuration, copy `caliper-harness.yaml.example` into your project as `caliper-harness.yaml` and set:
+Work from the project directory you want the model to edit and run `caliper`. When no worker is configured, Setup opens automatically. Choose a Coding model and a Judge, optionally set a project check, then review and save. Press `a` on either model page to add an existing endpoint or local checkpoint/launcher. Connections are reusable across projects; new project settings and state are kept under `%LOCALAPPDATA%\caliper\workspaces`, keyed by the project path. Existing project-local files and explicit paths remain in use. Native decision models are recommended, and compatible chat judges can also be selected. See [Server and model connections](SERVER-MODELS.md) for supported runtimes, launch controls and precedence. For manual configuration, copy `caliper-harness.yaml.example` into your project as `caliper-harness.yaml` and set:
 
 - `model.runtime`: `ollama`, or `openai` for a generic compatible server (`mlx` is macOS only).
 - `model.server`: the worker's actual API base, e.g. `http://127.0.0.1:11434/v1` for Ollama.
@@ -63,7 +63,7 @@ Work from the project directory you want the model to edit and run `caliper`. Wh
 - `decision.runtime`, `decision.model`, `decision.path`, `decision.server`, `decision.device`: same meaning as on macOS.
 - `coding.check_command`: a real project check, such as `npm test`, `go test ./...` or `powershell -File scripts\test.ps1`.
 
-Use `/help`, `/status`, `/settings` and `/sessions` exactly as on macOS. In Settings, disabling the decision model uses human approval for readiness and Risky actions, preserves checks and independent review, and disables automatic progress advice and recovery. New terminal tabs require Windows Terminal (the `wt.exe` on your PATH); in other consoles Caliper prints the resume command instead of opening a tab.
+Use `/manage` to add, edit, test and select saved servers/models. `/status` shows runtime activity and measured usage. Caliper does not scan the computer for models or servers. `/help`, `/settings` and `/sessions` work as on macOS. In Settings, disabling the decision model uses human approval for readiness and Risky actions, preserves checks and independent review, and disables automatic progress advice and recovery. New terminal tabs require Windows Terminal (the `wt.exe` on your PATH); in other consoles Caliper prints the resume command instead of opening a tab.
 
 ## Building from source (developers)
 

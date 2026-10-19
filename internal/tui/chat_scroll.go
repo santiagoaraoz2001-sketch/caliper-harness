@@ -217,7 +217,7 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if m.Settings.Editing == nil {
 			m.Settings.Sel = min(max(0, m.Settings.Sel+delta), len(settingFields())-1)
 		}
-	case ViewStatus:
+	case ViewManage:
 		m.Serve.Scroll += delta
 	case ViewDecisions:
 		m.Decisions.scroll += delta

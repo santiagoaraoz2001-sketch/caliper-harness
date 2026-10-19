@@ -101,6 +101,8 @@ func ToolProtocol(protocol string) string {
 
 // Tool turns always stream, independent of display. Direct Chat retains its policy.
 func (c *Client) ChatTools(ctx context.Context, msgs []Message, tools []ToolDefinition, onDelta func(string)) (reply Reply, err error) {
+	started := time.Now()
+	defer func() { c.observeRequest(started, reply.Served, reply.Usage, err) }()
 	if _, continuing := ctx.Value(responseContinuationKey{}).(Reply); continuing && c.runtime != RuntimeMLX {
 		return reply, fmt.Errorf("selected runtime cannot continue an unfinished native response; explicit owned MLX token-prefix support is required")
 	}

@@ -3,56 +3,27 @@ package tui
 import (
 	"os"
 	"path/filepath"
+	"specific-harness/internal/config"
 	"specific-harness/internal/serve"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestInstalledServerChoicesPreserveRecipeAndAssetIdentity(t *testing.T) {
+func TestInstalledServersAndLegacyDirectoriesAreNeverEnumerated(t *testing.T) {
 	isolateModelRoots(t)
 	bin, models := t.TempDir(), t.TempDir()
 	for _, name := range []string{"gufo", "llama-server"} {
-		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
-			t.Fatal(err)
-		}
+		os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nexit 1\n"), 0700)
 	}
 	t.Setenv("PATH", bin)
-	if err := os.WriteFile(filepath.Join(models, "local.gguf"), []byte("GGUFmetadata-only"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	os.WriteFile(filepath.Join(models, "unadded.gguf"), []byte("GGUFmetadata-only"), 0600)
 	m := settingsModel(t)
-	m.Cfg.Model.Server = "http://127.0.0.1:18890/v1"
+	m.Cfg.Model.Name = ""
 	m.Cfg.Serve.ModelDirs = []string{models}
 	got := m.probeServeWith(probeClient())().(serveProbedMsg)
-	choices, assets := map[string]bool{}, map[string]bool{}
-	keys := map[string]bool{}
-	for _, r := range got.rows {
-		if r.Recipe == nil || r.Recipe.Name != "gufo" && r.Recipe.Name != "llama-server" {
-			continue
-		}
-		if r.Recipe.URL != m.Cfg.Model.Server || r.Ours || r.Resident {
-			t.Fatalf("launch choice asserted actual runtime: %+v", r)
-		}
-		key := serveKeyOf(r)
-		if keys[key] {
-			t.Fatalf("alternative identity collision %q", key)
-		}
-		keys[key] = true
-		if r.Asset != nil {
-			assets[r.Recipe.Name] = true
-			if r.Asset.Complete {
-				t.Fatal("GGUF completeness inferred")
-			}
-		} else {
-			choices[r.Recipe.Name] = true
-		}
-	}
-	if len(choices) != 2 || len(assets) != 2 {
-		t.Fatalf("installed executables disconnected: choices%v assets%v", choices, assets)
-	}
-	if len(m.Serve.Spawned) != 0 {
-		t.Fatal("discovery launched process")
+	if len(got.rows) != 0 || len(got.installed) != 0 {
+		t.Fatalf("ambient entries: %+v", got)
 	}
 }
 
@@ -99,11 +70,12 @@ func TestDiscoveredLauncherRequiresLocalCandidateAndLoadsLiteralPath(t *testing.
 	m := settingsModel(t)
 	m.Cfg.Model.Server = "http://127.0.0.1:18890/v1"
 	m.Cfg.Model.Name = "remote/model"
-	m.Cfg.Serve.ModelDirs = []string{models}
+	m.Cfg.Serve.Models = []config.SavedModel{{Server: m.Cfg.Model.Server, Name: model, Path: model}}
+	m.Cfg.Serve.Recipes = []config.RecipeConfig{{Name: "my-gufo", Kind: "openai", Runtime: "openai", URL: m.Cfg.Model.Server, Argv: []string{filepath.Join(bin, "gufo"), "serve", "--model", "{model}"}}}
 	got := m.probeServeWith(probeClient())().(serveProbedMsg)
 	var candidate ServeRow
 	for _, r := range got.rows {
-		if r.Recipe == nil || r.Recipe.Name != "gufo" {
+		if r.Recipe == nil || r.Recipe.Name != "my-gufo" {
 			continue
 		}
 		r.Health = serve.Health{}
@@ -111,12 +83,7 @@ func TestDiscoveredLauncherRequiresLocalCandidateAndLoadsLiteralPath(t *testing.
 			candidate = r
 			continue
 		}
-		m.Serve.Rows = []ServeRow{r}
-		m.Serve.Sel = 0
-		m.serveStart()
-		if len(m.Serve.Spawned) != 0 {
-			t.Fatal("remote model ID launched installed server")
-		}
+
 	}
 	if candidate.Asset == nil {
 		t.Fatal("local candidate missing")

@@ -63,7 +63,9 @@ func serveModelWithModels(t *testing.T) Model {
 func TestServeModelRowsBuilt(t *testing.T) {
 	t.Setenv("PATH", t.TempDir()) // Isolate optional installed-server choices.
 	isolateModelRoots(t)
-	m := submit(New(testCfg(), "test"), "/status")
+	m := submit(New(testCfg(), "test"), "/manage")
+	m.Cfg.Decision.Disabled = true
+	m.Cfg.Serve.Recipes = []config.RecipeConfig{{Name: "my-ollama", Kind: serve.KindOllama, Runtime: "ollama", URL: serve.OllamaURL}}
 	msg := m.probeServeWith(probeClient())()
 	probed, ok := msg.(serveProbedMsg)
 	if !ok {
@@ -77,7 +79,7 @@ func TestServeModelRowsBuilt(t *testing.T) {
 			labels = append(labels, "S:"+r.Ep.Label)
 		}
 	}
-	want := []string{"S:worker", "R:qwen3:8b", "A:llama3", "S:ollama", "R:qwen3:8b", "A:llama3", "S:sidecar"}
+	want := []string{"S:my-ollama", "R:qwen3:8b", "A:llama3"}
 	if strings.Join(labels, ",") != strings.Join(want, ",") {
 		t.Errorf("rows=%v", labels)
 	}
@@ -234,7 +236,7 @@ func TestDecisionUnprovenOwnerIsNeverStopped(t *testing.T) {
 // probe results — no sockets. rows: worker up, ollama up, sidecar down.
 func serveModel(t *testing.T) Model {
 	t.Helper()
-	m := submit(New(testCfg(), "test"), "/status")
+	m := submit(New(testCfg(), "test"), "/manage")
 	m.CfgPath = filepath.Join(t.TempDir(), "specific-harness.yaml")
 	m.Serve.Rows = []ServeRow{
 		{Ep: serve.Endpoint{Kind: serve.KindAuto, Label: "worker", URL: "http://127.0.0.1:8080/v1", Model: "m"},
@@ -251,13 +253,12 @@ func lastAlert(m Model) Alert { return m.Alerts[len(m.Alerts)-1] }
 
 func TestServeTable(t *testing.T) {
 	m := New(testCfg(), "test")
-	eps := m.serveEndpoints()
-	if len(eps) != 3 || eps[0].Label != "worker" || eps[1].Label != "ollama" || eps[2].Label != "sidecar" {
-		t.Errorf("endpoints=%+v", eps)
+	if len(m.serveEndpoints()) != 0 {
+		t.Fatal("fresh guessed endpoints")
 	}
-	m.Cfg.Model.Server = "http://127.0.0.1:9999/v1"
-	if got := len(m.serveEndpoints()); got != 4 {
-		t.Errorf("custom server → %d rows, want 4", got)
+	m.Cfg.Serve.Recipes = []config.RecipeConfig{{Name: "my-server", Kind: "openai", URL: "http://127.0.0.1:9999/v1"}}
+	if eps := m.serveEndpoints(); len(eps) != 1 || eps[0].Label != "my-server" {
+		t.Fatalf("explicit endpoints %+v", eps)
 	}
 }
 
@@ -286,7 +287,7 @@ func TestServeUseDownRefuses(t *testing.T) {
 	if m.Cfg.Model.Server != before {
 		t.Error("down runtime must not switch")
 	}
-	if a := lastAlert(m); a.Kind != "err" || !strings.Contains(a.Text, "is down") {
+	if a := lastAlert(m); a.Kind != "err" || !strings.Contains(a.Text, "select a saved model") {
 		t.Errorf("alert=%+v", a)
 	}
 	if _, err := os.Stat(m.CfgPath); !os.IsNotExist(err) {
@@ -437,7 +438,7 @@ func TestServeSelects(t *testing.T) {
 }
 
 func TestServeEscChat(t *testing.T) {
-	m := submit(New(testCfg(), "test"), "/status")
+	m := submit(New(testCfg(), "test"), "/manage")
 	if !m.serveActive() {
 		t.Fatal("not on status")
 	}
@@ -467,13 +468,13 @@ func TestServeRender(t *testing.T) {
 	got := viewportServePages(m, m.Width, 10)
 	m.Width = 80
 	narrow := viewportServePages(m, m.Width, 10)
-	for _, want := range []string{"select", "enter", "use", "start", "unload", "load", "device", "model", "refresh", "esc", "chat"} {
+	for _, want := range []string{"select", "Enter", "use", "start", "unload", "load", "device", "model", "refresh", "esc", "chat"} {
 		if !strings.Contains(narrow, want) {
 			t.Errorf("narrow screen omits %q", want)
 		}
 	}
 	for _, want := range []string{"RUNTIME", "DECISION SIDECAR", "worker", "ollama", "sidecar",
-		"●", "○", "down", "qwen3:8b", "[worker]", "u use", "s start", "x unload", "l load", "d stage device", "m edit model", "esc chat"} {
+		"●", "○", "down", "qwen3:8b", "[Coding]", "u Coding", "s start", "x unload", "l load", "d device", "m model", "esc chat"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("screen omits %q:\n%s", want, got)
 		}
@@ -489,7 +490,7 @@ func TestServeProbeEntry(t *testing.T) {
 	if !ok {
 		t.Fatalf("msg=%T", msg)
 	}
-	if len(probed.rows) != 3 || !probed.rows[0].Worker || !probed.rows[2].Sidecar {
+	if len(probed.rows) != 0 {
 		t.Errorf("rows=%+v", probed.rows)
 	}
 }
