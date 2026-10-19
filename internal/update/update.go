@@ -199,7 +199,7 @@ func validate(root, platform string) error {
 	required := []string{executable(root, platform), filepath.Join(root, "prompts.yaml"), filepath.Join(root, "runtime", "manifest.json"), filepath.Join(root, "runtime", "decision", "requirements.lock"), filepath.Join(root, "MANIFEST.sha256")}
 	switch {
 	case strings.HasPrefix(platform, "windows-"):
-		required = append(required, filepath.Join(root, "kuzu_shared.dll"), filepath.Join(root, "bin", "rg.exe"), filepath.Join(root, "runtime", "decision", "python.exe"))
+		required = append(required, filepath.Join(root, "kuzu_shared.dll"), filepath.Join(root, "msvcp140.dll"), filepath.Join(root, "vcruntime140.dll"), filepath.Join(root, "vcruntime140_1.dll"), filepath.Join(root, "bin", "rg.exe"), filepath.Join(root, "runtime", "decision", "python.exe"), filepath.Join(root, "runtime", "decision", "msvcp140.dll"))
 	case strings.HasPrefix(platform, "darwin-"):
 		required = append(required, filepath.Join(root, "lib", "libkuzu.dylib"), filepath.Join(root, "bin", "rg"), filepath.Join(root, "runtime", "decision", "bin", "python3"), filepath.Join(root, "runtime", "worker", "bin", "python3"))
 	case strings.HasPrefix(platform, "linux-"):

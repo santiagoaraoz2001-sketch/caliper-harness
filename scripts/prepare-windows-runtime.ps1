@@ -10,7 +10,13 @@ if ($env:OS -ne 'Windows_NT' -or $env:PROCESSOR_ARCHITECTURE -ne 'AMD64') { thro
 $root = Resolve-Path (Join-Path $PSScriptRoot '..')
 $App = (Resolve-Path -LiteralPath $App).Path
 if (Test-Path (Join-Path $App 'runtime')) { throw 'refusing existing runtime; use a new bundle output' }
-foreach ($tool in 'uv', 'curl.exe', 'tar.exe') {
+# MSYS2 is on PATH for gcc/Bash. Its GNU tar treats a Windows drive colon
+# as a remote host; archive extraction must use the native Windows bsdtar.
+$nativeTar = Join-Path $env:SystemRoot 'System32\tar.exe'
+if (-not (Test-Path -LiteralPath $nativeTar -PathType Leaf)) {
+    throw "builder tool missing: native Windows tar ($nativeTar)"
+}
+foreach ($tool in 'uv', 'curl.exe') {
     if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "builder tool missing: $tool" }
 }
 $sources = Get-Content -Raw (Join-Path $root 'python\windows\sources.json') | ConvertFrom-Json
@@ -30,7 +36,7 @@ $env:UV_CACHE_DIR = if ($env:CALIPER_BUILD_CACHE) { $env:CALIPER_BUILD_CACHE } e
 
 $pyArchive = Join-Path $stage 'python.tar.gz'
 Get-Pinned $sources.python.url $sources.python.sha256 $pyArchive
-& tar.exe -xzf $pyArchive -C $stage
+& $nativeTar -xzf $pyArchive -C $stage
 if ($LASTEXITCODE -ne 0) { throw 'cannot extract standalone Python' }
 $base = Join-Path $stage 'python'
 if (-not (Test-Path (Join-Path $base 'python.exe'))) { throw 'standalone Python missing after download' }
@@ -59,6 +65,26 @@ Copy-Item $rgExe.FullName (Join-Path $App 'bin\rg.exe')
 Get-ChildItem -Recurse $rgStage -Include 'LICENSE*', 'UNLICENSE' | ForEach-Object {
     Copy-Item $_.FullName (Join-Path $App ("notices\ripgrep-" + $_.Name)) -ErrorAction SilentlyContinue
 }
+
+# Kuzu requires the VC runtime beside caliper.exe. The private interpreter's
+# DLLs and a developer machine's System32 do not provide a portable app closure.
+$vcArchive = Join-Path $stage 'vc-runtime.zip'
+Get-Pinned $sources.vc_runtime.url $sources.vc_runtime.sha256 $vcArchive
+$vcStage = Join-Path $stage 'vc-runtime'
+Expand-Archive -LiteralPath $vcArchive -DestinationPath $vcStage
+$vcDirectory = Join-Path $vcStage $sources.vc_runtime.archive_directory
+foreach ($name in 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') {
+    $source = Join-Path $vcDirectory $name
+    if ((Get-FileHash -Algorithm SHA256 -LiteralPath $source).Hash.ToLower() -ne $sources.vc_runtime.files.$name.sha256) {
+        throw "VC runtime file hash mismatch: $name"
+    }
+    Copy-Item -LiteralPath $source -Destination (Join-Path $App $name)
+}
+# PyTorch also imports MSVCP140 from the interpreter's application directory.
+# Python already includes the same pinned VCRUNTIME files; supply its C++ peer.
+Copy-Item -LiteralPath (Join-Path $App 'msvcp140.dll') -Destination (Join-Path $decisionDir 'msvcp140.dll')
+Copy-Item -LiteralPath (Join-Path $root 'python\windows\VC-RUNTIME-NOTICE.txt') -Destination (Join-Path $App 'notices\Microsoft-VC-RUNTIME.txt')
+Copy-Item -LiteralPath (Join-Path $root 'python\windows\VC-RUNTIME-LICENSE.txt') -Destination (Join-Path $App 'notices\Microsoft-VC-RUNTIME-LICENSE.txt')
 
 # Validate actual imports and origins before marking this folder as managed.
 # Poisoned Python environment is ignored.

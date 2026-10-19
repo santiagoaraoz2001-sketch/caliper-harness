@@ -19,7 +19,7 @@ function executable(root) { return path.join(root, process.platform === 'win32' 
 function validate(root) {
   if (fs.existsSync(path.join(root, 'BUILD-INCOMPLETE'))) throw new Error('Incomplete application bundle');
   const required = ['prompts.yaml', 'MANIFEST.sha256', 'runtime/decision/requirements.lock'];
-  if (identity.startsWith('windows-')) required.push('kuzu_shared.dll', 'bin/rg.exe', 'runtime/decision/python.exe');
+  if (identity.startsWith('windows-')) required.push('kuzu_shared.dll', 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'bin/rg.exe', 'runtime/decision/python.exe', 'runtime/decision/msvcp140.dll');
   else { required.push('bin/rg', 'runtime/decision/bin/python3', identity.startsWith('darwin-') ? 'lib/libkuzu.dylib' : 'lib/libkuzu.so'); if (identity.startsWith('darwin-')) required.push('runtime/worker/bin/python3'); }
   for (const name of [executable(root), ...required.map(file => path.join(root, file))]) if (!fs.statSync(name).isFile()) throw new Error(`Missing product file: ${name}`);
   if (process.platform !== 'win32') { for (const file of [executable(root), ...required.filter(name => name === 'bin/rg' || name.endsWith('/bin/python3')).map(name => path.join(root,name))]) fs.accessSync(file, fs.constants.X_OK); }

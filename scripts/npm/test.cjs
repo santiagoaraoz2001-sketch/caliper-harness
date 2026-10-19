@@ -16,7 +16,7 @@ async function fixture(t) {
   fs.writeFileSync(path.join(root, 'prompts.yaml'), 'original instructions');
   fs.writeFileSync(path.join(root, 'runtime', 'manifest.json'), JSON.stringify({ format: 1, platform: app.identity }));
   fs.writeFileSync(app.executable(root), '#!/bin/sh\nprintf "cwd=%s\\narg=%s\\n" "$PWD" "$1"\nexit 7\n', { mode: 0o755 });
-  for (const name of ['MANIFEST.sha256', 'runtime/decision/requirements.lock', 'bin/rg', 'bin/rg.exe', 'runtime/decision/bin/python3', 'runtime/worker/bin/python3', 'runtime/decision/python.exe', 'kuzu_shared.dll', 'lib/libkuzu.dylib', 'lib/libkuzu.so']) { const file = path.join(root, name); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, 'fixture component', { mode: 0o755 }); }
+  for (const name of ['MANIFEST.sha256', 'runtime/decision/requirements.lock', 'bin/rg', 'bin/rg.exe', 'runtime/decision/bin/python3', 'runtime/worker/bin/python3', 'runtime/decision/python.exe', 'runtime/decision/msvcp140.dll', 'kuzu_shared.dll', 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'lib/libkuzu.dylib', 'lib/libkuzu.so']) { const file = path.join(root, name); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, 'fixture component', { mode: 0o755 }); }
   const inventory = [];
   function walk(dir) { for (const item of fs.readdirSync(dir, { withFileTypes: true })) { const file = path.join(dir, item.name); if (item.isDirectory()) walk(file); else if (item.name !== 'MANIFEST.sha256') inventory.push(`${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}  ./${path.relative(root, file).split(path.sep).join('/')}`); } }
   walk(root); fs.writeFileSync(path.join(root, 'MANIFEST.sha256'), inventory.join('\n') + '\n');
@@ -67,4 +67,19 @@ test('nonexecutable installed commands cannot be activated on Unix', { skip: pro
   const prior=fs.readFileSync(path.join(home,'current.json'),'utf8');fs.chmodSync(app.executable(root),0o600);
   await assert.rejects(app.install(home,f.download,fixtureActivate),/EACCES/);
   assert.equal(fs.readFileSync(path.join(home,'current.json'),'utf8'),prior);
+});
+test('Windows selection requires all app-local VC runtime DLLs', async t => {
+  const f=await fixture(t); const root=path.join(f.dir,'source','Caliper');
+  fs.writeFileSync(path.join(root,'caliper.exe'),'binary fixture');
+  fs.writeFileSync(path.join(root,'runtime','manifest.json'),JSON.stringify({format:1,platform:'windows-amd64'}));
+  // Exercise the Windows validation branch on every host without executing a
+  // foreign binary; the native release proof separately launches the real exe.
+  const sandbox={require,process:{platform:'win32',arch:'x64'},module:{exports:{}},console};
+  require('node:vm').runInNewContext(fs.readFileSync(path.join(__dirname,'install.cjs'),'utf8'),sandbox);
+  const validate=sandbox.module.exports.validate;validate(root);
+  for(const name of ['msvcp140.dll','vcruntime140.dll','vcruntime140_1.dll','runtime/decision/msvcp140.dll']) {
+    const file=path.join(root,name);fs.renameSync(file,file+'.absent');
+    assert.throws(()=>validate(root),new RegExp(path.basename(name).replaceAll('.','\\.')));
+    fs.renameSync(file+'.absent',file);
+  }
 });

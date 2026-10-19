@@ -41,6 +41,12 @@ else:
     locks = {'decision': hashlib.sha256((app / 'runtime' / 'decision' / 'requirements.lock').read_bytes()).hexdigest()}
     sources_path = app / 'runtime' / 'sources.json'
     sources = json.loads(sources_path.read_text()) if sources_path.exists() else {}
+    for name in ('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll'):
+        actual = hashlib.sha256((app / name).read_bytes()).hexdigest()
+        if actual != sources['vc_runtime']['files'][name]['sha256']:
+            raise RuntimeError(f'app-local VC runtime differs from pinned source: {name}')
+    if hashlib.sha256((app / 'runtime' / 'decision' / 'msvcp140.dll').read_bytes()).hexdigest() != sources['vc_runtime']['files']['msvcp140.dll']['sha256']:
+        raise RuntimeError('private Python C++ runtime differs from pinned source')
     if report['python'] != sources['python']['version']:
         raise RuntimeError('private Python version differs from pinned source')
     if not list((app / 'templates').glob('*.tmpl')) or not (app / 'templates' / 'prompts.yaml').is_file():

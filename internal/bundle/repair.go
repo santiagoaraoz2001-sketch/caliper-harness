@@ -491,6 +491,11 @@ func repairProfile(root, stage, pythonArchive, profile string, note Reporter) er
 	if err := extractPython(pythonArchive, fresh); err != nil {
 		return err
 	}
+	if runtime.GOOS == "windows" {
+		if err := copyWindowsRuntimeDLL(root, fresh); err != nil {
+			return err
+		}
+	}
 	interpreter := interpreterIn(fresh)
 	if _, err := os.Stat(interpreter); err != nil {
 		return fmt.Errorf("standalone Python missing after download: %s", interpreter)
@@ -504,6 +509,17 @@ func repairProfile(root, stage, pythonArchive, profile string, note Reporter) er
 	}
 	note(fmt.Sprintf("%s Python runtime prepared", profile))
 	return nil
+}
+
+// The Python archive supplies VCRUNTIME but not the MSVCP140 required by torch.
+// Repair already verified this app-root DLL against the installation inventory;
+// restore the builder's private-interpreter copy before executing that profile.
+func copyWindowsRuntimeDLL(root, fresh string) error {
+	data, err := os.ReadFile(filepath.Join(root, "msvcp140.dll"))
+	if err != nil {
+		return fmt.Errorf("cannot restore private Python msvcp140.dll; replace the complete Caliper folder: %w", err)
+	}
+	return os.WriteFile(filepath.Join(fresh, "msvcp140.dll"), data, 0644)
 }
 
 // regenerateManifest reruns the bundled runtime verifier with the repaired
@@ -613,6 +629,9 @@ func repairAnchorsInventoried(inventory []byte) error {
 		directory = "macos"
 	}
 	anchors := []string{"runtime/sources.json", Marker, "python/" + directory + "/verify_runtime.py"}
+	if runtime.GOOS == "windows" {
+		anchors = append(anchors, "msvcp140.dll")
+	}
 	for _, profile := range requiredProfiles() {
 		anchors = append(anchors, "runtime/"+profile+"/requirements.lock")
 	}

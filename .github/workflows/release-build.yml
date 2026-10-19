@@ -73,7 +73,7 @@ jobs:
           & "$env:RUNNER_TEMP/Caliper/caliper.exe" version
           if ($LASTEXITCODE -ne 0) { throw 'native product launch failed without compiler/module PATH' }
           $env:PATH = $builderPath
-          $package = python scripts/package-release.py "$env:RUNNER_TEMP/Caliper" --version "$env:RELEASE_VERSION" --out dist
+          $package = & "$env:pythonLocation\python.exe" scripts/package-release.py "$env:RUNNER_TEMP/Caliper" --version "$env:RELEASE_VERSION" --out dist
           if ($LASTEXITCODE -ne 0) { throw 'release packaging failed' }
           $package | Set-Content "$env:RUNNER_TEMP/release.json"
           $release = $package | ConvertFrom-Json

@@ -16,7 +16,13 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Push-Location $root
 try {
 # Kuzu needs a C compiler for its cgo glue; everything else is pure Go.
-foreach ($tool in 'go', 'uv', 'curl.exe', 'tar.exe', 'gcc', 'bash') {
+# MSYS2 is on PATH for gcc/Bash. Its GNU tar treats a Windows drive colon
+# as a remote host; archive extraction must use the native Windows bsdtar.
+$nativeTar = Join-Path $env:SystemRoot 'System32\tar.exe'
+if (-not (Test-Path -LiteralPath $nativeTar -PathType Leaf)) {
+    throw "builder tool missing: native Windows tar ($nativeTar)"
+}
+foreach ($tool in 'go', 'uv', 'curl.exe', 'gcc', 'bash') {
     if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
         if ($tool -eq 'gcc') { throw 'builder tool missing: gcc (mingw-w64, e.g. via MSYS2) - required for the Kuzu cgo build' }
         throw "builder tool missing: $tool"
@@ -52,6 +58,13 @@ foreach ($name in 'server.py', 'backends.py', 'mps_attention.py', 'prompts.py', 
 }
 Copy-Item (Join-Path $root 'python\windows\verify_runtime.py') (Join-Path $Out 'python\windows')
 & (Join-Path $root 'scripts\prepare-windows-runtime.ps1') -App $Out -AllowDownloads
+# Inspect the real cgo executable and every app-local imported DLL. A hosted
+# runner may have VC/MinGW runtimes installed, so a launch alone is insufficient.
+$objdump = Join-Path (Split-Path (Get-Command gcc -CommandType Application).Source) 'objdump.exe'
+if (-not (Test-Path -LiteralPath $objdump)) { throw 'compiler PE import inspector missing: objdump.exe' }
+& (Join-Path $Out 'runtime\decision\python.exe') -I (Join-Path $root 'python\windows\verify_pe_dependencies.py') $Out $objdump |
+    Out-File -Encoding utf8 (Join-Path $Out 'notices\PE-DEPENDENCIES.json')
+if ($LASTEXITCODE -ne 0) { throw 'native dependency closure failed; refusing an incomplete release' }
 # The source example deliberately pins a project-relative path. Bundle defaults
 # must remain omitted so a copied example can use executable-relative assets.
 $skip = $false

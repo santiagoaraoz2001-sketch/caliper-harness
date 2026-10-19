@@ -156,6 +156,9 @@ func TestRepairRipgrepCommitsOrRollsBackAfterFullValidation(t *testing.T) {
 				directory = "macos"
 			}
 			files["python/"+directory+"/verify_runtime.py"] = "verified-script"
+			if runtime.GOOS == "windows" {
+				files["msvcp140.dll"] = "verified CRT source"
+			}
 			for _, p := range requiredProfiles() {
 				rel, _ := filepath.Rel(root, Python(root, p))
 				files[filepath.ToSlash(rel)] = "interpreter"
@@ -210,5 +213,36 @@ func TestManagedInterpreterCannotEscapeBundle(t *testing.T) {
 func TestHashRefusesDirectories(t *testing.T) {
 	if _, err := hashFile(t.TempDir()); err == nil || !strings.Contains(err.Error(), "not a regular file") {
 		t.Fatalf("nonfile accepted: %v", err)
+	}
+}
+
+func TestWindowsRepairCopiesPrivateRuntimeDLL(t *testing.T) {
+	root, fresh := t.TempDir(), t.TempDir()
+	want := []byte("inventoried Windows CRT bytes")
+	if err := os.WriteFile(filepath.Join(root, "msvcp140.dll"), want, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyWindowsRuntimeDLL(root, fresh); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(fresh, "msvcp140.dll"))
+	if err != nil || !bytes.Equal(got, want) {
+		t.Fatalf("private runtime DLL differs: %q, %v", got, err)
+	}
+	// Copying must not move/delete the verified app-root source.
+	got, err = os.ReadFile(filepath.Join(root, "msvcp140.dll"))
+	if err != nil || !bytes.Equal(got, want) {
+		t.Fatalf("app-root source changed: %q, %v", got, err)
+	}
+}
+
+func TestWindowsRepairMissingRuntimeSourceRefuses(t *testing.T) {
+	root, fresh := t.TempDir(), t.TempDir()
+	err := copyWindowsRuntimeDLL(root, fresh)
+	if err == nil || !strings.Contains(err.Error(), "msvcp140.dll") {
+		t.Fatalf("missing app-root source accepted: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(fresh, "msvcp140.dll")); !os.IsNotExist(err) {
+		t.Fatalf("failed copy created a private DLL: %v", err)
 	}
 }

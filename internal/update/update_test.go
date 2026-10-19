@@ -36,7 +36,7 @@ func archiveBytes(t *testing.T, entries map[string]string) []byte {
 }
 func fixture(t *testing.T) []byte {
 	files := map[string]string{"Caliper/caliper-harness": "binary", "Caliper/caliper.exe": "binary", "Caliper/prompts.yaml": "instructions", "Caliper/runtime/manifest.json": fmt.Sprintf(`{"format":1,"platform":%q}`, testPlatform)}
-	for _, name := range []string{"lib/libkuzu.dylib", "lib/libkuzu.so", "kuzu_shared.dll", "bin/rg.exe", "runtime/decision/python.exe", "bin/rg", "runtime/decision/bin/python3", "runtime/worker/bin/python3", "runtime/decision/requirements.lock"} {
+	for _, name := range []string{"lib/libkuzu.dylib", "lib/libkuzu.so", "kuzu_shared.dll", "msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll", "bin/rg.exe", "runtime/decision/python.exe", "runtime/decision/msvcp140.dll", "bin/rg", "runtime/decision/bin/python3", "runtime/worker/bin/python3", "runtime/decision/requirements.lock"} {
 		files["Caliper/"+name] = "component"
 	}
 	var inventory strings.Builder
@@ -220,5 +220,31 @@ func TestPreparedReleaseReuseDoesNotDownload(t *testing.T) {
 	}
 	if _, e := (Manager{Home: "relative", Platform: testPlatform}).Prepare(context.Background(), r); e == nil {
 		t.Fatal("relative update storage creates project debris")
+	}
+}
+
+func TestWindowsBundleRequiresAppLocalVCRuntime(t *testing.T) {
+	root := t.TempDir()
+	if err := extract(bytes.NewReader(fixture(t)), root); err != nil {
+		t.Fatal(err)
+	}
+	app := filepath.Join(root, "Caliper")
+	if err := os.WriteFile(filepath.Join(app, "runtime", "manifest.json"), []byte(`{"format":1,"platform":"windows-amd64"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validate(app, "windows-amd64"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll", "runtime/decision/msvcp140.dll"} {
+		path := filepath.Join(app, name)
+		if err := os.Rename(path, path+".absent"); err != nil {
+			t.Fatal(err)
+		}
+		if err := validate(app, "windows-amd64"); err == nil || !strings.Contains(err.Error(), filepath.FromSlash(name)) {
+			t.Fatalf("missing app-local %s must refuse: %v", name, err)
+		}
+		if err := os.Rename(path+".absent", path); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
