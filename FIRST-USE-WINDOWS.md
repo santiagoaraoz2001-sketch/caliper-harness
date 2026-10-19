@@ -30,7 +30,7 @@ The self-contained Windows bundle supplies private standalone Python, the pinned
 
 ## Configure and run
 
-Work from the project directory you want the model to edit and run `caliper`. When no worker is configured, Setup opens automatically (same behavior as on macOS; see the README). For manual configuration, copy `caliper-harness.yaml.example` into your project as `caliper-harness.yaml` and set:
+Work from the project directory you want the model to edit and run `caliper`. When no worker is configured, Setup opens automatically. Select a Worker and a Judge, optionally set a project check, then review and save. Press `a` on either model page to add an existing endpoint or local checkpoint/launcher. Connections are reusable across projects; checks and state stay in the project. Native decision models are recommended, and compatible chat judges can also be selected. See [Server and model connections](SERVER-MODELS.md) for supported runtimes, launch controls and precedence. For manual configuration, copy `caliper-harness.yaml.example` into your project as `caliper-harness.yaml` and set:
 
 - `model.runtime`: `ollama`, or `openai` for a generic compatible server (`mlx` is macOS only).
 - `model.server`: the worker's actual API base, e.g. `http://127.0.0.1:11434/v1` for Ollama.

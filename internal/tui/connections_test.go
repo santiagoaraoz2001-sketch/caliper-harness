@@ -165,3 +165,48 @@ func TestChangingJudgeKeepsOldOwnedSidecarVisible(t *testing.T) {
 		t.Fatal("unhealthy old owned sidecar could not be stopped")
 	}
 }
+
+func TestCustomNativeJudgeRecipeWinsAndEmptyKnownRecipeResolves(t *testing.T) {
+	t.Chdir("../..")
+	m := settingsModel(t)
+	m.Cfg.Serve.Recipes = []config.RecipeConfig{{Name: "custom-d1", Kind: serve.KindSidecar, URL: m.Cfg.Decision.Server, Argv: []string{"custom-judge", "--model", "{model}"}}}
+	row := ServeRow{Ep: serve.Endpoint{Kind: serve.KindSidecar, URL: m.Cfg.Decision.Server}, Sidecar: true}
+	rec := m.recipeFor(&row)
+	if rec == nil || rec.Argv[0] != "custom-judge" {
+		t.Fatal("explicit native argv ignored", rec)
+	}
+	m.Cfg.Serve.Recipes[0].Argv = nil
+	for _, rec := range m.serveRecipes() {
+		if rec.Name == "custom-d1" {
+			if len(rec.Argv) == 0 {
+				t.Fatal("known native launcher absent")
+			}
+			return
+		}
+	}
+	t.Fatal("native recipe missing")
+}
+
+func TestServeCandidatesStayUnderTheirServerAndRecipe(t *testing.T) {
+	a := &serve.Recipe{Name: "mlx", URL: "http://localhost:8080/v1"}
+	b := &serve.Recipe{Name: "local-mlx", URL: "http://localhost:19092/v1"}
+	c := &serve.Recipe{Name: "alternative", URL: b.URL}
+	server := func(r *serve.Recipe) ServeRow {
+		return ServeRow{Ep: serve.Endpoint{URL: r.URL, Label: r.Name}, Recipe: r}
+	}
+	model := func(r *serve.Recipe) ServeRow {
+		row := server(r)
+		row.IsModel = true
+		row.Ep.Model = "same-checkpoint"
+		return row
+	}
+	rows := groupServeRows([]ServeRow{server(a), server(b), server(c), model(a), model(b), model(c)})
+	if len(rows) != 6 {
+		t.Fatal("lost candidates", rows)
+	}
+	for i, r := range []*serve.Recipe{a, b, c} {
+		if rows[2*i].IsModel || !rows[2*i+1].IsModel || rows[2*i].Recipe.Name != r.Name || rows[2*i+1].Recipe.Name != r.Name || rows[2*i+1].Ep.URL != r.URL {
+			t.Fatalf("candidate grouped under wrong server: %+v", rows)
+		}
+	}
+}

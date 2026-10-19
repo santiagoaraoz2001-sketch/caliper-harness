@@ -36,7 +36,7 @@ try {
     foreach ($file in @('server.py', 'backends.py', 'mps_attention.py', 'prompts.py', 'requirements.txt', 'requirements-system-one.txt')) {
         Copy-Item -LiteralPath (Join-Path 'python/decision' $file) -Destination (Join-Path $out 'python/decision')
     }
-    Copy-Item -LiteralPath 'LICENSE', 'FIRST-USE.md', 'FIRST-USE-WINDOWS.md' -Destination $out
+    Copy-Item -LiteralPath 'LICENSE', 'FIRST-USE.md', 'FIRST-USE-WINDOWS.md', 'SERVER-MODELS.md' -Destination $out
     Copy-Item -LiteralPath 'scripts/install-windows.ps1' -Destination $out
     # Omit the explicit source-relative template override so config resolves the
     # bundled templates beside the executable when launched from another project.

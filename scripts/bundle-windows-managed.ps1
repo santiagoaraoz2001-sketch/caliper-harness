@@ -64,6 +64,7 @@ $stripped = foreach ($line in (Get-Content (Join-Path $root 'caliper-harness.yam
 [IO.File]::WriteAllText((Join-Path $Out 'caliper-harness.yaml.example'), ($stripped -join [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
 Copy-Item (Join-Path $root 'internal\tui\thirdparty\textarea\LICENSE') (Join-Path $Out 'notices\textarea-LICENSE')
 Copy-Item (Join-Path $root 'FIRST-USE-WINDOWS.md') $Out
+Copy-Item (Join-Path $root 'SERVER-MODELS.md') $Out
 Copy-Item (Join-Path $root 'scripts\install-windows.ps1') $Out
 $goroot = (& go env GOROOT).Trim()
 Copy-Item (Join-Path $goroot 'LICENSE') (Join-Path $Out 'notices\Go-LICENSE')

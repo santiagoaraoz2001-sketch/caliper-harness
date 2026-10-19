@@ -193,6 +193,12 @@ func (m *Model) serveRecipes() []serve.Recipe {
 	extra := make([]serve.Recipe, 0, len(m.Cfg.Serve.Recipes))
 	for _, r := range m.Cfg.Serve.Recipes {
 		rec := serve.Recipe{Name: r.Name, Kind: r.Kind, Runtime: r.Runtime, URL: r.URL, Argv: r.Argv, Dir: r.Dir}
+		if len(r.Argv) == 0 && r.Kind == serve.KindSidecar && decision.NativeRuntime(m.Cfg.Decision.Runtime) {
+			if known, ok := serve.SidecarRecipe(serve.FindHarnessDir(), r.URL, m.Cfg.Decision.Model, decision.SelectionFor(m.Cfg.Decision)); ok {
+				rec = known
+				rec.Name = r.Name
+			}
+		}
 		if len(r.Argv) == 0 {
 			if known, ok := serve.LocalRecipe(serve.FindHarnessDir(), r.Runtime, r.URL, "{model}"); ok {
 				rec = known
@@ -397,12 +403,42 @@ func (m *Model) probeServeWithDiscovery(client *http.Client, discover func(conte
 			}
 		}
 		mem, err := hw.Detect()
-		msg := serveProbedMsg{rows: rows, mem: mem, warnings: warnings, installed: serve.InstalledServers()}
+		msg := serveProbedMsg{rows: groupServeRows(rows), mem: mem, warnings: warnings, installed: serve.InstalledServers()}
 		if err != nil {
 			msg.memErr = err.Error()
 		}
 		return msg
 	}
+}
+
+// groupServeRows keeps every model directly below its actual server/recipe.
+// Discovery appends local assets after probing; their position is not ownership.
+func groupServeRows(rows []ServeRow) []ServeRow {
+	out := make([]ServeRow, 0, len(rows))
+	used := make([]bool, len(rows))
+	for i, server := range rows {
+		if server.IsModel {
+			continue
+		}
+		out = append(out, server)
+		used[i] = true
+		for j, model := range rows {
+			if used[j] || !model.IsModel || !sameServeURL(model.Ep.URL, server.Ep.URL) {
+				continue
+			}
+			if model.Recipe != nil && (server.Recipe == nil || model.Recipe.Name != server.Recipe.Name) {
+				continue
+			}
+			out = append(out, model)
+			used[j] = true
+		}
+	}
+	for i, row := range rows {
+		if !used[i] {
+			out = append(out, row)
+		}
+	}
+	return out
 }
 
 // sameServerPort compares complete endpoint identity, not just its port.
@@ -704,6 +740,11 @@ func labelOf(r *ServeRow) string {
 // other rows use the probe-time recipe.
 func (m *Model) recipeFor(r *ServeRow) *serve.Recipe {
 	if r.Sidecar {
+		for _, configured := range m.Cfg.Serve.Recipes {
+			if configured.Kind == serve.KindSidecar && configured.URL == r.Ep.URL && len(configured.Argv) > 0 && (r.Recipe == nil || r.Recipe.Name == configured.Name) {
+				return &serve.Recipe{Name: configured.Name, Kind: configured.Kind, URL: configured.URL, Argv: configured.Argv, Dir: configured.Dir}
+			}
+		}
 		for _, rec := range m.serveRecipes() {
 			if rec.Kind == serve.KindSidecar && rec.URL == r.Ep.URL {
 				return &rec
@@ -759,7 +800,7 @@ func (m *Model) serveStart() {
 	if r.Sidecar {
 		custom := false
 		for _, configured := range m.Cfg.Serve.Recipes {
-			custom = custom || configured.Kind == serve.KindSidecar && configured.URL == r.Ep.URL
+			custom = custom || configured.Kind == serve.KindSidecar && configured.URL == r.Ep.URL && len(configured.Argv) > 0
 		}
 		if !custom {
 			pc, err := m.Cfg.LoadPrompts()
@@ -776,6 +817,9 @@ func (m *Model) serveStart() {
 		}
 	}
 	selectedModel := m.Cfg.Model.Name
+	if r.Sidecar {
+		selectedModel = m.Cfg.Decision.Model
+	}
 	bound, err := serve.BindModel(*rec, selectedModel)
 	if err != nil {
 		m.alert("err", err.Error())
