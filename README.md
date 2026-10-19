@@ -99,10 +99,12 @@ an offline developer folder using installed Go, mingw-w64 GCC, Bash and ripgrep.
 Private runtime acquisition is a separate explicit command documented in
 [PORTABILITY.md](PORTABILITY.md); neither Windows packaging mode is natively qualified.
 
-On first run with an unconfigured worker, Setup opens: choose an existing
-model, enter your exact project check (for example `npm test`), review, and
-save. `/setup` reopens it; `/status` inspects or loads state; `/help` lists
-every command.
+On first run with an unconfigured worker, Setup opens: choose a Worker and
+Judge, optionally enter your project check (for example `npm test`), then review
+and save. Press `a` on either model page to add an existing server or local
+checkpoint. Connections can be reused across projects; checks stay local.
+`/setup` reopens it; `/status` inspects or loads models; `/help` lists commands.
+See [Server and model connections](SERVER-MODELS.md) for details.
 
 ## Commands
 
