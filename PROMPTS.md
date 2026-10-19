@@ -75,3 +75,16 @@ and carry over your edits. It adds `help.schema.graphql.noticed` and
 `help.schema.graphql.notices`, plus short discovery guidance in the existing
 system and GraphQL help sections. A catalog missing those keys reports the
 missing names at load; existing admitted runs keep their original snapshot.
+
+A claimed task's full frozen brief is supplied once at system role; the claim
+receipt records its identity and attempt. Observations in that brief are labelled
+as recorded during planning, so later tool receipts describe the current state.
+The Q&A sequence and required checks are unchanged.
+
+Successful guided answers already return the next planning question. They do not
+need an extra bookkeeping judgment to repeat it. Successful claimed work uses
+the existing progress watcher; failures, changed planning questions, delivered
+comments and normal final answers retain bookkeeping review. Readiness and
+independent verification remain separate. Judge requests reference exact duplicate
+call arguments once, with call IDs and digests; worker context and raw history
+are preserved.

@@ -263,10 +263,11 @@ func TestClaimedTaskScopeNativeCoding(t *testing.T) {
 						note = note || m.Content == "keep exact user note κ"
 						source = source || m.ToolCallID == "prep-read" && strings.Contains(m.Content, "observed")
 						claim = claim || m.ToolCallID == "call-0-0" && strings.Contains(m.Content, task.ID)
-						if m.ToolCallID == "call-0-0" {
-							_, raw, present := strings.Cut(m.Content, "Frozen authored requirements (not verified source facts): ")
-							var authored map[string]string
-							brief = present && json.Unmarshal([]byte(raw), &authored) == nil && authored["acceptance_command"] == task.AcceptanceCommand && authored["check_command"] == task.CheckCommand && authored["current"] == task.Current && authored["prompt"] == task.Prompt
+						if m.ToolCallID == "call-0-0" && strings.Contains(m.Content, "Frozen authored requirements") {
+							t.Error("claim receipt duplicated the system brief")
+						}
+						if m.Role == "system" {
+							brief = brief || strings.Contains(m.Content, "Behavioral check: "+task.AcceptanceCommand) && strings.Contains(m.Content, "Project check: "+task.CheckCommand) && strings.Contains(m.Content, task.Current) && strings.Contains(m.Content, task.Prompt)
 						}
 					}
 					if !old || !note || !source || !claim || !brief || !proposal || !reasoning {

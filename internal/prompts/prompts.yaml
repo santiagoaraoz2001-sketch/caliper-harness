@@ -66,7 +66,7 @@ texts:
   system.task.brief: |
     TASK: {{.Title}}
     Objective: {{.Prompt}}
-    Current observations to check: {{.Current}}
+    Observations recorded during planning (historical; use later receipts for current state): {{.Current}}
     Target: {{.Target}}
     Steps: {{.Sketch}}
     Acceptance: {{.Acceptance}}
@@ -78,10 +78,9 @@ texts:
   # Fields: none. The harness owns identities, checks, review and legal transitions.
   system.task.handoff: |2-
     For work already implemented, preserve it and address only unmet requirements. Use known source and
-    receipts; do not redo the fix. Use check for the frozen behavioral command then project check;
-    reuse a current passed episode unless later effects made it stale.
-    Give a normal final answer with no tool call: actual changes, results and remaining problems.
-    This requests independent review, not completion; no COMPLETE/FINISH tool call is needed. Address remediation through the same task's current requeue/readiness/start route.
+    receipts; reuse a current passed episode unless later effects made it stale.
+    A normal final answer with no tool call requests independent review, not completion; no COMPLETE/FINISH call is needed.
+    Address remediation through the same task's current requeue/readiness/start route.
     After VALIDATED, report progress and follow plan's current question for the next task or approach.
     A dispatched worker returns its result to the orchestrator. The harness carries IDs and admission.
 
@@ -2826,8 +2825,8 @@ texts:
 
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
   planning.observe: |2-
-    DRAFT OBSERVATIONS: State what you actually observed, the source locator, unknowns and observable
-    target. Reading a test is not running it. This answer saves the brief; it does not execute work.
+    DRAFT OBSERVATIONS: What did you observe, where, and what remains unknown? What observable
+    target should change? Reading a test is not running it. Save observations, not execution claims.
 
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
   planning.proof: |2-
@@ -2846,14 +2845,13 @@ texts:
 
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
   planning.step_execution: |2-
-    DRAFT METHOD: Answer execution with how you intend to perform this subtask, for example
-    plan(execution="<concrete intended actions>"). This saves a method; it does not run code or claim
-    a task. Wait for the next question.
+    DRAFT METHOD: How will you perform this subtask? Answer execution with concrete intended actions.
+    This saves the method; it does not run code. Execution follows drafting and claim.
 
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
   planning.step_validation: |2-
-    DRAFT VALIDATION: Answer validation with the observation/assertion showing this subtask worked.
-    This saves intentions, not an executed check. Wait for the next question.
+    DRAFT VALIDATION: What observation or assertion will show this subtask worked? Answer validation
+    with the planned check, not a claim that it ran.
 
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
   planning.step_more: |2-

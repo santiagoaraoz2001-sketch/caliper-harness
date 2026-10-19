@@ -373,6 +373,7 @@ func (r *Runner) groundProgressRefusal(packet *progressPacket, refusal string, n
 
 func (r *Runner) progressAdvice(ctx context.Context, w *watcher, packet progressPacket, source, instructions string, log func(string, string) error) (string, error) {
 	reviewedPhase := r.progressPhase(packet)
+	packet.deduplicateEvidence()
 	options := []string{r.Prompts.Text("decision.discovery.continue"), r.Prompts.Text("decision.discovery.act"), r.Prompts.Text("decision.discovery.reconsider")}
 	req, v, err := r.progressJudgment(ctx, &packet, decision.Request{Instructions: instructions, Options: options}, packet.reduceForCapacity, log)
 	failed := func(cause error) (string, error) {
@@ -449,6 +450,62 @@ func (r *Runner) progressAdvice(ctx context.Context, w *watcher, packet progress
 		}
 	}
 	return advice, nil
+}
+
+// Keep one exact argument body per call in the judge projection. The same
+// write/edit often appears in Latest, LatestSettled, the receipt window and the
+// assistant reply. References retain call identity and a digest; original
+// observations, worker context and failure receipts are never rewritten.
+func (p *progressPacket) deduplicateEvidence() {
+	seen := map[string]string{}
+	dedup := func(field, id string, raw []byte, remove, restore func()) {
+		if id == "" || len(raw) == 0 || string(raw) == "null" || !json.Valid(raw) {
+			return
+		}
+		if _, err := tool.JSONObject(string(raw)); err != nil {
+			return // Ambiguous/malformed arguments remain literal evidence.
+		}
+		var value any
+		decoder := json.NewDecoder(strings.NewReader(string(raw)))
+		decoder.UseNumber()
+		if decoder.Decode(&value) != nil {
+			return
+		}
+		canonical, err := json.Marshal(value)
+		if err != nil {
+			return
+		}
+		key := id + ":" + string(canonical)
+		if previous, ok := seen[key]; ok {
+			p.omitSmaller(field+" (same call arguments as "+previous+")", string(raw), remove, restore)
+		} else {
+			seen[key] = field
+		}
+	}
+	for _, item := range []struct {
+		name    string
+		receipt *loopObservation
+	}{{"Latest", p.Latest}, {"LatestDiscovery", p.LatestDiscovery}, {"LatestSettled", p.LatestSettled}} {
+		if item.receipt == nil {
+			continue
+		}
+		receipt := item.receipt
+		args := receipt.Args
+		raw, _ := json.Marshal(args)
+		dedup(item.name+".Args", receipt.CallID, raw, func() { receipt.Args = nil }, func() { receipt.Args = args })
+	}
+	for i, receipt := range p.RecentReceipts {
+		args := receipt.Args
+		raw, _ := json.Marshal(args)
+		dedup(fmt.Sprintf("RecentReceipts[%d].Args", i), receipt.CallID, raw, func() { receipt.Args = nil }, func() { receipt.Args = args })
+	}
+	for i := range p.RecentCompletedReplies {
+		for j := range p.RecentCompletedReplies[i].ToolCalls {
+			call := &p.RecentCompletedReplies[i].ToolCalls[j]
+			args := call.Arguments
+			dedup(fmt.Sprintf("RecentCompletedReplies[%d].ToolCalls[%d].Arguments", i, j), call.ID, []byte(args), func() { call.Arguments = "" }, func() { call.Arguments = args })
+		}
+	}
 }
 
 func (r *Runner) progressPhase(packet progressPacket) [32]byte {

@@ -20,7 +20,16 @@ func TestTaskRoundGuidanceRunner(t *testing.T) {
 		t.Run(fmt.Sprint(qualified), func(t *testing.T) {
 			var effects []string
 			reg := tool.NewRegistry()
-			reg.Register(echoTool(&effects))
+			echo := echoTool(&effects)
+			original := echo.Execute
+			// Failed observations still request bookkeeping advice; successful
+			// claimed calls now use the existing progress watcher instead.
+			echo.Execute = func(ctx context.Context, args tool.Args) (tool.Result, error) {
+				result, err := original(ctx, args)
+				result.Failed = true
+				return result, err
+			}
+			reg.Register(echo)
 			sink := &recordSink{}
 			r := &Runner{Registry: reg, Session: sink, SessionID: "round", Workspace: "/workspace", MaxSteps: 4,
 				Model: &scriptModel{replies: []string{"```tool\ntool: task_start\ntask: actual-task\n```", "```tool\ntool: echo\ntext: one\n```", "```tool\ntool: echo\ntext: two\n```", "factual final"}}}

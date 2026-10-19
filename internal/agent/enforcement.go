@@ -144,12 +144,13 @@ func (r *Runner) currentProgress(facts any) ProgressCheckpoint {
 }
 
 type observed struct {
-	CallID     string
-	ObservedAt time.Time
-	Tool       string
-	Args       tool.Args
-	Result     tool.Result
-	Error      string
+	PlanningQuestion string // successful guided draft's next question, not an instruction from the model
+	CallID           string
+	ObservedAt       time.Time
+	Tool             string
+	Args             tool.Args
+	Result           tool.Result
+	Error            string
 }
 type enforcement struct {
 	current               *observed // this call only; cleared before validation/schema-only handling
@@ -244,10 +245,8 @@ func (r *Runner) TaskStartDefinition() tool.Definition {
 			r.claimPreparationEnd = len(r.Continuation.Entries) - 1
 		}
 		text := fmt.Sprintf("claimed task %s attempt%d; direct main execution admitted, check %q", value.TaskID, value.Attempt, command)
-		if r.Assigned.ClaimedBrief != nil {
-			brief, _ := json.Marshal(r.Assigned.ClaimedBrief())
-			text += "\nFrozen authored requirements (not verified source facts): " + string(brief)
-		}
+		// refreshWorkflow installs the frozen brief at system role before the
+		// next request. Keep this receipt about the actual claim, not a second brief.
 		return tool.Result{Text: text}, nil
 	}}
 }
@@ -294,11 +293,16 @@ func (r *Runner) assignmentExec(next Exec) Exec {
 					encoded, _ := json.Marshal(args)
 					note.Args = tool.Args{"operation_sha256": fmt.Sprintf("%x", sha256.Sum256(encoded))}
 					var envelope struct {
-						Effects     json.RawMessage `json:"effects"`
-						Errors      []string        `json:"errors"`
-						DataOmitted bool            `json:"data_omitted"`
+						Effects      json.RawMessage `json:"effects"`
+						Errors       []string        `json:"errors"`
+						DataOmitted  bool            `json:"data_omitted"`
+						NextQuestion string          `json:"next_question"`
 					}
-					_ = json.Unmarshal([]byte(result.Text), &envelope)
+					decoded := json.Unmarshal([]byte(result.Text), &envelope) == nil
+					if d.Label == "plan" && decoded && len(envelope.Errors) == 0 && !envelope.DataOmitted && err == nil && !result.Failed && !result.Blocked && !result.Truncated {
+						note.PlanningQuestion = envelope.NextQuestion
+					}
+					envelope.NextQuestion = "" // current owner checkpoint carries this once
 					summary, _ := json.Marshal(envelope)
 					note.Result.Text = fmt.Sprintf("actual GraphQL response sha256=%x; effects/errors/omission=%s; selected owning facts supplied separately", sha256.Sum256([]byte(result.Text)), summary)
 				}
@@ -333,6 +337,16 @@ func (r *Runner) enforce(ctx context.Context, final bool, provisional string, lo
 	if err != nil {
 		return "", err
 	}
+	// Successful drafting already supplies the next question. Successful work
+	// under a claim is supervised by the existing progress watcher. Neither
+	// needs a second bookkeeping judgment after every call. Finals, failures,
+	// changed questions and delivered comments retain this enforcement path.
+	if note := r.enforcement.latest; !final && note != nil && note.Error == "" && !note.Result.Failed && !note.Result.Blocked && !note.Result.Truncated && (note.Result.ExitCode == nil || *note.Result.ExitCode == 0) && packet.PreflightRefusal == "" && len(packet.UnexecutedCalls) == 0 && len(packet.DeliveredUserComments) == 0 && len(packet.DeliveredTaskComments) == 0 {
+		guided := !r.assignedClaim && note.PlanningQuestion != "" && note.PlanningQuestion == packet.Checkpoint.NextAction
+		if guided || r.assignedClaim && r.settlement == nil {
+			return "", nil
+		}
+	}
 	// PAT decisions use owner facts and receipts, not duplicate complete source.
 	packet.LatestSourceText = ""
 	facts := packet.Facts
@@ -348,6 +362,7 @@ func (r *Runner) enforce(ctx context.Context, final bool, provisional string, lo
 		ProvisionalModelAnswer      string
 	}{packet, same, final, provisional}
 	input.Latest, input.LatestDiscovery = loopObserved(r.enforcement.latest), loopObserved(latestDiscovery)
+	input.deduplicateEvidence()
 	raw, err := json.Marshal(input)
 	if err != nil {
 		return "", err
