@@ -103,6 +103,39 @@ try {
     $script:signature.Status='Valid'
     Assert ((Install-CaliperSystemRuntime) -eq 0) 'signed installer did not run'
     Assert ($script:opened -eq 1 -and -not (Test-Path -LiteralPath $script:downloadPath)) 'signed temporary installer not cleaned up'
+    # Execute the actual builder dispatch against an argument recorder. The
+    # independent downloaded interpreter must normalize the target, never itself.
+    & {
+        $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $PSScriptRoot 'prepare-windows-runtime.ps1'), [ref]$null, [ref]$errors)
+        Assert (-not $errors) 'builder parse failed'
+        $calls = @($ast.FindAll({ param($node)
+            $node -is [System.Management.Automation.Language.CommandAst] -and
+            $node.Extent.Text -match '^& .*use_system_runtime\.py'
+        }, $true))
+        Assert ($calls.Count -eq 1) 'expected one normalization dispatch'
+        $base = 'downloaded-source-python'
+        $decisionDir = 'new-private-runtime'
+        $App = 'application'
+        $script:normalizerInterpreter = ''
+        $script:normalizerArguments = @()
+        function Join-Path($Path, $ChildPath) {
+            if ($ChildPath -eq 'python.exe') {
+                $script:normalizerInterpreter = $Path
+                return 'Invoke-InterpreterFixture'
+            }
+            return "$Path/$ChildPath"
+        }
+        function Invoke-InterpreterFixture {
+            $script:normalizerArguments = @($args)
+        }
+        Invoke-Expression $calls[0].Extent.Text
+        Assert ($script:normalizerInterpreter -eq $base) 'normalizer loads the runtime it must modify'
+        Assert ($script:normalizerArguments.Count -eq 3 -and
+            $script:normalizerArguments[0] -eq '-I' -and
+            $script:normalizerArguments[2] -eq $decisionDir) 'normalizer arguments lost isolated mode or staged target'
+    }
     $global:LASTEXITCODE = 0
     Write-Output 'PASS: missing/invalid PE, minimum/newer/outdated runtime, silent installed path, verification errors, check-only, recheck, reboot/cancel/failure, Microsoft signature'
 } finally {

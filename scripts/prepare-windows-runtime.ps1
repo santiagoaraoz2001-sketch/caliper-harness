@@ -69,8 +69,9 @@ Get-ChildItem -Recurse $rgStage -Include 'LICENSE*', 'UNLICENSE' | ForEach-Objec
 }
 
 # Normalize any wheel-mangled CRT imports before removing vendored copies.
-# This edits only this invocation's owned runtime; Windows supplies the CRT.
-& (Join-Path $decisionDir 'python.exe') -I (Join-Path $App 'python\windows\use_system_runtime.py') $decisionDir
+# Use the separate downloaded interpreter: Windows locks DLLs loaded by the
+# running process, so the target interpreter cannot remove its own VC runtime.
+& (Join-Path $base 'python.exe') -I (Join-Path $App 'python\windows\use_system_runtime.py') $decisionDir
 if ($LASTEXITCODE -ne 0) { throw 'Cannot normalize private runtime to the verified system CRT' }
 
 # Validate actual imports and origins before marking this folder as managed.

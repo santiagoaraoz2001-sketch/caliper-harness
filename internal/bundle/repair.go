@@ -500,7 +500,7 @@ func repairProfile(root, stage, pythonArchive, profile string, note Reporter) er
 		return err
 	}
 	if runtime.GOOS == "windows" {
-		if err := normalizeWindowsRuntime(root, fresh); err != nil {
+		if err := normalizeWindowsRuntime(root, fresh, pythonArchive); err != nil {
 			return err
 		}
 	}
@@ -513,8 +513,19 @@ func repairProfile(root, stage, pythonArchive, profile string, note Reporter) er
 
 // Reuse the builder's verified normalizer after downloading the private runtime.
 // It repairs mangled PE imports before removing vendored CRT, in staging only.
-func normalizeWindowsRuntime(root, fresh string) error {
-	cmd := exec.Command(interpreterIn(fresh), "-I", filepath.Join(root, "python", "windows", "use_system_runtime.py"), fresh)
+func normalizeWindowsRuntime(root, fresh, pythonArchive string) error {
+	// The target interpreter loads its own CRT DLLs, preventing their deletion on
+	// Windows. Run from a separate copy of the same already-verified archive; the
+	// installed interpreter may be broken and is not a safe repair dependency.
+	runner, err := os.MkdirTemp(filepath.Dir(fresh), ".normalize-python-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(runner)
+	if err := extractPython(pythonArchive, runner); err != nil {
+		return fmt.Errorf("Windows system-runtime normalization failed; cannot prepare isolated interpreter: %w", err)
+	}
+	cmd := exec.Command(interpreterIn(runner), "-I", filepath.Join(root, "python", "windows", "use_system_runtime.py"), fresh)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("Windows system-runtime normalization failed; installed runtime unchanged: %w: %s", err, strings.TrimSpace(string(out)))
 	}

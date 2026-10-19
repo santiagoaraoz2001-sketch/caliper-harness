@@ -226,13 +226,65 @@ func TestWindowsRepairNormalizationFailurePreservesInstalledRuntime(t *testing.T
 	if err := os.WriteFile(prior, []byte("prior runtime"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	// No staged interpreter: the actual process launch must fail, not silently
-	// qualify an unnormalized runtime or remove files from the installed version.
-	if err := normalizeWindowsRuntime(root, fresh); err == nil || !strings.Contains(err.Error(), "normalization failed") {
+	// A missing verified archive must refuse normalization without changing
+	// the installed runtime.
+	if err := normalizeWindowsRuntime(root, fresh, filepath.Join(root, "missing-python.tar.gz")); err == nil || !strings.Contains(err.Error(), "normalization failed") {
 		t.Fatalf("failed normalizer accepted: %v", err)
 	}
 	got, err := os.ReadFile(prior)
 	if err != nil || string(got) != "prior runtime" {
 		t.Fatalf("installed runtime changed: %q %v", got, err)
+	}
+}
+
+func TestWindowsNormalizerRunsOutsideTargetRuntime(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("portable process-boundary fixture uses a Unix executable; native Windows build verifies actual Python")
+	}
+	for _, exit := range []int{0, 9} {
+		t.Run(fmt.Sprint(exit), func(t *testing.T) {
+			root, stage := t.TempDir(), t.TempDir()
+			fresh := filepath.Join(stage, "new-decision")
+			if err := os.MkdirAll(filepath.Dir(interpreterIn(fresh)), 0755); err != nil {
+				t.Fatal(err)
+			}
+			// Selecting the target interpreter is the regression: it must never run.
+			if err := os.WriteFile(interpreterIn(fresh), []byte("#!/bin/sh\nexit 97\n"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$0\" \"$1\" \"$2\" \"$3\" > \"$3/normalizer-command.txt\"\nexit %d\n", exit)
+			var data bytes.Buffer
+			gz := gzip.NewWriter(&data)
+			tw := tar.NewWriter(gz)
+			if err := tw.WriteHeader(&tar.Header{Name: "python/bin/python3", Mode: 0755, Size: int64(len(script))}); err != nil {
+				t.Fatal(err)
+			}
+			tw.Write([]byte(script))
+			tw.Close()
+			gz.Close()
+			archive := filepath.Join(stage, "python.tar.gz")
+			if err := os.WriteFile(archive, data.Bytes(), 0600); err != nil {
+				t.Fatal(err)
+			}
+			err := normalizeWindowsRuntime(root, fresh, archive)
+			if (err != nil) != (exit != 0) {
+				t.Fatalf("exit %d: %v", exit, err)
+			}
+			raw, err := os.ReadFile(filepath.Join(fresh, "normalizer-command.txt"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+			if len(args) != 4 || strings.HasPrefix(args[0], fresh+string(os.PathSeparator)) || args[1] != "-I" || args[2] != filepath.Join(root, "python/windows/use_system_runtime.py") || args[3] != fresh {
+				t.Fatalf("wrong normalizer command: %q", args)
+			}
+			if _, err := os.Stat(args[0]); !os.IsNotExist(err) {
+				t.Fatalf("temporary runner retained: %v", err)
+			}
+			original, _ := os.ReadFile(interpreterIn(fresh))
+			if string(original) != "#!/bin/sh\nexit 97\n" {
+				t.Fatal("target interpreter changed")
+			}
+		})
 	}
 }
