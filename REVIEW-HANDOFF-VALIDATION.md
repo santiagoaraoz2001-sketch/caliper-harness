@@ -38,3 +38,9 @@ Native D1 replay is a negative result, not a pass: requests129/131 still selecte
 ## Fresh benchmark
 
 After publication, rerun the unchanged two-fix brief and original source baseline with Laguna and native D1 on the Mac. Reuse the existing isolated-fixture script so Git observations describe this project rather than an ancestor repository. Keep model parameters, detailed Q&A, zero run/step ceilings and silent continuation unchanged. Record the complete rubric; task checks, reviewer PASS and parent closure must each have their own evidence. A faster review is a live hypothesis until measured.
+
+## Publication and live start
+
+v0.1.0 was published from ce852f4d8f5c6bdcd640beb793f2fa02cb5ee08b with a Mac arm64 application folder and checksums. The final bundle passed native dependency, local signing, relocation and 31,592 manifest-file hash checks. GitHub asset digests and lengths match local artifacts. The release tag remains on this tested source commit; later status-only documentation does not change the released candidate.
+
+The original benchmark brief was submitted once at 2026-10-19 02:17:08 UTC with unchanged parameters and source baseline. Initial discovery and native D1 responses work; task claim, edits, paired checks, review, handoff and parent closure are pending at the 02:19 UTC observation. Full timestamped rubric: verification/2026-10-19-v0.1.0-native/RUBRIC.md. The benchmark remains running.
