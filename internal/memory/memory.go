@@ -143,6 +143,10 @@ func graphList(ctx context.Context, s *store.Store, kind, text string, limit, by
 	if len(relevance) > 0 {
 		chosen := relevance[0]
 		matches := []string{}
+		if chosen.KeyPrefix != "" {
+			matches = append(matches, "m.key STARTS WITH $prefix")
+			params["prefix"] = chosen.KeyPrefix
+		}
 		for _, pair := range []struct{ column, value string }{{"task_id", chosen.TaskID}, {"file_path", chosen.FilePath}, {"session_ref", chosen.SessionRef}} {
 			if pair.value != "" {
 				matches = append(matches, "m."+pair.column+"=$"+pair.column)
@@ -228,6 +232,10 @@ func graphList(ctx context.Context, s *store.Store, kind, text string, limit, by
 
 // PutKnowledge appends an authored note; CAS and typed links share the writer.
 func PutKnowledge(ctx context.Context, s *store.Store, root, sessionRef, key, body, previous, taskID, filePath string) (*Entry, error) {
+	return putKnowledge(ctx, s, root, sessionRef, key, body, previous, taskID, filePath, "")
+}
+
+func putKnowledge(ctx context.Context, s *store.Store, root, sessionRef, key, body, previous, taskID, filePath, approachID string) (*Entry, error) {
 	if strings.HasPrefix(key, plan.RevisionKeyPrefix) {
 		return nil, fmt.Errorf("knowledge key is reserved for owning revision receipts")
 	}
@@ -258,6 +266,11 @@ func PutKnowledge(ctx context.Context, s *store.Store, root, sessionRef, key, bo
 	}
 	e := &Entry{ID: uuid.NewString(), Kind: "note", Body: body, CreatedAt: time.Now().UTC(), SessionRef: sessionRef, ProjectRoot: root, Key: key, PreviousID: previous, TaskID: taskID, FilePath: filePath}
 	err := s.UpdateContext(ctx, func(tx *store.Tx) error {
+		if approachID != "" {
+			if err := plan.CheckProject(tx, "approach", approachID, root); err != nil {
+				return err
+			}
+		}
 		if taskID != "" {
 			if err := plan.CheckProject(tx, "task", taskID, root); err != nil {
 				return err
@@ -299,7 +312,7 @@ func Knowledge(ctx context.Context, s *store.Store, root, key, id string, limit,
 }
 
 // KnowledgeSelection names actual owning associations, never a guessed semantic match.
-type KnowledgeSelection struct{ TaskID, FilePath, SessionRef string }
+type KnowledgeSelection struct{ TaskID, FilePath, SessionRef, KeyPrefix string }
 
 func SelectedKnowledge(ctx context.Context, s *store.Store, root string, selection KnowledgeSelection, rows, bytes int) ([]*Entry, error) {
 	if root == "" || rows <= 0 || bytes <= 0 {

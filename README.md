@@ -190,6 +190,27 @@ graph for how code should be written:
 caliper-harness graph --query 'query { knowledge(key:"styleguide") { body } }'
 ```
 
+## Record what you notice
+
+While working on an Approach, the model can save weak spots, brittle code,
+potential issues and opportunities through the existing GraphQL tool:
+
+```graphql
+mutation {
+  noticed(approachId: "<actual approach ID>",
+          body: "Cache entries do not expire. Long sessions may retain unused data; growth has not been measured.",
+          filePath: "src/cache.go") { id key }
+}
+```
+
+`notices(approachId: "<actual approach ID>") { id body filePath }` retrieves
+that Approach's notes. They are ordinary project knowledge: saved across
+sessions, with author and timestamp, and editable through existing versioned
+knowledge operations. They do not create tasks or change verification status.
+The model is instructed to record useful observations briefly and continue
+its assigned work. `help(topic="schema.graphql.noticed")` provides the call
+template and examples.
+
 ## Design principles
 
 1. **Never fabricate success.** No silent fallbacks, simulated results, or
@@ -205,30 +226,21 @@ caliper-harness graph --query 'query { knowledge(key:"styleguide") { body } }'
    fix lands at the shared mechanism, with a regression test proven to fail
    on the old code first.
 
-## Development status
+## Release status
 
-This is a developer preview under active evaluation. The capability rubric
-in [CapabilityRubric.md](CapabilityRubric.md) is the scoreboard — functions
-earn PASS only from observed evidence at their declared level, and no
-aggregate percentage is computed. Read the current state honestly:
+Caliper is an early development release. Local-model runs have exercised
+planning, task claims, edits, paired checks and independent review. The latest
+completed benchmark qualified both Tasks but left their Approach and Plan open;
+v0.1.0 corrected that handoff and a fresh benchmark is still in progress.
+D1 can miss repetitive reasoning. Passing checks and reviewer agreement do not
+guarantee correctness.
 
-- Transport, planning-state authoring, readiness, task claiming, check
-  execution, refusal recovery, session recording, and judgment supervision
-  have live native-model evidence.
-- A full claim → check → independent review cycle has **not** yet been
-  qualified end to end on a local model. The most recent live run completed
-  its product work and checks (19/19 on the test workload) but settled
-  unverified when the model server died under a 100k-token prompt.
-- The current candidate separates selected PAT drafting from execution: finish all
-  Task briefs for an Approach, request readiness, then claim. Discovery stays
-  available while drafting. This lifecycle correction has fixture evidence; live
-  qualification remains pending. Supervisor direction and style-judge live
-  qualification remain open work.
+The downloadable application folder targets Apple Silicon Macs. Windows and
+Linux share the source, but native builds and runtime behavior still need
+validation on those systems. See [PORTABILITY.md](PORTABILITY.md).
 
-Verification campaigns run locally against real models with byte-exact wire
-capture; their (large) artifacts are not part of this repository. The plan
-and evidence discipline are described in
-[ConstructionPlan.md](ConstructionPlan.md).
+Development plans, benchmark traces and scratch notes stay local. Release
+changes and qualification notes are published on [GitHub Releases](https://github.com/santiagoaraoz2001-sketch/caliper-harness/releases).
 
 ## Testing
 
@@ -274,4 +286,4 @@ MIT — see [LICENSE](LICENSE).
 
 ### Server and platform development
 
-The current server/model-control candidate and custom recipe examples are described in [SERVER-MODELS.md](SERVER-MODELS.md). Implementation and native qualification status are tracked in [the server/platform plan](SERVER-PLATFORM-PLAN.md). Windows and Linux conversion work is isolated on `codex/windows-conversion` and `codex/linux-conversion`; these are development branches, not qualified releases.
+Server/model controls and custom recipes are described in [SERVER-MODELS.md](SERVER-MODELS.md). The `MacOS`, `Windows` and `Linux` branches carry the same shared source. Target-platform qualification is documented in [PORTABILITY.md](PORTABILITY.md).

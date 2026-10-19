@@ -4,7 +4,7 @@
 /python/decision/models/
 
 # Local verification campaigns: multi-GB wire captures, staged runtimes and
-# session records. Curated reports may be added explicitly later.
+# session records and local development reports.
 /verification/
 
 # Local session stores and logs
@@ -12,7 +12,29 @@
 *.log
 .DS_Store
 
-# future features: parked work, ignored by git; manifest in future/README.md
-/future/*
-!/future/README.md
+# Parked work stays local.
+/future/
 __pycache__/
+
+# Local development plans, audits and work notes (kept on disk).
+/CODEBASE_REVIEW.md
+/CapabilityRubric.md
+/Concept.md
+/ConstructionPlan.md
+/DESIGN.md
+/GRAPHQL-BUDGET-VALIDATION.md
+/PRODUCT.md
+/RELEASE-NOTES-v0.1.0.md
+/RELIABILITY-2026-10-16.md
+/REVIEW-HANDOFF-VALIDATION.md
+/REVIEWER-SHELL-VALIDATION.md
+/SERVER-CLEANUP-NATIVE-JUDGES.md
+/SERVER-PLATFORM-PLAN.md
+/SNAKE-TRACE-FIXES.md
+/TOOL-CALL-REPAIR.md
+/WINDOWS-WIP-REVIEW.md
+/guidingprinciples.md
+/runtime/gemma-current-diagnostic-preparation/HANDOFF.md
+/specific-harness-inventory.md
+/internal/run/data/
+/RELEASE-NOTES-*.md

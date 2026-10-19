@@ -1,5 +1,5 @@
 // Package config loads the harness YAML configuration. Every tunable named
-// in Concept.md lives here, with later owner context policy applied below.
+// for the harness lives here, with explicit context policy applied below.
 // Anything absent falls back to the built-in defaults, and a missing file means
 // pure defaults (disclosed, never
 // silent). Percentages are 0-100 in YAML.

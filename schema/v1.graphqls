@@ -22,6 +22,8 @@ type Query {
   taskComments(taskId: ID!, attempt: Int!, limit: Int!): [TaskComment!]!
   """Read authored project knowledge heads, or an immutable version by id. Not verified execution evidence."""
   knowledge(key: String, id: ID, limit: Int): [Knowledge!]!
+  """Read observations recorded for one Approach. Authored opportunities, not verified defects or required work."""
+  notices(approachId: ID!, limit: Int): [Knowledge!]!
   version: String!
   memories(kind: String, text: String, limit: Int): [MemoryEntry!]!
   sessions: [Session!]!
@@ -66,6 +68,8 @@ type Mutation {
   prepareTask(input: FreshTaskInput!): PreparedTask!
   """Append an authored project note using the actual current id; empty expectedPreviousId creates a new key."""
   appendKnowledge(key: String!, body: String!, expectedPreviousId: ID!, taskId: ID, filePath: String): Knowledge!
+  """Record a weak spot, brittle code, potential issue or opportunity noticed during an Approach. Creates a separate project note; does not change workflow or verification."""
+  noticed(approachId: ID!, body: String!, filePath: String): Knowledge!
   """Compatibility name for appendKnowledge; appends an immutable version with the same compare-and-set rule."""
   putKnowledge(key: String!, body: String!, expectedPreviousId: ID!, taskId: ID, filePath: String): Knowledge! @deprecated(reason: "Use appendKnowledge; both append immutable versions")
   """Explicitly bind a legacy unscoped plan to the captured host workspace. Does not activate or qualify work."""

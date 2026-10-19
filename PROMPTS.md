@@ -69,3 +69,9 @@ recorded execution, reviewer or check event group. Request only the needed messa
 fields. These reads use the current project scope and existing GraphQL budgets;
 historical checks never verify the current files. Incomplete active calls are
 identified without inventing a completed result.
+
+When upgrading a customized catalog to v0.1.1, start from the new shipped YAML
+and carry over your edits. It adds `help.schema.graphql.noticed` and
+`help.schema.graphql.notices`, plus short discovery guidance in the existing
+system and GraphQL help sections. A catalog missing those keys reports the
+missing names at load; existing admitted runs keep their original snapshot.

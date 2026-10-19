@@ -33,6 +33,9 @@ texts:
     arguments and a native template. For GraphQL use schema.graphql.<operation>, e.g.
     help(topic="schema.graphql.appendKnowledge"). Use help(topic="<tool>") for examples/recovery,
     help() for the overview, or help(topic="guide") for the full guide. Topics are not extra tools.
+    When GraphQL is available, record useful weak spots or opportunities noticed during the current
+    Approach with noticed; see schema.graphql.noticed. State the evidence and uncertainty briefly,
+    then continue the assigned work. A note neither expands scope nor proves a defect.
 
   # System role: complete structured-call array validation/serial result rules.
   # Original use sites: internal/agent/context.go:115 (basePrompt).
@@ -1258,6 +1261,13 @@ texts:
     With record/phase supplied, offset and limit page that record's actual saved events, and callId filters native groups there. Missing sources refuse; legacy raw history never gains invented native correlation. A saved worker workspace may differ from the project or no longer exist; it is historical provenance and grants no path authority. Select message fields for actual calls and results; raw text and thinking/reasoning fields can be much larger. Existing GraphQL row, byte, selection and time budgets apply; narrow fields/limit after a budget refusal.
     Every returned page is historical. Preserve failed, denied and unexecuted results. A prior PASS or authored success claim grants no present check/reviewer/approval authority. Read current project files and run the current required checks before judging freshness or completion.
 
+
+    When you notice a weak spot, brittle code, potential issue or opportunity during an Approach,
+    record it with noticed(approachId:...,body:...,filePath:...). Use the real current Approach ID,
+    explain the observation and uncertainty briefly, then continue the assigned work. This does not
+    create a task or change scope. Use notices(approachId:...) to retrieve those notes;
+    help(topic="schema.graphql.noticed") provides the exact template and an example.
+
   # Focused help.grep documentation/examples; help labels current executable availability.
   # Original use sites: internal/tools/model-guide.md:26 (helpDefinition).
   # Fields: none. Supplied by the owning Go caller.
@@ -1325,7 +1335,7 @@ texts:
     # Harness operating guide
     Follow your active role in the real project. For coding, inspect source, implement and check the request; for review, inspect without changing artifacts. Report actual evidence. Use find_file/find_dir for paths, grep for source text, then read the relevant file or declaration. Reuse returned paths, hashes and paging offsets.
 
-    Start with help(topic="schema") for the tools available now. Request schema.<tool> for exact arguments and a compact call template. GraphQL has a separate operation index at schema.graphql; schema.graphql.appendKnowledge shows how to save product decisions or useful paths. Request help(topic="<tool>") for use cases and examples, or help(topic="guide") for the comprehensive guide.
+    Start with help(topic="schema") for the tools available now. Request schema.<tool> for exact arguments and a compact call template. GraphQL has a separate operation index at schema.graphql; schema.graphql.appendKnowledge saves product decisions or useful paths; schema.graphql.noticed records observations for the current Approach. Request help(topic="<tool>") for use cases and examples, or help(topic="guide") for the comprehensive guide.
 
     Ordinary coding uses the core tools directly. In the main/orchestrator role, use plan() when useful or requested. Assigned workers/reviewers keep their frozen role. The host binds Plan → Approach → Task identities. Let each answer settle before using the next question. Drafting saves intentions. The later START plan(invoke="EXECUTE") claims work for the main model; explicit launch dispatches workers. Actual checks and independent review qualify work.
 
@@ -1806,7 +1816,7 @@ texts:
   # Original use sites: internal/tools/graph/graph.go:25 (New).
   # Fields: none. Supplied by the owning Go caller.
   tools.graphql.purpose: |-
-    Read selected project knowledge and graph state; append decisions, paths or useful facts with appendKnowledge. Need exact arguments? Use help(topic="schema.graphql") for operations or help(topic="schema.graphql.appendKnowledge") for the knowledge-write template. query holds GraphQL document text; variables is one JSON-object string. Use actual returned IDs and expectedPreviousId for updates. Project/author are host-bound. Composed mutations can partially commit: read effect receipts before retrying. Authored notes and historical PASS do not establish current verification. For guided planning use plan().
+    Read selected project knowledge and graph state; append decisions, paths or useful facts with appendKnowledge. Use noticed for weak spots or opportunities in the current Approach; notices retrieves them. Need exact arguments? Use help(topic="schema.graphql") for operations or help(topic="schema.graphql.appendKnowledge") for the knowledge-write template. query holds GraphQL document text; variables is one JSON-object string. Use actual returned IDs and expectedPreviousId for updates. Project/author are host-bound. Composed mutations can partially commit: read effect receipts before retrying. Authored notes and historical PASS do not establish current verification. For guided planning use plan().
 
   # Model-facing desc prose for the current NewGrepAt registry constructor; executable
   # schema/authority remain Go-owned.
@@ -3221,7 +3231,7 @@ texts:
   # Compact reference framing/examples; executable names/arguments are generated from the owning registry/SDL.
   help.schema.graphql.index: |-
     # schema.graphql
-    GraphQL is one tool. Set its query argument to a GraphQL document; native arguments stay flat. For an exact operation signature and template, use help(topic="schema.graphql.<operation>"). Start with schema.graphql.appendKnowledge to save decisions or paths, or schema.graphql.knowledge to read them. Request schema.graphql.<Type> for one input/output type. Fuller use cases are in help(topic="graphql").
+    GraphQL is one tool. Set its query argument to a GraphQL document; native arguments stay flat. For an exact operation signature and template, use help(topic="schema.graphql.<operation>"). Use schema.graphql.appendKnowledge for decisions/paths, schema.graphql.knowledge to read them, or schema.graphql.noticed to record an Approach observation and schema.graphql.notices to retrieve its notes. Request schema.graphql.<Type> for one input/output type. Fuller use cases are in help(topic="graphql").
     Model-accessible operations (compatibility aliases omitted):
 
   # Compact reference framing/examples; executable names/arguments are generated from the owning registry/SDL.
@@ -3246,6 +3256,19 @@ texts:
   # Compact reference framing/examples; executable names/arguments are generated from the owning registry/SDL.
   help.schema.graphql.appendKnowledge: |-
     Appends one immutable authored version. For a new key set expectedPreviousId to "". For an existing key, use the actual current head ID already in context as expectedPreviousId. Query knowledge(key:"<key>"){id body} only if the needed head/body is missing or may have changed externally. Never guess it. Optional taskId/filePath link real work or a project path; project and author are host-bound. Keep actual applied IDs and partial-effect receipts. Authored knowledge is not a check/review result.
+
+  # Approach observations use existing authored knowledge; no task, approval or verdict is created.
+  # Fields: none. Argument templates come from the executable GraphQL schema.
+  help.schema.graphql.noticed: |-
+    Noticed records one weak spot, brittle area, potential issue or opportunity encountered while working on an Approach. Use its actual approachId already in context; never invent one. body should briefly say what you observed, why it matters and what remains uncertain. Optional filePath locates it inside the project. Each call appends a separate note and returns its actual id/key; no previous ID or readback is needed. Reuse the receipt rather than submitting the same observation twice. A note is not a verified defect, task, approval or reason to stop. Continue the assigned work; use the existing planning/revision path if scope needs to change. Without an Approach, appendKnowledge can hold a project note.
+    Example GraphQL document (replace the approach ID):
+    mutation { noticed(approachId:"<actual approach ID>",body:"Cache entries never expire in the inspected lookup. Long-running sessions may retain unused data; memory growth is not measured yet.",filePath:"src/cache.go") { id key body filePath } }
+    Retrieve later with query { notices(approachId:"<actual approach ID>") { id body filePath } }. Records use ordinary knowledge keys noticed/<approachId>/<unique id>, so existing knowledge reads and version updates also work.
+
+  # Recall authored observations without treating them as executable requirements.
+  # Fields: none. Existing GraphQL result/record settings apply.
+  help.schema.graphql.notices: |-
+    Returns the current note versions for the actual Approach, newest first, under the existing GraphQL record/result settings. Select only needed fields; limit optionally requests fewer records. Notes are authored observations, not verified defects or required tasks. Each returned key also works with knowledge(key:...) for version-aware updates through appendKnowledge.
 
   # Compact reference framing/examples; executable names/arguments are generated from the owning registry/SDL.
   help.schema.graphql.putKnowledge: |-

@@ -664,12 +664,33 @@ func (r *mutationResolver) AppendKnowledge(ctx context.Context, key, body, expec
 	}
 	applied(ctx, e.ID)
 	// Owner mutation output is selected/bounded just like an explicit read.
-	entries, err := r.knowledge(ctx, "", e.ID, 1, true)
+	return r.savedKnowledge(ctx, e.ID)
+}
+
+func (r *mutationResolver) Noticed(ctx context.Context, approachID, body string, filePath *string) (*model.Knowledge, error) {
+	s, err := scope(ctx)
+	if err != nil {
+		return nil, err
+	}
+	file := ""
+	if filePath != nil {
+		file = *filePath
+	}
+	e, err := memory.Noticed(ctx, r.store, s.root, s.sessionRef, approachID, body, file)
+	if err != nil {
+		return nil, transactionError(ctx, err)
+	}
+	applied(ctx, e.ID)
+	return r.savedKnowledge(ctx, e.ID)
+}
+
+func (r *Resolver) savedKnowledge(ctx context.Context, id string) (*model.Knowledge, error) {
+	entries, err := r.knowledge(ctx, "", id, 1, true)
 	if err != nil {
 		return nil, err
 	}
 	if len(entries) != 1 {
-		return nil, fmt.Errorf("applied knowledge %s could not be read back", e.ID)
+		return nil, fmt.Errorf("applied knowledge %s could not be read back", id)
 	}
 	return entries[0], nil
 }
@@ -693,7 +714,18 @@ func (r *queryResolver) Knowledge(ctx context.Context, key, id *string, limit *i
 	}
 	return r.knowledge(ctx, k, i, n, false)
 }
-func (r *Resolver) knowledge(ctx context.Context, key, id string, n int, mutation bool) ([]*model.Knowledge, error) {
+func (r *queryResolver) Notices(ctx context.Context, approachID string, limit *int) ([]*model.Knowledge, error) {
+	n := 0
+	if limit != nil {
+		n = *limit
+		if n <= 0 {
+			return nil, fmt.Errorf("notices limit must be positive")
+		}
+	}
+	return r.knowledge(ctx, "", "", n, false, approachID)
+}
+
+func (r *Resolver) knowledge(ctx context.Context, key, id string, n int, mutation bool, approachID ...string) ([]*model.Knowledge, error) {
 	s, err := scope(ctx)
 	if err != nil {
 		return nil, err
@@ -711,7 +743,13 @@ func (r *Resolver) knowledge(ctx context.Context, key, id string, n int, mutatio
 			body = true
 		}
 	}
-	entries, err := memory.Knowledge(ctx, r.store, s.root, key, id, n, bytes, body, selectedNames(selected(ctx, rootSelection(ctx), "Knowledge")))
+	fields := selectedNames(selected(ctx, rootSelection(ctx), "Knowledge"))
+	var entries []*memory.Entry
+	if len(approachID) > 0 {
+		entries, err = memory.Notices(ctx, r.store, s.root, approachID[0], n, bytes, body, fields)
+	} else {
+		entries, err = memory.Knowledge(ctx, r.store, s.root, key, id, n, bytes, body, fields)
+	}
 	if err != nil {
 		return nil, err
 	}

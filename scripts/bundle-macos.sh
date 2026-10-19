@@ -28,7 +28,7 @@ cp python/macos/verify_runtime.py "$out/python/macos/"
 # must remain omitted so a copied example can use executable-relative assets.
 awk '/^templates:$/ {skip=1; next} skip && /^[[:space:]]/ {next} skip {skip=0} {print}' caliper-harness.yaml.example > "$out/caliper-harness.yaml.example"
 cp internal/tui/thirdparty/textarea/LICENSE "$out/notices/textarea-LICENSE"
-cp FIRST-USE.md "$out/"
+cp LICENSE FIRST-USE.md PROMPTS.md "$out/"
 goroot=$(GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go env GOROOT)
 go_license=$goroot/LICENSE
 [[ -f $go_license ]] || go_license=$goroot/../LICENSE # Homebrew keeps it beside libexec.

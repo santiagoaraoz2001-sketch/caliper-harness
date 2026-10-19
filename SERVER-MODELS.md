@@ -1,6 +1,6 @@
 # Servers and models
 
-This guide describes the server-management candidate under development. See SERVER-PLATFORM-PLAN.md for acceptance status. Existing installed application folders do not acquire source changes automatically.
+This guide describes the server and model controls. See [PORTABILITY.md](PORTABILITY.md) for platform qualification. Existing installed application folders do not acquire source changes automatically.
 
 ## Choose the worker or judge
 
