@@ -6,6 +6,9 @@ Keep the folder intact: `caliper.exe`, any `*.dll` beside it, `bin\`, `runtime\`
 
 ## Install so `caliper` works in every terminal
 
+Plain `npm install caliper-harness` also registers `caliper` for your user account.
+Reopen the terminal if the command is not found. Use `-g` to avoid local npm files.
+
 With Node.js 20 or newer, `npm install -g caliper-harness` installs the complete
 managed application and the `caliper` command. `/update` stages an available
 release for the next launch; your active run and previous work remain intact.

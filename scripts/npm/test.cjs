@@ -69,12 +69,13 @@ test('nonexecutable installed commands cannot be activated on Unix', { skip: pro
   await assert.rejects(app.install(home,f.download,fixtureActivate),/EACCES/);
   assert.equal(fs.readFileSync(path.join(home,'current.json'),'utf8'),prior);
 });
-function windowsApp(spawn) {
+function platformApp(platform, spawn, env = {}) {
   const load = name => name === 'node:child_process' ? {spawn} : require(name);
-  const sandbox = {require: load, process: {platform: 'win32', arch: 'x64', env: {...process.env, SystemRoot: 'C:\\Windows'}}, module: {exports: {}}, console};
+  const sandbox = {require: load, process: {platform, arch: 'x64', env: {...process.env, SystemRoot: 'C:\\Windows', ...env}}, module: {exports: {}}, console};
   require('node:vm').runInNewContext(fs.readFileSync(path.join(__dirname,'install.cjs'),'utf8'),sandbox);
   return sandbox.module.exports;
 }
+function windowsApp(spawn) { return platformApp('win32', spawn); }
 function simulatedSpawn(codes, calls) {
   return (file,args,options) => {
     calls.push({file,args,options});
@@ -143,4 +144,56 @@ test('Windows launcher invokes prerequisite before the binary and does not forwa
   await new Promise(setImmediate);
   assert.equal(calls[0],'validate'); assert.equal(calls[1],'prerequisite');
   assert.deepEqual(Array.from(calls[2].args),['--config','path with spaces.yaml']); assert.equal(calls[2].options.cwd,undefined);
+});
+test('plain npm registration invokes the packaged installer with literal paths and inherited cwd', async () => {
+  for (const platform of ['darwin','linux','win32']) {
+    const calls=[], client=platformApp(platform,simulatedSpawn([0],calls),{npm_config_global:'false'});
+    const root=path.resolve("Caliper app's folder");
+    await client.registerCommand(root);
+    assert.equal(calls.length,1); const call=calls[0];
+    assert.equal(call.options.cwd,undefined); assert.equal(call.options.stdio,'inherit');
+    if(platform==='win32') {
+      assert.match(call.file,/System32.*WindowsPowerShell.*powershell.exe$/);
+      assert.deepEqual(Array.from(call.args),['-NoProfile','-ExecutionPolicy','Bypass','-File',path.join(root,'install-windows.ps1'),'-TargetDirectory',root]);
+    } else {
+      assert.equal(call.file,'/bin/sh'); assert.deepEqual(Array.from(call.args),[path.join(root,'install.sh')]);
+    }
+  }
+});
+test('global npm installation keeps npm-owned command registration', async () => {
+  for(const platform of ['darwin','linux','win32']) {
+    const client=platformApp(platform,()=>{throw Error('global install must not launch the platform installer');},{npm_config_global:'true'});
+    await client.registerCommand('/unused/app');
+  }
+});
+test('registration failures are returned instead of reporting an available command', async () => {
+  for(const platform of ['darwin','win32']) {
+    const calls=[], client=platformApp(platform,simulatedSpawn([7],calls),{npm_config_global:'false'});
+    await assert.rejects(client.registerCommand('/app with spaces'));
+    assert.equal(calls.length,1);
+    const failed=platformApp(platform,()=>{
+      const child=new (require('node:events').EventEmitter)();setImmediate(()=>child.emit('error',new Error('installer could not start')));return child;
+    },{npm_config_global:'false'});
+    await assert.rejects(failed.registerCommand('/app'),/installer could not start/);
+  }
+});
+test('plain npm registration uses real Unix installer and creates a working future-shell command', {skip:process.platform==='win32'}, async t => {
+  const f=await fixture(t), root=path.join(f.dir,"Caliper app's folder");
+  fs.renameSync(path.join(f.dir,'source','Caliper'),root);
+  fs.copyFileSync(path.join(__dirname,'..','install.sh'),path.join(root,'install.sh'));
+  const home=path.join(f.dir,"user home's path"), cwd=path.join(f.dir,'unrelated project');
+  fs.mkdirSync(home);fs.mkdirSync(cwd);
+  const env={...process.env,HOME:home,SHELL:'/bin/sh',npm_config_global:'false'};
+  const script='require(process.argv[1]).registerCommand(process.argv[2]).catch(e=>{console.error(e);process.exitCode=1})';
+  const register=spawnSync(process.execPath,['-e',script,path.join(__dirname,'install.cjs'),root],{cwd,env,encoding:'utf8'});
+  assert.equal(register.status,0,register.stderr);
+  const launcher=path.join(home,'.local','bin','caliper'); assert.ok(fs.existsSync(launcher));
+  const launched=spawnSync('/bin/sh',['-c','. "$HOME/.profile"; command -v caliper; caliper "$1"','--','literal argument with spaces'],{cwd,env,encoding:'utf8'});
+  assert.equal(launched.status,7,launched.stderr);
+  assert.ok(launched.stdout.includes(launcher)); assert.ok(launched.stdout.includes(`cwd=${fs.realpathSync(cwd)}`));
+  assert.match(launched.stdout,/arg=literal argument with spaces/);assert.deepEqual(fs.readdirSync(cwd),[]);
+  // Repeating npm install should update the owned launcher without duplicating PATH entries.
+  const again=spawnSync(process.execPath,['-e',script,path.join(__dirname,'install.cjs'),root],{cwd,env,encoding:'utf8'});
+  assert.equal(again.status,0,again.stderr);
+  assert.equal(fs.readFileSync(path.join(home,'.profile'),'utf8').split('# Caliper terminal command').length-1,1);
 });

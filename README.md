@@ -75,6 +75,10 @@ its private runtimes and ripgrep. Model weights and project build tools remain
 separate. Linux includes the CUDA runtime upfront, so its download is several GB.
 The supported packages are macOS arm64, Windows amd64, and Linux amd64/arm64.
 
+Plain `npm install caliper-harness` also registers the command for your user account.
+Reopen your terminal if it cannot find `caliper`. Local npm installation creates
+`node_modules` and npm package files where you run it; `-g` avoids those project files.
+
 Caliper offers available updates at startup. Accept the offer or use `/update` to
 prepare the new version; close and reopen Caliper to use it. Active runs keep their
 current executable. `npm install -g caliper-harness@latest` also updates the command.

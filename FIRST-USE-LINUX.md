@@ -1,5 +1,8 @@
 # Caliper on Linux
 
+Plain `npm install caliper-harness` also registers `caliper` for your user account.
+Reopen the terminal if the command is not found. Use `-g` to avoid local npm files.
+
 With Node.js 20 or newer, install the complete application and terminal command:
 
 ```sh

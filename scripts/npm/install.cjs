@@ -72,6 +72,23 @@ async function activateNative(root) {
     child.on('error',reject);child.on('exit',code=>code===0?resolve():reject(new Error(`Native installation activation failed (${code}); previous selection preserved`)));
   });
 }
+async function registerCommand(root) {
+  // Global npm installs already register the package's bin entry. Local npm
+  // installs need the same per-user registration as downloaded app folders.
+  if (process.env.npm_config_global === 'true') return;
+  let command = '/bin/sh', args = [path.join(root, 'install.sh')];
+  if (process.platform === 'win32') {
+    if (!process.env.SystemRoot) throw new Error('SystemRoot unavailable; cannot register Caliper command');
+    command = path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    // Register the installed folder in place; do not copy its runtime again.
+    args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'install-windows.ps1'), '-TargetDirectory', root];
+  }
+  await new Promise((resolve, reject) => {
+    const child = spawn(command, args, {stdio: 'inherit', windowsHide: false});
+    child.on('error', reject);
+    child.on('exit', code => code === 0 ? resolve() : reject(new Error(`Caliper command registration failed (${code}); application retained at ${root}`)));
+  });
+}
 async function install(base = home(), download = get, activate = activateNative) {
   if (!supported.includes(identity)) throw new Error(`No Caliper product bundle for ${identity}. Supported: ${supported.join(', ')}`);
   const parent = path.join(base, 'versions', version, identity);
@@ -118,5 +135,5 @@ async function install(base = home(), download = get, activate = activateNative)
     return root;
   } finally { fs.rmSync(stage, { recursive: true, force: true }); }
 }
-if (require.main === module) install().then(root => console.log(`Caliper ${version} installed: ${root}\nRun caliper from your project directory.`)).catch(error => { console.error(`Caliper installation failed: ${error.message}`); process.exitCode = 1; });
-module.exports = { home, executable, validate, install, identity, version, ensurePrerequisites, activateNative };
+if (require.main === module) install().then(async root => { await registerCommand(root); console.log(`Caliper ${version} installed: ${root}\nRun caliper from your project directory. Reopen your terminal if the command is not found.`); }).catch(error => { console.error(`Caliper installation failed: ${error.message}`); process.exitCode = 1; });
+module.exports = { home, executable, validate, install, identity, version, ensurePrerequisites, activateNative, registerCommand };
