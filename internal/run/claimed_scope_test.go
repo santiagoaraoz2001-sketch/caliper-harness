@@ -200,8 +200,10 @@ func TestClaimedTaskScopeNativeCoding(t *testing.T) {
 					}
 					if variant.postclaim && claimed && requests == 1 {
 						tail := body.Messages[len(body.Messages)-1].Content
-						if !strings.Contains(tail, "current task claim remains active") || strings.Contains(tail, strings.TrimSpace(running.Prompts.Text("continuation.bookkeeping.next_action"))) || strings.Contains(tail, "grants no coding/check/review authority") {
-							t.Errorf("claimed repair tail contradicts authority: %s", tail)
+						// A successful claim already carries the execution receipt; it
+						// should not provoke an extra bookkeeping nudge.
+						if !strings.Contains(tail, "claimed task "+task.ID) || strings.Contains(tail, "Harness bookkeeping request:") || strings.Contains(tail, "grants no coding/check/review authority") {
+							t.Errorf("successful claim lost its receipt or added redundant advice: %s", tail)
 						}
 					}
 					if !names["graphql"] || !names["help"] {
