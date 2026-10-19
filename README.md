@@ -32,10 +32,6 @@ unreliable in specific, repeatable ways, so the harness owns planning state,
 tool boundaries, verification, and an evidence record that never lets a
 claimed result outrun an observed one.
 
-> [!WARNING]
-> Developer preview. No release has been made. Native-model coding
-> performance is still being qualified — the honest current score is in
-> [Development status](#development-status) below, not in this paragraph.
 
 ## Why Caliper?
 
