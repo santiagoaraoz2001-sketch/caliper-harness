@@ -626,6 +626,7 @@ func (tx *repairTransaction) rollback() error {
 func repairAnchorsInventoried(inventory []byte) error {
 	entries := map[string]bool{}
 	for _, line := range strings.Split(string(inventory), "\n") {
+		line = strings.TrimSuffix(line, "\r")
 		if len(line) >= 67 {
 			rel, err := manifestRel(line[66:])
 			if err != nil {

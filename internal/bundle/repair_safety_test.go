@@ -140,8 +140,12 @@ type repairTransport func(*http.Request) (*http.Response, error)
 
 func (f repairTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 func TestRepairRipgrepCommitsOrRollsBackAfterFullValidation(t *testing.T) {
-	for _, badManifest := range []bool{false, true} {
-		t.Run(fmt.Sprint(badManifest), func(t *testing.T) {
+	for _, tc := range []struct {
+		badManifest bool
+		ending      string
+	}{{false, "\n"}, {true, "\n"}, {false, "\r\n"}, {true, "\r\n"}} {
+		badManifest := tc.badManifest
+		t.Run(fmt.Sprintf("bad=%t ending=%q", badManifest, tc.ending), func(t *testing.T) {
 			root := fixture(t)
 			var archive bytes.Buffer
 			zw := zip.NewWriter(&archive)
@@ -170,6 +174,12 @@ func TestRepairRipgrepCommitsOrRollsBackAfterFullValidation(t *testing.T) {
 			}
 			writeInventory(t, root, files)
 			original, _ := os.ReadFile(filepath.Join(root, ManifestFile))
+			// Python's text writer emits CRLF on Windows; run the actual complete
+			// repair transaction against that independent on-disk layout too.
+			original = bytes.ReplaceAll(original, []byte("\n"), []byte(tc.ending))
+			if err := os.WriteFile(filepath.Join(root, ManifestFile), original, 0600); err != nil {
+				t.Fatal(err)
+			}
 			os.WriteFile(filepath.Join(root, "bin", rgFileName()), []byte("broken search"), 0755)
 			old := http.DefaultTransport
 			http.DefaultTransport = repairTransport(func(r *http.Request) (*http.Response, error) {

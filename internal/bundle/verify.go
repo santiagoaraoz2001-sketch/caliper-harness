@@ -247,6 +247,7 @@ func containedPath(root, rel string) (string, error) {
 func writeRepairedInventory(root string, original []byte, profiles map[string]bool, ripgrep bool) error {
 	entries := map[string]string{}
 	for _, line := range strings.Split(strings.TrimSpace(string(original)), "\n") {
+		line = strings.TrimSuffix(line, "\r")
 		if len(line) < 67 {
 			return fmt.Errorf("malformed original inventory")
 		}

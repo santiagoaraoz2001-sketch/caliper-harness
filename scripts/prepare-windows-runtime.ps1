@@ -74,11 +74,13 @@ Get-ChildItem -Recurse $rgStage -Include 'LICENSE*', 'UNLICENSE' | ForEach-Objec
 & (Join-Path $base 'python.exe') -I (Join-Path $App 'python\windows\use_system_runtime.py') $decisionDir
 if ($LASTEXITCODE -ne 0) { throw 'Cannot normalize private runtime to the verified system CRT' }
 
+# The source interpreter has exited; no later step uses the downloaded build
+# inputs. Remove this invocation's staging before auditing the finished app.
+Remove-Item -LiteralPath $stage -Recurse -Force
+
 # Validate actual imports and origins before marking this folder as managed.
 # Poisoned Python environment is ignored.
 $manifest = & (Join-Path $decisionDir 'python.exe') -I (Join-Path $root 'python\windows\verify_runtime.py') $App
 if ($LASTEXITCODE -ne 0) { throw 'bundled runtime verification failed' }
 [IO.File]::WriteAllText((Join-Path $App 'runtime\manifest.json.tmp'), ($manifest -join [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
-# Delete only the builder staging directory created by this invocation.
-Remove-Item -Recurse -Force $stage
 # bundle-windows relocates and re-verifies before publishing this marker.

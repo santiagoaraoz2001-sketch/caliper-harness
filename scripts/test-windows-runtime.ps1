@@ -115,6 +115,23 @@ try {
             $node.Extent.Text -match '^& .*use_system_runtime\.py'
         }, $true))
         Assert ($calls.Count -eq 1) 'expected one normalization dispatch'
+        $cleanup = @($ast.FindAll({ param($node)
+            $node -is [System.Management.Automation.Language.CommandAst] -and
+            $node.GetCommandName() -eq 'Remove-Item' -and $node.Extent.Text -match '\$stage'
+        }, $true))
+        $verify = @($ast.FindAll({ param($node)
+            $node -is [System.Management.Automation.Language.CommandAst] -and
+            $node.Extent.Text -match '^& .*verify_runtime\.py'
+        }, $true))
+        Assert ($cleanup.Count -eq 1 -and $verify.Count -eq 1 -and
+            $calls[0].Extent.EndOffset -lt $cleanup[0].Extent.StartOffset -and
+            $cleanup[0].Extent.EndOffset -lt $verify[0].Extent.StartOffset) 'builder staging must be removed after normalization and before product verification'
+        $laterStageReads = @($ast.FindAll({ param($node)
+            $node -is [System.Management.Automation.Language.VariableExpressionAst] -and
+            $node.VariablePath.UserPath -in @('stage', 'base', 'rgStage', 'rgZip', 'pyArchive') -and
+            $node.Extent.StartOffset -gt $cleanup[0].Extent.EndOffset
+        }, $true))
+        Assert ($laterStageReads.Count -eq 0) 'builder uses staging after cleanup'
         $base = 'downloaded-source-python'
         $decisionDir = 'new-private-runtime'
         $App = 'application'
