@@ -100,6 +100,13 @@ func TestConsistencyNativeHeadersMatchCurrentClaimPhase(t *testing.T) {
 			s := openAssignedStore(t, dir)
 			task := assignedFixtureTask(t, s, "true", "test -d .")
 			scope := selectedFixtureScope(t, s, task.ID)
+			// Observe one unclaimed request, or claim/execution/settled requests
+			// plus their host check. Stop the fixture through its explicit budget;
+			// a thinking-only model response now continues normally.
+			maxSteps := 4
+			if exposure == "coding" {
+				maxSteps = 1
+			}
 			mainCalls, reviews := 0, 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 				var body struct {
@@ -114,7 +121,7 @@ func TestConsistencyNativeHeadersMatchCurrentClaimPhase(t *testing.T) {
 				for _, message := range body.Messages {
 					review = review || strings.HasPrefix(message.Content, "Review ")
 				}
-				delta, reason := map[string]any{"reasoning": "stop with actual artifacts preserved"}, "stop"
+				delta, reason := map[string]any{"reasoning": "observed current phase and preserved actual artifacts"}, "stop"
 				if review {
 					reviews++
 					delta = map[string]any{"content": "PASS: mechanical component episode only"}
@@ -161,7 +168,7 @@ func TestConsistencyNativeHeadersMatchCurrentClaimPhase(t *testing.T) {
 			cfg.Model.Runtime, cfg.Model.ToolProtocol = "openai", "structured"
 			cfg.Templates.Path = assignedTemplates()
 			bindDecisionFixture(t, &cfg, nil)
-			r, _, err := New(Deps{Tools: exposure, Cfg: cfg, Store: s, Server: server.URL, Model: "component", Window: 32768, MaxSteps: 6, Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: "phase-wire", Continuation: session.Continuation{Workflow: scope}}, "exercise the declared mechanical episode")
+			r, _, err := New(Deps{Tools: exposure, Cfg: cfg, Store: s, Server: server.URL, Model: "component", Window: 32768, MaxSteps: maxSteps, Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: "phase-wire", Continuation: session.Continuation{Workflow: scope}}, "exercise the declared mechanical episode")
 			if err != nil {
 				t.Fatal(err)
 			}

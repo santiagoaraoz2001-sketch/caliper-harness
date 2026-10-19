@@ -421,7 +421,7 @@ func TestTypedPreparationNativeAndTextCorrelation(t *testing.T) {
 				if n == 0 {
 					args = tool.Args{"plan_title": "repair", "plan_goal": "correct source", "approach_title": "owner fix", "task_title": "repair", "task_prompt": "repair source", "current": "observed source error", "target": "correct output", "sketch": "small fix and regression", "acceptance": "true exits0", "tests": "owning regressions", "verify": "inspect source and check", "acceptance_command": "test -d ."}
 				}
-				delta, finish := map[string]any{"reasoning": "component thinking-only stop"}, "stop"
+				delta, finish := map[string]any{"reasoning": "observed claimed task and correlated receipts"}, "stop"
 				if n < len(names) {
 					if protocol == "text" {
 						text := "```tool\ntool: " + names[n] + "\n"
@@ -442,7 +442,9 @@ func TestTypedPreparationNativeAndTextCorrelation(t *testing.T) {
 			defer server.Close()
 			cfg.Model.Server = server.URL
 			sink := &codingSink{dir: filepath.Join(dir, "sessions")}
-			r, _, err := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, "root")}, Cfg: cfg, Store: s, Server: server.URL, Model: "fixture", Window: 32768, MaxSteps: 5, Session: sink, SessionID: "wire"}, "repair source")
+			// Three actual operations and one request inspecting their receipts;
+			// the fixture budget ends this probe, not a thinking-only reply.
+			r, _, err := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, "root")}, Cfg: cfg, Store: s, Server: server.URL, Model: "fixture", Window: 32768, MaxSteps: 4, Session: sink, SessionID: "wire"}, "repair source")
 			if err != nil {
 				t.Fatal(err)
 			}

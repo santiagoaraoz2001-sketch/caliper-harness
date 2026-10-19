@@ -108,7 +108,7 @@ func TestReceiptAdviceExplicitFullNextWire(t *testing.T) {
 			fmt.Sprintf(`mutation { setTaskBlock(id:%q,current:"observed wrong formula",target:"correct conversion",sketch:"repair formula",acceptance:"command true exit0",tests:"existing conversion tests",verify:"independently inspect conversion/check",checkCommand:"true",acceptanceCommand:"test -d .") { id state } }`, taskID),
 			fmt.Sprintf(`mutation { transitionApproach(id:%q,to:"ready") { id state } }`, approachID),
 		}
-		delta := map[string]any{"reasoning": "component thinking-only stop"}
+		delta := map[string]any{"reasoning": "observed post-readiness request"}
 		finish := "stop"
 		if n < len(queries) {
 			args, _ := json.Marshal(map[string]string{"query": queries[n]})
@@ -121,7 +121,8 @@ func TestReceiptAdviceExplicitFullNextWire(t *testing.T) {
 	}))
 	defer model.Close()
 	cfg.Model.Server = model.URL
-	rr, _, err = New(Deps{Tools: "full", Cfg: cfg, Store: s, Server: model.URL, Model: "component", Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: "receipt", Window: 262144, MaxSteps: 8}, "repair conversion")
+	// Six mutations plus one observed next wire; stop by the fixture budget.
+	rr, _, err = New(Deps{Tools: "full", Cfg: cfg, Store: s, Server: model.URL, Model: "component", Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: "receipt", Window: 262144, MaxSteps: 7}, "repair conversion")
 	if err != nil {
 		t.Fatal(err)
 	}
