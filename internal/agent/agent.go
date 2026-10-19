@@ -661,6 +661,7 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 	}
 	deferredBoundaryAdvice := ""
 	deferCompaction := false // A declined length-boundary summary must still yield a worker turn.
+	var pruning pruneBatch
 	compactModel := func(candidate session.Continuation) (session.Continuation, string, bool, error) {
 		requestCtx, cancel := context.WithCancelCause(ctx)
 		if r.GenerationInterrupt != nil {
@@ -772,7 +773,7 @@ steps:
 			contextEvent(r.Continuation)
 		}
 		revision := r.Continuation.Revision
-		basis, report := r.prune(&r.Continuation)
+		basis, report := pruning.apply(r, &r.Continuation)
 		transcript = r.Continuation.Messages()
 		if report != "" {
 			kind := "pressure"

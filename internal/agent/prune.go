@@ -2,10 +2,44 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"math"
 	"specific-harness/internal/session"
 )
+
+// pruneBatch keeps ordinary requests append-only. Rewriting an old result
+// invalidates every cached token after it, even if the replacement is tiny.
+// Batch at an already changed instruction/tool prefix or existing pressure
+// boundary. This is request-local scheduling, never restored task authority.
+type pruneBatch struct {
+	prefix [32]byte
+	seen   bool
+}
+
+func (b *pruneBatch) apply(r *Runner, c *session.Continuation) (int, string) {
+	h := sha256.New()
+	fmt.Fprintf(h, "%q%q", c.ModelKey, c.SchemaKey)
+	for _, e := range c.Entries {
+		if e.Message.Role != "system" {
+			break
+		}
+		fmt.Fprintf(h, "%q", e.Message.Content)
+	}
+	var prefix [32]byte
+	copy(prefix[:], h.Sum(nil))
+	boundary := !b.seen || prefix != b.prefix
+	b.prefix, b.seen = prefix, true
+	basis := c.Estimate()
+	occupancy := basis
+	if c.Measured && c.Prompt > occupancy {
+		occupancy = c.Prompt
+	}
+	if boundary || shouldCompact(occupancy, r.MaxTokens, true, r.Compaction) || overBudget(occupancy, r.MaxTokens, true) {
+		return r.prune(c)
+	}
+	return basis, ""
+}
 
 type Prune struct {
 	// OutputsAgeTokens is the age of a consumed output body, measured from

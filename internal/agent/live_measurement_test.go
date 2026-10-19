@@ -93,6 +93,10 @@ func TestLiveMeasurementMutationBoundaries(t *testing.T) {
 				}
 			} else if mutation == "prune" {
 				r.Prune.OutputsAgeTokens = 1
+				// Pruning now batches at existing pressure/role boundaries.
+				// Keep this a measurement-invalidation test by reaching 90%.
+				r.Compaction.Trigger = 90
+				model.usages[1].In = 9500
 			} else {
 				model.replies = []string{echoBlock(strings.Repeat("x", 5000)), echoBlock("b"), "SUMMARY", "FINAL"}
 				model.usages = []llm.Usage{{In: 20, Out: 5, Reported: true}, {In: 1450, Out: 5, Reported: true}, {In: 20, Out: 5, Reported: true}, {In: 100, Out: 5, Reported: true}}
