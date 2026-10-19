@@ -62,19 +62,25 @@ claimed result outrun an observed one.
 
 ### Managed bundle
 
+Extract the complete application folder to a permanent location. On macOS or
+Linux, install its terminal command once:
+
 ```sh
-./start.sh
+cd /path/to/Caliper
+sh ./install.sh
 ```
 
-The launcher selects the locally validated self-contained development build
-(private Python, model/decision dependencies, and ripgrep included — no pip,
-virtualenvs, or Homebrew needed) and keeps your current project directory.
-See [FIRST-USE.md](FIRST-USE.md) for model prerequisites.
+Open a new terminal, enter your project directory, and run `caliper`. The command
+opens the TUI; `caliper help` lists CLI commands. Keep the application folder
+intact. Run its installer again after moving it or selecting a new version.
+The installer needs no administrator rights and does not download runtimes or
+models. See [FIRST-USE.md](FIRST-USE.md) for macOS prerequisites.
 
-Windows packaging is a development candidate, pending native qualification.
-The offline folder uses `start.ps1`; the separately built managed folder includes
-`install-windows.ps1` for PATH installation. Workers use an installed compatible
-server; MLX is Mac-only. See [FIRST-USE-WINDOWS.md](FIRST-USE-WINDOWS.md).
+On Windows, run `powershell -ExecutionPolicy Bypass -File .\install-windows.ps1`
+inside the extracted folder, reopen the terminal application, then run `caliper`.
+Both Windows packaging modes include the installer. Windows and Linux native
+execution still require qualification; source portability is not runtime proof.
+See [FIRST-USE-WINDOWS.md](FIRST-USE-WINDOWS.md) and [PORTABILITY.md](PORTABILITY.md).
 
 ### Build from source
 

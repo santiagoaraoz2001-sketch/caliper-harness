@@ -30,6 +30,8 @@ cp -- "$kuzu_dir/LICENSE" "$out/notices/Kuzu-LICENSE"
 cp -- LICENSE FIRST-USE.md "$out/"
 awk '/^templates:$/ {skip=1; next} skip && /^[[:space:]]/ {next} skip {skip=0} {print}' caliper-harness.yaml.example > "$out/caliper-harness.yaml.example"
 cp -- scripts/start-linux.sh "$out/start.sh"
+cp -- scripts/install.sh "$out/install.sh"
+chmod +x "$out/install.sh"
 chmod +x "$out/start.sh"
 {
  printf 'Linux %s development bundle. Native build; not release-qualified.\n' "$arch"
@@ -50,7 +52,7 @@ else
   exit 1
 fi
 if grep -q 'not found' "$out/notices/NATIVE-DEPENDENCIES.txt"; then echo 'Missing native dependency; see notices.' >&2; exit 1; fi
-(cd "$out" && sha256sum caliper-harness lib/libkuzu.so bin/rg prompts.yaml start.sh > notices/ARTIFACT-SHA256.txt)
+(cd "$out" && sha256sum caliper-harness lib/libkuzu.so bin/rg prompts.yaml start.sh install.sh > notices/ARTIFACT-SHA256.txt)
 # No managed runtime manifest: bundle.Check must never mistake this source
 # distribution for the self-contained macOS runtime.
 rm -- "$out/BUILD-INCOMPLETE"

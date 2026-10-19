@@ -12,7 +12,7 @@ From inside the bundle folder, run:
 powershell -ExecutionPolicy Bypass -File .\install-windows.ps1
 ```
 
-This copies the folder to `%LOCALAPPDATA%\Caliper` and adds it to your user `PATH`. Open a **new** terminal (cmd, PowerShell or Windows Terminal) and run `caliper`. Terminals that were already open keep the old PATH. Re-running the installer replaces the installed copy. Windows SmartScreen may flag the unsigned development executable on first run; confirm the hash above before allowing it.
+This copies the folder to `%LOCALAPPDATA%\Caliper` and adds it to your user `PATH`. Open a **new** terminal (cmd, PowerShell or Windows Terminal) and run `caliper`. Terminals that were already open keep the old PATH. Re-running the installer stages the full replacement before switching folders and keeps the previous installation in a named sibling backup. Close Caliper before updating. `-TargetDirectory C:\path\Caliper` selects another location; `-NoPath` leaves PATH management to you. Windows SmartScreen may flag the unsigned development executable on first run; confirm the hash above before allowing it.
 
 Install a compatible Bash on PATH (for example Git for Windows Bash). Shell tools and coding checks use Bash even when the interactive terminal is PowerShell. Project check tools and inference servers remain external.
 
@@ -50,7 +50,7 @@ Offline developer folder (installed ripgrep, system Python for optional decision
 powershell -File scripts\bundle-windows.ps1 -OutputDirectory C:\build\new-folder
 ```
 
-Run its `start.ps1` from your project directory. It preserves the developer mode without a managed-runtime marker.
+Run its included `install-windows.ps1`, then `caliper` from your project directory. Its command shim preserves the developer mode, working directory, arguments and exit status without adding a managed-runtime marker. `start.ps1` remains available.
 
 Private runtime candidate (also requires uv, curl.exe and tar.exe):
 

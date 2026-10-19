@@ -29,6 +29,8 @@ cp python/macos/verify_runtime.py "$out/python/macos/"
 awk '/^templates:$/ {skip=1; next} skip && /^[[:space:]]/ {next} skip {skip=0} {print}' caliper-harness.yaml.example > "$out/caliper-harness.yaml.example"
 cp internal/tui/thirdparty/textarea/LICENSE "$out/notices/textarea-LICENSE"
 cp LICENSE FIRST-USE.md PROMPTS.md "$out/"
+cp scripts/install.sh "$out/install.sh"
+chmod +x "$out/install.sh"
 goroot=$(GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go env GOROOT)
 go_license=$goroot/LICENSE
 [[ -f $go_license ]] || go_license=$goroot/../LICENSE # Homebrew keeps it beside libexec.
