@@ -1,0 +1,65 @@
+name: Publish npm launcher
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing stable release or draft to validate (never publishes)
+        required: true
+        default: v0.1.2
+permissions:
+  contents: read
+concurrency:
+  group: npm-publication
+  cancel-in-progress: false
+jobs:
+  npm:
+    if: github.event_name == 'workflow_dispatch' || (!github.event.release.draft && !github.event.release.prerelease)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+      CHECK_MODE: ${{ github.event_name == 'release' && 'publish' || 'dry-run' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Drafts need not have a tag yet. Manual validation uses its selected
+          # source commit; a published release always uses the exact tag.
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Use supported npm OIDC client
+        run: npm install --global npm@11.15.0 --ignore-scripts
+      - name: Validate the complete release inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node -e 'if (!/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(process.env.RELEASE_TAG)) throw new Error("Expected stable vX.Y.Z release tag")'
+          release_id=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json databaseId --jq .databaseId)
+          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" > "$RUNNER_TEMP/release.json"
+          mkdir "$RUNNER_TEMP/release-metadata"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.sha256' --pattern '*.parts.json' --dir "$RUNNER_TEMP/release-metadata"
+          node scripts/check-npm-release.cjs release "$RELEASE_TAG" "$RUNNER_TEMP/release.json" "$RUNNER_TEMP/release-metadata" "$CHECK_MODE"
+      - name: Test and pack the exact launcher
+        run: |
+          node --test scripts/check-npm-release.test.cjs
+          npm ci --prefix scripts/npm --ignore-scripts
+          npm test --prefix scripts/npm
+          mkdir "$RUNNER_TEMP/npm-package"
+          cd scripts/npm
+          npm pack --ignore-scripts --json --pack-destination "$RUNNER_TEMP/npm-package" > "$RUNNER_TEMP/npm-package/pack.json"
+      - name: Check existing npm publication and latest version
+        id: registry
+        run: node scripts/check-npm-release.cjs registry "$RUNNER_TEMP/npm-package/pack.json"
+      - name: Publish through the configured npm trusted publisher
+        if: github.event_name == 'release' && steps.registry.outputs.publish == 'true'
+        env:
+          PACKAGE_PATH: ${{ steps.registry.outputs.package_path }}
+        run: npm publish "$PACKAGE_PATH" --access public --tag latest --ignore-scripts --registry https://registry.npmjs.org/
+      - name: Report dry-run result
+        if: github.event_name == 'workflow_dispatch'
+        run: echo 'Dry run passed. No npm package, tag, or release was changed.'
