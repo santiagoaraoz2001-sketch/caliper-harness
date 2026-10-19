@@ -23,14 +23,16 @@ platform = manifest['platform']
 if manifest['format'] != 1 or platform not in ('darwin-arm64', 'windows-amd64', 'linux-amd64', 'linux-arm64'):
     raise SystemExit('Unsupported managed product platform')
 if platform == 'windows-amd64':
-    for name in ('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'runtime/decision/msvcp140.dll'):
-        if not (app / name).is_file():
-            raise SystemExit(f'Missing app-local Windows runtime: {name}')
+    if not (app / 'ensure-windows-runtime.ps1').is_file():
+        raise SystemExit('Missing Windows system prerequisite helper')
+    for file in app.rglob('*'):
+        if file.is_file() and (re.match(r'(?i)^(?:(?:msvcp|vcruntime|concrt|vcomp|vccorlib)\d.*|ucrtbase)\.dll$', file.name)
+                               or file.name.lower().startswith('vc_redist')):
+            raise SystemExit(f'Microsoft runtime must be installed separately, not shipped: {file}')
 allowed = {'caliper-harness', 'caliper.exe', 'lib', 'bin', 'runtime', 'python', 'templates', 'notices',
            'prompts.yaml', 'caliper-harness.yaml.example', 'install.sh', 'install-windows.ps1',
-           'start.sh', 'LICENSE', 'FIRST-USE.md', 'FIRST-USE-WINDOWS.md', 'FIRST-USE-LINUX.md', 'SERVER-MODELS.md',
-           'PROMPTS.md', 'MANIFEST.sha256', 'kuzu_shared.dll',
-           'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll'}
+           'start.sh', 'start.ps1', 'ensure-windows-runtime.ps1', 'LICENSE', 'FIRST-USE.md', 'FIRST-USE-WINDOWS.md', 'FIRST-USE-LINUX.md', 'SERVER-MODELS.md',
+           'PROMPTS.md', 'MANIFEST.sha256', 'kuzu_shared.dll'}
 extra = {p.name for p in app.iterdir()} - allowed
 if extra:
     raise SystemExit(f'Unexpected release-root files (review before shipping): {sorted(extra)}')

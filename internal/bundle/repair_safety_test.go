@@ -157,7 +157,8 @@ func TestRepairRipgrepCommitsOrRollsBackAfterFullValidation(t *testing.T) {
 			}
 			files["python/"+directory+"/verify_runtime.py"] = "verified-script"
 			if runtime.GOOS == "windows" {
-				files["msvcp140.dll"] = "verified CRT source"
+				files["ensure-windows-runtime.ps1"] = "verified prerequisite helper"
+				files["python/windows/use_system_runtime.py"] = "verified normalizer"
 			}
 			for _, p := range requiredProfiles() {
 				rel, _ := filepath.Rel(root, Python(root, p))
@@ -216,33 +217,22 @@ func TestHashRefusesDirectories(t *testing.T) {
 	}
 }
 
-func TestWindowsRepairCopiesPrivateRuntimeDLL(t *testing.T) {
+func TestWindowsRepairNormalizationFailurePreservesInstalledRuntime(t *testing.T) {
 	root, fresh := t.TempDir(), t.TempDir()
-	want := []byte("inventoried Windows CRT bytes")
-	if err := os.WriteFile(filepath.Join(root, "msvcp140.dll"), want, 0644); err != nil {
+	prior := filepath.Join(root, "runtime", "decision", "msvcp140.dll")
+	if err := os.MkdirAll(filepath.Dir(prior), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := copyWindowsRuntimeDLL(root, fresh); err != nil {
+	if err := os.WriteFile(prior, []byte("prior runtime"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := os.ReadFile(filepath.Join(fresh, "msvcp140.dll"))
-	if err != nil || !bytes.Equal(got, want) {
-		t.Fatalf("private runtime DLL differs: %q, %v", got, err)
+	// No staged interpreter: the actual process launch must fail, not silently
+	// qualify an unnormalized runtime or remove files from the installed version.
+	if err := normalizeWindowsRuntime(root, fresh); err == nil || !strings.Contains(err.Error(), "normalization failed") {
+		t.Fatalf("failed normalizer accepted: %v", err)
 	}
-	// Copying must not move/delete the verified app-root source.
-	got, err = os.ReadFile(filepath.Join(root, "msvcp140.dll"))
-	if err != nil || !bytes.Equal(got, want) {
-		t.Fatalf("app-root source changed: %q, %v", got, err)
-	}
-}
-
-func TestWindowsRepairMissingRuntimeSourceRefuses(t *testing.T) {
-	root, fresh := t.TempDir(), t.TempDir()
-	err := copyWindowsRuntimeDLL(root, fresh)
-	if err == nil || !strings.Contains(err.Error(), "msvcp140.dll") {
-		t.Fatalf("missing app-root source accepted: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(fresh, "msvcp140.dll")); !os.IsNotExist(err) {
-		t.Fatalf("failed copy created a private DLL: %v", err)
+	got, err := os.ReadFile(prior)
+	if err != nil || string(got) != "prior runtime" {
+		t.Fatalf("installed runtime changed: %q %v", got, err)
 	}
 }

@@ -36,9 +36,10 @@ func archiveBytes(t *testing.T, entries map[string]string) []byte {
 }
 func fixture(t *testing.T) []byte {
 	files := map[string]string{"Caliper/caliper-harness": "binary", "Caliper/caliper.exe": "binary", "Caliper/prompts.yaml": "instructions", "Caliper/runtime/manifest.json": fmt.Sprintf(`{"format":1,"platform":%q}`, testPlatform)}
-	for _, name := range []string{"lib/libkuzu.dylib", "lib/libkuzu.so", "kuzu_shared.dll", "msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll", "bin/rg.exe", "runtime/decision/python.exe", "runtime/decision/msvcp140.dll", "bin/rg", "runtime/decision/bin/python3", "runtime/worker/bin/python3", "runtime/decision/requirements.lock"} {
+	for _, name := range []string{"lib/libkuzu.dylib", "lib/libkuzu.so", "kuzu_shared.dll", "ensure-windows-runtime.ps1", "bin/rg.exe", "runtime/decision/python.exe", "bin/rg", "runtime/decision/bin/python3", "runtime/worker/bin/python3", "runtime/decision/requirements.lock"} {
 		files["Caliper/"+name] = "component"
 	}
+	files["Caliper/ensure-windows-runtime.ps1"] = "exit 0\n"
 	var inventory strings.Builder
 	for n, v := range files {
 		fmt.Fprintf(&inventory, "%x  ./%s\n", sha256.Sum256([]byte(v)), strings.TrimPrefix(n, "Caliper/"))
@@ -223,7 +224,7 @@ func TestPreparedReleaseReuseDoesNotDownload(t *testing.T) {
 	}
 }
 
-func TestWindowsBundleRequiresAppLocalVCRuntime(t *testing.T) {
+func TestWindowsBundleRequiresSystemRuntimeHelper(t *testing.T) {
 	root := t.TempDir()
 	if err := extract(bytes.NewReader(fixture(t)), root); err != nil {
 		t.Fatal(err)
@@ -235,16 +236,87 @@ func TestWindowsBundleRequiresAppLocalVCRuntime(t *testing.T) {
 	if err := validate(app, "windows-amd64"); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll", "runtime/decision/msvcp140.dll"} {
+	for _, name := range []string{"ensure-windows-runtime.ps1"} {
 		path := filepath.Join(app, name)
 		if err := os.Rename(path, path+".absent"); err != nil {
 			t.Fatal(err)
 		}
 		if err := validate(app, "windows-amd64"); err == nil || !strings.Contains(err.Error(), filepath.FromSlash(name)) {
-			t.Fatalf("missing app-local %s must refuse: %v", name, err)
+			t.Fatalf("missing prerequisite helper %s must refuse: %v", name, err)
 		}
 		if err := os.Rename(path+".absent", path); err != nil {
 			t.Fatal(err)
+		}
+	}
+}
+
+func TestWindowsPrerequisiteFailurePreservesSelection(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("actual Windows PowerShell invocation")
+	}
+	m, r := server(t, fixture(t), false)
+	selected, err := m.Prepare(context.Background(), r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior := []byte("previous selection")
+	os.WriteFile(filepath.Join(m.Home, "current.json"), prior, 0600)
+	if err := os.WriteFile(filepath.Join(selected.Root, "ensure-windows-runtime.ps1"), []byte("exit 3010\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Activate(selected); err == nil || !strings.Contains(err.Error(), "prerequisite") {
+		t.Fatalf("failure accepted: %v", err)
+	}
+	got, _ := os.ReadFile(filepath.Join(m.Home, "current.json"))
+	if !bytes.Equal(got, prior) {
+		t.Fatal("selection changed after failed prerequisite")
+	}
+}
+
+func TestLegacyWindowsSelectionNeedsInventoriedRuntime(t *testing.T) {
+	root := t.TempDir()
+	if err := extract(bytes.NewReader(fixture(t)), root); err != nil {
+		t.Fatal(err)
+	}
+	app := filepath.Join(root, "Caliper")
+	os.Remove(filepath.Join(app, "ensure-windows-runtime.ps1"))
+	os.WriteFile(filepath.Join(app, "runtime/manifest.json"), []byte(`{"format":1,"platform":"windows-amd64"}`), 0600)
+	var extra strings.Builder
+	for _, name := range []string{"msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll", "runtime/decision/msvcp140.dll"} {
+		data := []byte("legacy CRT")
+		os.WriteFile(filepath.Join(app, name), data, 0600)
+		fmt.Fprintf(&extra, "%x  ./%s\n", sha256.Sum256(data), name)
+	}
+	f, err := os.OpenFile(filepath.Join(app, "MANIFEST.sha256"), os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString(extra.String())
+	f.Close()
+	inventory, err := os.ReadFile(filepath.Join(app, "MANIFEST.sha256"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ending := range []string{"\n", "\r\n"} {
+		for _, finalNewline := range []bool{true, false} {
+			layout := strings.ReplaceAll(strings.TrimSuffix(string(inventory), "\n"), "\n", ending)
+			if finalNewline {
+				layout += ending
+			}
+			if err := os.WriteFile(filepath.Join(app, "MANIFEST.sha256"), []byte(layout), 0600); err != nil {
+				t.Fatal(err)
+			}
+			os.WriteFile(filepath.Join(app, "msvcp140.dll"), []byte("legacy CRT"), 0600)
+			if err := validate(app, "windows-amd64", true); err != nil {
+				t.Fatalf("ending=%q final=%v: %v", ending, finalNewline, err)
+			}
+			if err := validate(app, "windows-amd64"); err == nil {
+				t.Fatal("new release accepted without helper")
+			}
+			os.WriteFile(filepath.Join(app, "msvcp140.dll"), []byte("changed"), 0600)
+			if err := validate(app, "windows-amd64", true); err == nil {
+				t.Fatal("legacy selection accepted modified DLL")
+			}
 		}
 	}
 }

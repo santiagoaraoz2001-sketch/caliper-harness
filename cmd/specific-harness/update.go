@@ -32,6 +32,10 @@ func launchSelectedVersion() (bool, int) {
 	if filepath.Clean(exe) == filepath.Clean(selected.Executable()) {
 		return false, 0
 	}
+	if err := selected.EnsurePrerequisites(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return true, 1
+	}
 	code, err := runSelected(*selected)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Cannot launch staged Caliper:", err)

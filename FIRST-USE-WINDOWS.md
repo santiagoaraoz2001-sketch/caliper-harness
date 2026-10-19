@@ -1,8 +1,8 @@
 # Caliper Harness: first use on Windows
 
-This application folder is a development build. The managed builder requires a relocation import check before completion. No native Windows application or installer qualification was performed in the Mac review; native linking, DLL dependencies, terminal behavior and model operations remain unverified.
+This application folder includes Caliper and its private Python dependencies. Release checks exercise native application loading, installation, package imports and relocation. Model inference and GPU compatibility depend on the server and hardware you select.
 
-Keep the folder intact: `caliper.exe`, any `*.dll` beside it, `bin\`, `runtime\`, `prompts.yaml`, `templates\`, `python\`, `notices\` and `MANIFEST.sha256` belong together. Verify the supplied files in PowerShell from that folder with `Get-Content .\MANIFEST.sha256 | ForEach-Object { $h, $p = $_ -split '  '; (Get-FileHash -Algorithm SHA256 $p).Hash.ToLower() -eq $h }`. Go and a C compiler are builder tools; they are not needed to run the supplied executable. In the managed bundle this verification is also automatic: every startup re-hashes all files against `MANIFEST.sha256`, and if only downloadable dependencies (the private Python runtime or bundled ripgrep) are missing or changed, Caliper warns, names them, and asks a yes/no question before downloading the pinned replacements and re-verifying. Answering no (or pressing Enter) refuses the launch; damage to anything else still requires replacing the complete folder.
+Keep the folder intact: `caliper.exe`, any `*.dll` beside it, `bin\`, `runtime\`, `prompts.yaml`, `templates\`, `python\`, `notices\` and `MANIFEST.sha256`, `ensure-windows-runtime.ps1` and the launcher scripts belong together. Verify the supplied files in PowerShell from that folder with `Get-Content .\MANIFEST.sha256 | ForEach-Object { $h, $p = $_ -split '  '; (Get-FileHash -Algorithm SHA256 $p).Hash.ToLower() -eq $h }`. Go and a C compiler are builder tools; they are not needed to run the supplied executable. In the managed bundle this verification is also automatic: every startup re-hashes all files against `MANIFEST.sha256`, and if only downloadable dependencies (the private Python runtime or bundled ripgrep) are missing or changed, Caliper warns, names them, and asks a yes/no question before downloading the pinned replacements and re-verifying. Answering no (or pressing Enter) refuses the launch; damage to anything else still requires replacing the complete folder.
 
 ## Install so `caliper` works in every terminal
 
@@ -16,6 +16,23 @@ From inside the bundle folder, run:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install-windows.ps1
 ```
+
+Before activation, the installer checks the **system Microsoft Visual C++ x64
+Runtime (14.44.35211 or newer)**. A compatible installation is used silently,
+without downloads. If it is missing or outdated, Caliper downloads Microsoft's
+installer directly from Microsoft, checks its Authenticode signature, and opens
+its setup window. Review Microsoft's terms there; Windows may request
+administrator approval. Cancelling or declining leaves the existing Caliper
+installation unchanged. If Microsoft requests a restart, restart Windows and
+run the Caliper installer again. A verification/access error is reported rather
+than treated as a missing runtime. Caliper does not distribute Microsoft runtime
+DLLs or the installer. See [Microsoft's runtime information](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist/).
+
+To run the downloaded folder without installing a terminal command, use
+`powershell -ExecutionPolicy Bypass -File .\start.ps1` from your project, with
+the full path to that script. The launcher performs the prerequisite check
+before loading the native executable; a direct `caliper.exe` invocation cannot
+install its own DLL prerequisites.
 
 This copies the application into a separate folder under `%LOCALAPPDATA%\Caliper\applications` and registers `%LOCALAPPDATA%\Caliper\commands` on your user `PATH`. Open a **new** terminal (cmd, PowerShell or Windows Terminal) and run `caliper`. Re-running the installer selects a new intact copy without moving the user-data directory, replacing active executables or deleting previous versions. `-TargetDirectory C:\path\Caliper` selects another application root; central user data stays in its original location. `-NoPath` leaves PATH management to you. Windows SmartScreen may flag the unsigned development executable on first run; confirm the hash above before allowing it.
 
@@ -31,7 +48,7 @@ ollama pull qwen2.5-coder:7b
 
 Caliper does not download weights and does not switch models on failure. The MLX worker (Apple Silicon only) is unavailable on Windows; the Ollama route covers the same Setup/Status flow. One capability differs: literal continuation of unfinished responses requires the owned MLX worker, so truncated replies on Windows are recorded as failures to continue rather than resumed invisibly.
 
-The self-contained Windows bundle supplies private standalone Python, the pinned decision-sidecar dependencies (both supported adapters and their PyTorch/Transformers dependencies) and ripgrep. Its built-in recipes select those interpreters automatically. Users do not create virtual environments, run pip or install Python for harness dependencies. Nothing changes the system Python or your project environment. Explicit custom recipes retain their original interpreter and environment.
+The Windows bundle supplies private standalone Python, the pinned decision-sidecar dependencies (both supported adapters and their PyTorch/Transformers dependencies) and ripgrep. Its built-in recipes select those interpreters automatically. Users do not create virtual environments, run pip or install Python for harness dependencies. Nothing changes the system Python or your project environment. Explicit custom recipes retain their original interpreter and environment.
 
 ## Configure and run
 
@@ -47,7 +64,7 @@ Use `/help`, `/status`, `/settings` and `/sessions` exactly as on macOS. In Sett
 
 ## Building from source (developers)
 
-Two native Windows amd64 packaging modes are available. Both require Go 1.25+, compatible mingw-w64 GCC/CGO, Bash and cached Go dependencies. Neither build has been executed or qualified on Windows during the Mac review.
+Two native Windows amd64 packaging modes are available. Both require Go 1.25+, compatible mingw-w64 GCC/CGO, Bash and cached Go dependencies. Both require the system Microsoft Visual C++ x64 runtime described above. Build scripts check it without downloading or opening an installer; run `scripts\ensure-windows-runtime.ps1` interactively first if needed.
 
 Offline developer folder (installed ripgrep, system Python for optional decision sidecar; no downloads):
 
@@ -63,4 +80,4 @@ Private runtime candidate (also requires uv, curl.exe and tar.exe):
 powershell -File scripts\bundle-windows-managed.ps1 -Out C:\build\new-managed-folder -AllowDownloads
 ```
 
-This explicit mode downloads the pinned Python/ripgrep archives and hash-locked Python packages. Archive hashes are checked before extraction; dependency synchronization requires hashes. Imports and package origins are checked again after relocation. These checks do not load a model or prove native inference, GPU compatibility, application linking or transitive DLL availability. Both modes refuse an existing output folder and retain incomplete evidence on failure. Do not launch a folder containing `BUILD-INCOMPLETE`.
+This explicit mode downloads the pinned Python/ripgrep archives and hash-locked Python packages. Archive hashes are checked before extraction; dependency synchronization requires hashes. Imports and package origins are checked again after relocation. The build also audits native executable/DLL imports against bundled libraries and the verified system runtime. These checks do not load a model or prove native inference or GPU compatibility. Both modes refuse an existing output folder and retain incomplete evidence on failure. Do not launch a folder containing `BUILD-INCOMPLETE`.

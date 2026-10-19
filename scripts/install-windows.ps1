@@ -1,4 +1,4 @@
-# Install the intact bundle and register `caliper` without administrator rights.
+# Install Caliper per-user. Microsoft prerequisite setup may separately request UAC.
 #Requires -Version 5.1
 param([string]$TargetDirectory = (Join-Path $env:LOCALAPPDATA 'Caliper'), [switch]$NoPath)
 $ErrorActionPreference = 'Stop'
@@ -16,6 +16,10 @@ foreach ($required in @($binary, 'kuzu_shared.dll', 'prompts.yaml')) {
 if ($managed -and -not (Test-Path -LiteralPath (Join-Path $source 'runtime\manifest.json') -PathType Leaf)) {
     throw 'Incomplete managed bundle: runtime\manifest.json is missing.'
 }
+$runtimeCheck = Join-Path $source 'ensure-windows-runtime.ps1'
+if (-not (Test-Path -LiteralPath $runtimeCheck -PathType Leaf)) { throw 'Incomplete bundle: ensure-windows-runtime.ps1 is missing.' }
+& $runtimeCheck
+if ($LASTEXITCODE -ne 0) { throw "Windows runtime prerequisite incomplete (exit $LASTEXITCODE); existing installation unchanged." }
 # TargetDirectory is the application install root, not a replacement for the
 # user's central data directory. They coincide on default Windows installs, so
 # never rename or replace the root: workspaces, settings, current.json, updater
@@ -56,7 +60,7 @@ if ($source.TrimEnd('\') -ine $target.TrimEnd('\')) {
 # Keep the legacy binary/shim untouched. Relative paths also preserve spaces and
 # Unicode user names without embedding them into the CMD file's text encoding.
 New-Item -ItemType Directory -Path $commands -Force | Out-Null
-$shim = "@echo off`r`n$marker`r`nsetlocal EnableExtensions DisableDelayedExpansion`r`nset `"PATH=%~dp0$relativeApp\bin;%PATH%`"`r`n`"%~dp0$relativeApp\$binary`" %*`r`nexit /b %errorlevel%`r`n"
+$shim = "@echo off`r`n$marker`r`nsetlocal EnableExtensions DisableDelayedExpansion`r`nset `"PATH=%~dp0$relativeApp\bin;%PATH%`"`r`n`"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`" -NoProfile -ExecutionPolicy Bypass -File `"%~dp0$relativeApp\ensure-windows-runtime.ps1`"`r`nif errorlevel 1 exit /b %errorlevel%`r`n`"%~dp0$relativeApp\$binary`" %*`r`nexit /b %errorlevel%`r`n"
 $temporaryLauncher = Join-Path $commands ('.caliper-install-' + [guid]::NewGuid().ToString('N'))
 [IO.File]::WriteAllText($temporaryLauncher, $shim, (New-Object System.Text.ASCIIEncoding))
 try {

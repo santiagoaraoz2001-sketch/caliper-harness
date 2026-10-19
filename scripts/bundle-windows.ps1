@@ -7,6 +7,8 @@ if ($env:OS -ne 'Windows_NT' -or $env:PROCESSOR_ARCHITECTURE -ne 'AMD64') {
 foreach ($tool in @('go', 'gcc', 'rg', 'bash')) {
     if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "Installed builder prerequisite missing: $tool" }
 }
+& (Join-Path $PSScriptRoot 'ensure-windows-runtime.ps1') -CheckOnly
+if ($LASTEXITCODE -ne 0) { throw 'Install the Microsoft system runtime before building.' }
 $root = Split-Path -Parent $PSScriptRoot
 $out = [IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath $out) { throw 'Output must not exist; no existing folder is reused.' }
@@ -37,7 +39,7 @@ try {
         Copy-Item -LiteralPath (Join-Path 'python/decision' $file) -Destination (Join-Path $out 'python/decision')
     }
     Copy-Item -LiteralPath 'LICENSE', 'FIRST-USE.md', 'FIRST-USE-WINDOWS.md', 'SERVER-MODELS.md' -Destination $out
-    Copy-Item -LiteralPath 'scripts/install-windows.ps1' -Destination $out
+    Copy-Item -LiteralPath 'scripts/install-windows.ps1', 'scripts/ensure-windows-runtime.ps1' -Destination $out
     # Omit the explicit source-relative template override so config resolves the
     # bundled templates beside the executable when launched from another project.
     $example = [IO.File]::ReadAllText((Join-Path $root 'caliper-harness.yaml.example'))

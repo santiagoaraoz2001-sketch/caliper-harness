@@ -491,11 +491,6 @@ func repairProfile(root, stage, pythonArchive, profile string, note Reporter) er
 	if err := extractPython(pythonArchive, fresh); err != nil {
 		return err
 	}
-	if runtime.GOOS == "windows" {
-		if err := copyWindowsRuntimeDLL(root, fresh); err != nil {
-			return err
-		}
-	}
 	interpreter := interpreterIn(fresh)
 	if _, err := os.Stat(interpreter); err != nil {
 		return fmt.Errorf("standalone Python missing after download: %s", interpreter)
@@ -504,6 +499,11 @@ func repairProfile(root, stage, pythonArchive, profile string, note Reporter) er
 	if err := syncProfilePackages(interpreter, lock, stage); err != nil {
 		return err
 	}
+	if runtime.GOOS == "windows" {
+		if err := normalizeWindowsRuntime(root, fresh); err != nil {
+			return err
+		}
+	}
 	if err := os.WriteFile(filepath.Join(fresh, "requirements.lock"), lockBytes, 0644); err != nil {
 		return err
 	}
@@ -511,15 +511,14 @@ func repairProfile(root, stage, pythonArchive, profile string, note Reporter) er
 	return nil
 }
 
-// The Python archive supplies VCRUNTIME but not the MSVCP140 required by torch.
-// Repair already verified this app-root DLL against the installation inventory;
-// restore the builder's private-interpreter copy before executing that profile.
-func copyWindowsRuntimeDLL(root, fresh string) error {
-	data, err := os.ReadFile(filepath.Join(root, "msvcp140.dll"))
-	if err != nil {
-		return fmt.Errorf("cannot restore private Python msvcp140.dll; replace the complete Caliper folder: %w", err)
+// Reuse the builder's verified normalizer after downloading the private runtime.
+// It repairs mangled PE imports before removing vendored CRT, in staging only.
+func normalizeWindowsRuntime(root, fresh string) error {
+	cmd := exec.Command(interpreterIn(fresh), "-I", filepath.Join(root, "python", "windows", "use_system_runtime.py"), fresh)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("Windows system-runtime normalization failed; installed runtime unchanged: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	return os.WriteFile(filepath.Join(fresh, "msvcp140.dll"), data, 0644)
+	return nil
 }
 
 // regenerateManifest reruns the bundled runtime verifier with the repaired
@@ -630,7 +629,7 @@ func repairAnchorsInventoried(inventory []byte) error {
 	}
 	anchors := []string{"runtime/sources.json", Marker, "python/" + directory + "/verify_runtime.py"}
 	if runtime.GOOS == "windows" {
-		anchors = append(anchors, "msvcp140.dll")
+		anchors = append(anchors, "ensure-windows-runtime.ps1", "python/windows/use_system_runtime.py")
 	}
 	for _, profile := range requiredProfiles() {
 		anchors = append(anchors, "runtime/"+profile+"/requirements.lock")

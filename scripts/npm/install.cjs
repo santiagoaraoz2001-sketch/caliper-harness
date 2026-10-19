@@ -16,10 +16,10 @@ function home() {
   return path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'), 'caliper');
 }
 function executable(root) { return path.join(root, process.platform === 'win32' ? 'caliper.exe' : 'caliper-harness'); }
-function validate(root) {
+function validate(root, allowLegacy = false) {
   if (fs.existsSync(path.join(root, 'BUILD-INCOMPLETE'))) throw new Error('Incomplete application bundle');
   const required = ['prompts.yaml', 'MANIFEST.sha256', 'runtime/decision/requirements.lock'];
-  if (identity.startsWith('windows-')) required.push('kuzu_shared.dll', 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'bin/rg.exe', 'runtime/decision/python.exe', 'runtime/decision/msvcp140.dll');
+  if (identity.startsWith('windows-')) { required.push('kuzu_shared.dll', 'bin/rg.exe', 'runtime/decision/python.exe'); if (!allowLegacy || !legacyWindowsRuntime(root)) required.push('ensure-windows-runtime.ps1'); }
   else { required.push('bin/rg', 'runtime/decision/bin/python3', identity.startsWith('darwin-') ? 'lib/libkuzu.dylib' : 'lib/libkuzu.so'); if (identity.startsWith('darwin-')) required.push('runtime/worker/bin/python3'); }
   for (const name of [executable(root), ...required.map(file => path.join(root, file))]) if (!fs.statSync(name).isFile()) throw new Error(`Missing product file: ${name}`);
   if (process.platform !== 'win32') { for (const file of [executable(root), ...required.filter(name => name === 'bin/rg' || name.endsWith('/bin/python3')).map(name => path.join(root,name))]) fs.accessSync(file, fs.constants.X_OK); }
@@ -41,7 +41,30 @@ async function verify(root) {
   }
 }
 async function get(url) { const r = await fetch(url); if (!r.ok) { const error = new Error(`${url}: HTTP ${r.status}`); error.status = r.status; throw error; } return r; }
+function legacyWindowsRuntime(root) {
+  try {
+    const inventory = '\n' + fs.readFileSync(path.join(root, 'MANIFEST.sha256'), 'utf8').replace(/\r\n/g, '\n').replace(/\n$/, '') + '\n';
+    return ['msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'runtime/decision/msvcp140.dll'].every(name => {
+      const file = fs.realpathSync(path.join(root, name)), rel = path.relative(fs.realpathSync(root), file);
+      if (rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) return false;
+      const hash = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+      return inventory.includes(`\n${hash}  ./${name}\n`);
+    });
+  } catch { return false; }
+}
+async function ensurePrerequisites(root) {
+  if (process.platform !== 'win32') return;
+  const helper = path.join(root, 'ensure-windows-runtime.ps1');
+  if (!fs.existsSync(helper) && legacyWindowsRuntime(root)) return;
+  if (!process.env.SystemRoot) throw new Error('SystemRoot unavailable; cannot check Windows runtime');
+  await new Promise((resolve, reject) => {
+    const child = spawn(path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', helper], {stdio: 'inherit', windowsHide: false});
+    child.on('error', reject);
+    child.on('exit', code => code === 0 ? resolve() : reject(new Error(`Windows runtime prerequisite failed (${code}); previous selection preserved. Finish any requested restart before retrying.`)));
+  });
+}
 async function activateNative(root) {
+  await ensurePrerequisites(root);
   const env = { ...process.env, PATH: path.join(root,'bin') + path.delimiter + (process.env.PATH || '') };
   if (process.platform === 'linux') env.LD_LIBRARY_PATH = path.join(root,'lib') + (process.env.LD_LIBRARY_PATH ? path.delimiter + process.env.LD_LIBRARY_PATH : '');
   await new Promise((resolve,reject) => {
@@ -96,4 +119,4 @@ async function install(base = home(), download = get, activate = activateNative)
   } finally { fs.rmSync(stage, { recursive: true, force: true }); }
 }
 if (require.main === module) install().then(root => console.log(`Caliper ${version} installed: ${root}\nRun caliper from your project directory.`)).catch(error => { console.error(`Caliper installation failed: ${error.message}`); process.exitCode = 1; });
-module.exports = { home, executable, validate, install, identity, version };
+module.exports = { home, executable, validate, install, identity, version, ensurePrerequisites, activateNative };

@@ -57,6 +57,12 @@ jobs:
           $env:GOPATH = Join-Path $env:TEMP 'caliper-go-path'
           $env:GOCACHE = Join-Path $env:TEMP 'caliper-go-build-cache'
           $env:GOTOOLCHAIN = 'local'
+          ./scripts/test-windows-runtime.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows runtime prerequisite tests failed' }
+          & "$env:pythonLocation\python.exe" -m unittest discover -s python/windows -p 'test_*.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'Windows runtime normalization/import audit tests failed' }
+          ./scripts/ensure-windows-runtime.ps1 -CheckOnly
+          if ($LASTEXITCODE -ne 0) { throw 'Windows builder requires the Microsoft system runtime; no unattended GUI installation attempted' }
           go mod download
           if ($LASTEXITCODE -ne 0) { throw 'module acquisition failed' }
           $kuzu = (& go list -m -f '{{.Dir}}' github.com/kuzudb/go-kuzu).Trim()

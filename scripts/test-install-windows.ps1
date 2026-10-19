@@ -3,6 +3,8 @@
 #Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'These installer tests require Windows.' }
+& (Join-Path $PSScriptRoot 'ensure-windows-runtime.ps1') -CheckOnly
+if ($LASTEXITCODE -ne 0) { throw 'Install the system runtime before running installer fixtures; tests never install prerequisites.' }
 $installer = Join-Path $PSScriptRoot 'install-windows.ps1'
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ('caliper-installer-test-' + [guid]::NewGuid().ToString('N'))
 $originalLocalAppData = $env:LOCALAPPDATA
@@ -19,6 +21,7 @@ function Write-FixtureFile([string]$path, [string]$text) {
 function New-FixtureBundle([string]$path, [bool]$managed = $true) {
     New-Item -ItemType Directory -Path $path -Force | Out-Null
     Copy-Item -LiteralPath $installer -Destination (Join-Path $path 'install-windows.ps1')
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'ensure-windows-runtime.ps1') -Destination $path
     $name = if ($managed) { 'caliper.exe' } else { 'caliper-harness.exe' }
     Copy-Item -LiteralPath $env:ComSpec -Destination (Join-Path $path $name)
     Write-FixtureFile (Join-Path $path 'kuzu_shared.dll') 'inert DLL fixture'
@@ -65,6 +68,16 @@ try {
     Assert ($LASTEXITCODE -eq 7) 'launcher lost child exit code'
     Set-Location $originalLocation
     $activeLauncher = [IO.File]::ReadAllText($launcher)
+    # A failed prerequisite must never activate a candidate or change work.
+    $sourceCheck = Join-Path $source 'ensure-windows-runtime.ps1'
+    [IO.File]::WriteAllText($sourceCheck, 'exit 1')
+    $beforeCopies = @(Get-ChildItem (Join-Path $target 'applications') -Directory).Count
+    $refused = $false
+    try { & (Join-Path $source 'install-windows.ps1') -NoPath } catch { $refused = $true }
+    Assert $refused 'failed runtime prerequisite was ignored'
+    Assert ([IO.File]::ReadAllText($launcher) -eq $activeLauncher) 'runtime failure changed active launcher'
+    Assert (@(Get-ChildItem (Join-Path $target 'applications') -Directory).Count -eq $beforeCopies) 'runtime failure copied a candidate'
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'ensure-windows-runtime.ps1') -Destination $sourceCheck -Force
     Write-FixtureFile (Join-Path $source 'BUILD-INCOMPLETE') 'incomplete'
     $refused = $false
     try { & (Join-Path $source 'install-windows.ps1') -NoPath } catch { $refused = $true }

@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -154,10 +155,60 @@ func (m Manager) Selected() (*Selection, error) {
 	if !validVersion(s.Version) || s.Platform != m.Platform || filepath.Clean(s.Root) != expected {
 		return nil, fmt.Errorf("invalid Caliper version selection")
 	}
-	if e = validate(s.Root, s.Platform); e != nil {
+	if e = validate(s.Root, s.Platform, true); e != nil {
 		return nil, e
 	}
 	return &s, nil
+}
+
+// Legacy installed versions retain their inventoried app-local CRT. New releases
+// must carry the system-runtime helper instead; never rewrite old version files.
+func legacyWindowsRuntime(root string) bool {
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return false
+	}
+	inventory, err := os.ReadFile(filepath.Join(root, "MANIFEST.sha256"))
+	if err != nil {
+		return false
+	}
+	lines := "\n" + strings.TrimSuffix(strings.ReplaceAll(string(inventory), "\r\n", "\n"), "\n") + "\n"
+	for _, name := range []string{"msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll", "runtime/decision/msvcp140.dll"} {
+		file, err := filepath.EvalSymlinks(filepath.Join(root, name))
+		if err != nil || !inside(root, file) {
+			return false
+		}
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return false
+		}
+		if !strings.Contains(lines, fmt.Sprintf("\n%x  ./%s\n", sha256.Sum256(data), name)) {
+			return false
+		}
+	}
+	return true
+}
+
+// EnsurePrerequisites runs before activation and native Windows launch. The
+// installer owns prompts/UAC and reports reboot-required as a nonzero exit.
+func (s Selection) EnsurePrerequisites() error {
+	if runtime.GOOS != "windows" || !strings.HasPrefix(s.Platform, "windows-") {
+		return nil
+	}
+	helper := filepath.Join(s.Root, "ensure-windows-runtime.ps1")
+	if _, err := os.Stat(helper); errors.Is(err, os.ErrNotExist) && legacyWindowsRuntime(s.Root) {
+		return nil
+	}
+	systemRoot := os.Getenv("SystemRoot")
+	if systemRoot == "" {
+		return fmt.Errorf("SystemRoot is unavailable; cannot check Windows runtime")
+	}
+	cmd := exec.Command(filepath.Join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", helper)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("Windows runtime prerequisite failed; previous selection preserved (a requested restart must finish before retrying): %w", err)
+	}
+	return nil
 }
 func (s Selection) Executable() string { return executable(s.Root, s.Platform) }
 func (s Selection) Env(base []string) []string {
@@ -192,14 +243,17 @@ func (s Selection) Env(base []string) []string {
 	}
 	return out
 }
-func validate(root, platform string) error {
+func validate(root, platform string, allowLegacy ...bool) error {
 	if _, e := os.Stat(filepath.Join(root, "BUILD-INCOMPLETE")); e == nil {
 		return fmt.Errorf("incomplete release folder")
 	}
 	required := []string{executable(root, platform), filepath.Join(root, "prompts.yaml"), filepath.Join(root, "runtime", "manifest.json"), filepath.Join(root, "runtime", "decision", "requirements.lock"), filepath.Join(root, "MANIFEST.sha256")}
 	switch {
 	case strings.HasPrefix(platform, "windows-"):
-		required = append(required, filepath.Join(root, "kuzu_shared.dll"), filepath.Join(root, "msvcp140.dll"), filepath.Join(root, "vcruntime140.dll"), filepath.Join(root, "vcruntime140_1.dll"), filepath.Join(root, "bin", "rg.exe"), filepath.Join(root, "runtime", "decision", "python.exe"), filepath.Join(root, "runtime", "decision", "msvcp140.dll"))
+		if len(allowLegacy) == 0 || !allowLegacy[0] || !legacyWindowsRuntime(root) {
+			required = append(required, filepath.Join(root, "ensure-windows-runtime.ps1"))
+		}
+		required = append(required, filepath.Join(root, "kuzu_shared.dll"), filepath.Join(root, "bin", "rg.exe"), filepath.Join(root, "runtime", "decision", "python.exe"))
 	case strings.HasPrefix(platform, "darwin-"):
 		required = append(required, filepath.Join(root, "lib", "libkuzu.dylib"), filepath.Join(root, "bin", "rg"), filepath.Join(root, "runtime", "decision", "bin", "python3"), filepath.Join(root, "runtime", "worker", "bin", "python3"))
 	case strings.HasPrefix(platform, "linux-"):
@@ -355,6 +409,9 @@ func (m Manager) Activate(s *Selection) (*Selection, error) {
 		return nil, fmt.Errorf("invalid activation target")
 	}
 	if e := validate(s.Root, m.Platform); e != nil {
+		return nil, e
+	}
+	if e := s.EnsurePrerequisites(); e != nil {
 		return nil, e
 	}
 	b, _ := json.MarshalIndent(s, "", "  ")

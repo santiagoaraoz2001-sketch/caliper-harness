@@ -8,6 +8,8 @@ $ErrorActionPreference = 'Stop'
 if (-not $AllowDownloads) { throw 'Runtime downloads require -AllowDownloads.' }
 if ($env:OS -ne 'Windows_NT' -or $env:PROCESSOR_ARCHITECTURE -ne 'AMD64') { throw 'Windows x64 builder required' }
 $root = Resolve-Path (Join-Path $PSScriptRoot '..')
+& (Join-Path $PSScriptRoot 'ensure-windows-runtime.ps1') -CheckOnly
+if ($LASTEXITCODE -ne 0) { throw 'Install the Microsoft system runtime before building.' }
 $App = (Resolve-Path -LiteralPath $App).Path
 if (Test-Path (Join-Path $App 'runtime')) { throw 'refusing existing runtime; use a new bundle output' }
 # MSYS2 is on PATH for gcc/Bash. Its GNU tar treats a Windows drive colon
@@ -66,25 +68,10 @@ Get-ChildItem -Recurse $rgStage -Include 'LICENSE*', 'UNLICENSE' | ForEach-Objec
     Copy-Item $_.FullName (Join-Path $App ("notices\ripgrep-" + $_.Name)) -ErrorAction SilentlyContinue
 }
 
-# Kuzu requires the VC runtime beside caliper.exe. The private interpreter's
-# DLLs and a developer machine's System32 do not provide a portable app closure.
-$vcArchive = Join-Path $stage 'vc-runtime.zip'
-Get-Pinned $sources.vc_runtime.url $sources.vc_runtime.sha256 $vcArchive
-$vcStage = Join-Path $stage 'vc-runtime'
-Expand-Archive -LiteralPath $vcArchive -DestinationPath $vcStage
-$vcDirectory = Join-Path $vcStage $sources.vc_runtime.archive_directory
-foreach ($name in 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') {
-    $source = Join-Path $vcDirectory $name
-    if ((Get-FileHash -Algorithm SHA256 -LiteralPath $source).Hash.ToLower() -ne $sources.vc_runtime.files.$name.sha256) {
-        throw "VC runtime file hash mismatch: $name"
-    }
-    Copy-Item -LiteralPath $source -Destination (Join-Path $App $name)
-}
-# PyTorch also imports MSVCP140 from the interpreter's application directory.
-# Python already includes the same pinned VCRUNTIME files; supply its C++ peer.
-Copy-Item -LiteralPath (Join-Path $App 'msvcp140.dll') -Destination (Join-Path $decisionDir 'msvcp140.dll')
-Copy-Item -LiteralPath (Join-Path $root 'python\windows\VC-RUNTIME-NOTICE.txt') -Destination (Join-Path $App 'notices\Microsoft-VC-RUNTIME.txt')
-Copy-Item -LiteralPath (Join-Path $root 'python\windows\VC-RUNTIME-LICENSE.txt') -Destination (Join-Path $App 'notices\Microsoft-VC-RUNTIME-LICENSE.txt')
+# Normalize any wheel-mangled CRT imports before removing vendored copies.
+# This edits only this invocation's owned runtime; Windows supplies the CRT.
+& (Join-Path $decisionDir 'python.exe') -I (Join-Path $App 'python\windows\use_system_runtime.py') $decisionDir
+if ($LASTEXITCODE -ne 0) { throw 'Cannot normalize private runtime to the verified system CRT' }
 
 # Validate actual imports and origins before marking this folder as managed.
 # Poisoned Python environment is ignored.

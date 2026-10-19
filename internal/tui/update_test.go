@@ -17,7 +17,7 @@ func TestPreparedUpdateKeepsNewerExternalSelection(t *testing.T) {
 	platform := runtime.GOOS + "-" + runtime.GOARCH
 	manager := appupdate.Manager{Home: t.TempDir(), Platform: platform}
 	selected := appupdate.Selection{Version: "0.1.4", Platform: platform, Root: filepath.Join(manager.Home, "versions", "0.1.4", platform, "Caliper")}
-	files := []string{"caliper-harness", "caliper.exe", "prompts.yaml", "MANIFEST.sha256", "runtime/decision/requirements.lock", "lib/libkuzu.dylib", "lib/libkuzu.so", "kuzu_shared.dll", "msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll", "bin/rg", "bin/rg.exe", "runtime/decision/bin/python3", "runtime/decision/python.exe", "runtime/decision/msvcp140.dll", "runtime/worker/bin/python3"}
+	files := []string{"caliper-harness", "caliper.exe", "prompts.yaml", "MANIFEST.sha256", "runtime/decision/requirements.lock", "lib/libkuzu.dylib", "lib/libkuzu.so", "kuzu_shared.dll", "ensure-windows-runtime.ps1", "bin/rg", "bin/rg.exe", "runtime/decision/bin/python3", "runtime/decision/python.exe", "runtime/worker/bin/python3"}
 	for _, name := range files {
 		path := filepath.Join(selected.Root, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
@@ -29,6 +29,9 @@ func TestPreparedUpdateKeepsNewerExternalSelection(t *testing.T) {
 	}
 	manifest, _ := json.Marshal(map[string]any{"format": 1, "platform": platform})
 	if err := os.WriteFile(filepath.Join(selected.Root, "runtime/manifest.json"), manifest, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(selected.Root, "ensure-windows-runtime.ps1"), []byte("exit 0\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := manager.Activate(&selected); err != nil {

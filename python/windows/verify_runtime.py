@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -14,7 +15,7 @@ if len(sys.argv) > 2:
     profile = sys.argv[2]
     import importlib
     root = app / 'runtime' / profile
-    names = ('torch', 'transformers', 'laya', 'yaml')
+    names = ('numpy', 'torch', 'transformers', 'laya', 'yaml')
     modules = {}
     for name in names:
         module = importlib.import_module(name)
@@ -41,14 +42,17 @@ else:
     locks = {'decision': hashlib.sha256((app / 'runtime' / 'decision' / 'requirements.lock').read_bytes()).hexdigest()}
     sources_path = app / 'runtime' / 'sources.json'
     sources = json.loads(sources_path.read_text()) if sources_path.exists() else {}
-    for name in ('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll'):
-        actual = hashlib.sha256((app / name).read_bytes()).hexdigest()
-        if actual != sources['vc_runtime']['files'][name]['sha256']:
-            raise RuntimeError(f'app-local VC runtime differs from pinned source: {name}')
-    if hashlib.sha256((app / 'runtime' / 'decision' / 'msvcp140.dll').read_bytes()).hexdigest() != sources['vc_runtime']['files']['msvcp140.dll']['sha256']:
-        raise RuntimeError('private Python C++ runtime differs from pinned source')
+    for file in app.rglob('*.dll'):
+        if re.match(r'(?i)^(?:(?:msvcp|vcruntime|concrt|vcomp|vccorlib)\d.*|ucrtbase)\.dll$', file.name):
+            raise RuntimeError(f'Microsoft runtime must not be bundled: {file}')
+    powershell = Path(os.environ['SystemRoot']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
+    system_runtime = json.loads(subprocess.check_output([
+        str(powershell), '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+        str(app / 'ensure-windows-runtime.ps1'), '-CheckOnly', '-Json'], text=True))
+    if not system_runtime['ready']:
+        raise RuntimeError('System Microsoft runtime did not pass verification')
     if report['python'] != sources['python']['version']:
         raise RuntimeError('private Python version differs from pinned source')
     if not list((app / 'templates').glob('*.tmpl')) or not (app / 'templates' / 'prompts.yaml').is_file():
         raise RuntimeError('bundled templates/prompts missing')
-    print(json.dumps({'format': 1, 'platform': 'windows-amd64', 'python': report['python'], 'sources': sources, 'locks': locks, 'profiles': [report], 'ripgrep': rg}, indent=2))
+    print(json.dumps({'format': 1, 'platform': 'windows-amd64', 'python': report['python'], 'sources': sources, 'locks': locks, 'profiles': [report], 'ripgrep': rg, 'system_vc_runtime': system_runtime}, indent=2))

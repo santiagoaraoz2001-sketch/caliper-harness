@@ -9,14 +9,15 @@ const tar = require('tar');
 const { spawnSync } = require('node:child_process');
 const app = require('./install.cjs');
 const fixtureActivate = async (root, version, base) => fs.writeFileSync(path.join(base,'current.json'),JSON.stringify({root,version,platform:app.identity}));
-async function fixture(t) {
+async function fixture(t, platform = app.identity) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'caliper-npm-test-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const root = path.join(dir, 'source', 'Caliper'); fs.mkdirSync(path.join(root, 'runtime'), { recursive: true });
   fs.writeFileSync(path.join(root, 'prompts.yaml'), 'original instructions');
-  fs.writeFileSync(path.join(root, 'runtime', 'manifest.json'), JSON.stringify({ format: 1, platform: app.identity }));
+  fs.writeFileSync(path.join(root, 'runtime', 'manifest.json'), JSON.stringify({ format: 1, platform }));
   fs.writeFileSync(app.executable(root), '#!/bin/sh\nprintf "cwd=%s\\narg=%s\\n" "$PWD" "$1"\nexit 7\n', { mode: 0o755 });
-  for (const name of ['MANIFEST.sha256', 'runtime/decision/requirements.lock', 'bin/rg', 'bin/rg.exe', 'runtime/decision/bin/python3', 'runtime/worker/bin/python3', 'runtime/decision/python.exe', 'runtime/decision/msvcp140.dll', 'kuzu_shared.dll', 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'lib/libkuzu.dylib', 'lib/libkuzu.so']) { const file = path.join(root, name); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, 'fixture component', { mode: 0o755 }); }
+  for (const name of ['MANIFEST.sha256', 'runtime/decision/requirements.lock', 'bin/rg', 'bin/rg.exe', 'runtime/decision/bin/python3', 'runtime/worker/bin/python3', 'runtime/decision/python.exe', 'kuzu_shared.dll', 'ensure-windows-runtime.ps1', 'lib/libkuzu.dylib', 'lib/libkuzu.so']) { const file = path.join(root, name); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, 'fixture component', { mode: 0o755 }); }
+  if (platform.startsWith("windows-")) fs.writeFileSync(path.join(root,"caliper.exe"),"binary fixture");
   const inventory = [];
   function walk(dir) { for (const item of fs.readdirSync(dir, { withFileTypes: true })) { const file = path.join(dir, item.name); if (item.isDirectory()) walk(file); else if (item.name !== 'MANIFEST.sha256') inventory.push(`${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}  ./${path.relative(root, file).split(path.sep).join('/')}`); } }
   walk(root); fs.writeFileSync(path.join(root, 'MANIFEST.sha256'), inventory.join('\n') + '\n');
@@ -68,18 +69,78 @@ test('nonexecutable installed commands cannot be activated on Unix', { skip: pro
   await assert.rejects(app.install(home,f.download,fixtureActivate),/EACCES/);
   assert.equal(fs.readFileSync(path.join(home,'current.json'),'utf8'),prior);
 });
-test('Windows selection requires all app-local VC runtime DLLs', async t => {
-  const f=await fixture(t); const root=path.join(f.dir,'source','Caliper');
+function windowsApp(spawn) {
+  const load = name => name === 'node:child_process' ? {spawn} : require(name);
+  const sandbox = {require: load, process: {platform: 'win32', arch: 'x64', env: {...process.env, SystemRoot: 'C:\\Windows'}}, module: {exports: {}}, console};
+  require('node:vm').runInNewContext(fs.readFileSync(path.join(__dirname,'install.cjs'),'utf8'),sandbox);
+  return sandbox.module.exports;
+}
+function simulatedSpawn(codes, calls) {
+  return (file,args,options) => {
+    calls.push({file,args,options});
+    const child = new (require('node:events').EventEmitter)();
+    setImmediate(() => child.emit('exit', codes.shift())); return child;
+  };
+}
+test('Windows bundles require system prerequisite helper instead of bundled VC DLLs', async t => {
+  const f=await fixture(t), root=path.join(f.dir,'source','Caliper');
   fs.writeFileSync(path.join(root,'caliper.exe'),'binary fixture');
   fs.writeFileSync(path.join(root,'runtime','manifest.json'),JSON.stringify({format:1,platform:'windows-amd64'}));
-  // Exercise the Windows validation branch on every host without executing a
-  // foreign binary; the native release proof separately launches the real exe.
-  const sandbox={require,process:{platform:'win32',arch:'x64'},module:{exports:{}},console};
-  require('node:vm').runInNewContext(fs.readFileSync(path.join(__dirname,'install.cjs'),'utf8'),sandbox);
-  const validate=sandbox.module.exports.validate;validate(root);
-  for(const name of ['msvcp140.dll','vcruntime140.dll','vcruntime140_1.dll','runtime/decision/msvcp140.dll']) {
-    const file=path.join(root,name);fs.renameSync(file,file+'.absent');
-    assert.throws(()=>validate(root),new RegExp(path.basename(name).replaceAll('.','\\.')));
-    fs.renameSync(file+'.absent',file);
+  const win = windowsApp(() => {throw Error('validation must not execute')});
+  win.validate(root);
+  fs.rmSync(path.join(root,'ensure-windows-runtime.ps1'));
+  assert.throws(()=>win.validate(root), /ensure-windows-runtime/);
+  assert.throws(()=>win.validate(root,true), /ensure-windows-runtime/);
+});
+test('Windows prerequisite failure during real install preserves previous selection', async t => {
+  const f=await fixture(t,'windows-amd64');
+  for(const failure of [1,3010]) {
+    const base=path.join(f.dir,`failed-${failure}`); fs.mkdirSync(base);
+    const receipt=path.join(base,'current.json'); fs.writeFileSync(receipt,'previous selection');
+    const calls=[], win=windowsApp(simulatedSpawn([failure],calls));
+    await assert.rejects(win.install(base,f.download), /prerequisite failed/);
+    assert.equal(calls.length,1); assert.match(calls[0].file,/System32.*powershell.exe$/);
+    assert.equal(calls[0].args.at(-1),path.join(base,'versions',app.version,'windows-amd64','Caliper','ensure-windows-runtime.ps1'));
+    assert.equal(calls[0].options.cwd,undefined); assert.equal(calls[0].options.stdio,'inherit');
+    assert.equal(fs.readFileSync(receipt,'utf8'),'previous selection');
   }
+  const calls=[], win=windowsApp(simulatedSpawn([0,0],calls));
+  await win.activateNative(path.join(f.dir,'source','Caliper'));
+  assert.equal(calls.length,2); assert.match(calls[1].file,/caliper.exe$/);
+  assert.deepEqual(Array.from(calls[1].args),['install-activate']);
+});
+test('legacy Windows selection requires inventoried matching app-local DLLs', async t => {
+  const f=await fixture(t), root=path.join(f.dir,'source','Caliper');
+  fs.writeFileSync(path.join(root,'caliper.exe'),'binary fixture');
+  fs.writeFileSync(path.join(root,'runtime','manifest.json'),JSON.stringify({format:1,platform:'windows-amd64'}));
+  fs.rmSync(path.join(root,'ensure-windows-runtime.ps1'));
+  const names=['msvcp140.dll','vcruntime140.dll','vcruntime140_1.dll','runtime/decision/msvcp140.dll'];
+  for(const name of names) {
+    fs.writeFileSync(path.join(root,name),'original legacy DLL');
+    fs.appendFileSync(path.join(root,'MANIFEST.sha256'),`${crypto.createHash('sha256').update('original legacy DLL').digest('hex')}  ./${name}\n`);
+  }
+  const win=windowsApp(()=>{throw Error('legacy app-local runtime needs no system install')});
+  const inventory=fs.readFileSync(path.join(root,'MANIFEST.sha256'),'utf8');
+  for(const ending of ['\n','\r\n']) for(const finalNewline of [true,false]) {
+    const layout=inventory.replace(/\n$/,'').replace(/\n/g,ending)+(finalNewline?ending:'');
+    fs.writeFileSync(path.join(root,'MANIFEST.sha256'),layout);
+    fs.writeFileSync(path.join(root,names[0]),'original legacy DLL');
+    win.validate(root,true); await win.ensurePrerequisites(root);
+    assert.throws(()=>win.validate(root),/ensure-windows-runtime/);
+    fs.writeFileSync(path.join(root,names[0]),'tampered');
+    assert.throws(()=>win.validate(root,true),/ensure-windows-runtime/);
+  }
+});
+test('Windows launcher invokes prerequisite before the binary and does not forward user arguments to installer', async t => {
+  const f=await fixture(t), root=path.join(f.dir,'source','Caliper'), calls=[];
+  const base=path.dirname(root), selected={version:'0.1.2',platform:'windows-amd64',root};
+  const wrapper={home:()=>base, identity:selected.platform, validate:()=>calls.push('validate'), ensurePrerequisites:async()=>calls.push('prerequisite'), executable:()=>path.join(root,'caliper.exe')};
+  // Use a real selection path, with fs intercepted only for the receipt.
+  selected.root=path.join(base,'versions',selected.version,selected.platform,'Caliper');
+  const load=name=> name==='./install.cjs'?wrapper:name==='node:fs'?{readFileSync:()=>JSON.stringify(selected)}:name==='node:child_process'?{spawn:(file,args,options)=>{calls.push({file,args,options});return new (require('node:events').EventEmitter)();}}:require(name);
+  const processFixture={platform:'win32',env:{},argv:['node','bin','--config','path with spaces.yaml'],on:()=>{}};
+  require('node:vm').runInNewContext(fs.readFileSync(path.join(__dirname,'bin.cjs'),'utf8'),{require:load,process:processFixture,console});
+  await new Promise(setImmediate);
+  assert.equal(calls[0],'validate'); assert.equal(calls[1],'prerequisite');
+  assert.deepEqual(Array.from(calls[2].args),['--config','path with spaces.yaml']); assert.equal(calls[2].options.cwd,undefined);
 });

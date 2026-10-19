@@ -12,6 +12,8 @@ $Out = [System.IO.Path]::GetFullPath($Out)
 if (Test-Path -LiteralPath $Out) { throw 'Output must not exist.' }
 New-Item -ItemType Directory -Path $Out | Out-Null
 Set-Content -LiteralPath (Join-Path $Out 'BUILD-INCOMPLETE') -Value 'Incomplete build; do not launch.'
+& (Join-Path $PSScriptRoot 'ensure-windows-runtime.ps1') -CheckOnly
+if ($LASTEXITCODE -ne 0) { throw 'Install the Microsoft system runtime before building.' }
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Push-Location $root
 try {
@@ -56,7 +58,9 @@ Copy-Item 'internal\prompts\prompts.yaml' (Join-Path $Out 'prompts.yaml')
 foreach ($name in 'server.py', 'backends.py', 'mps_attention.py', 'prompts.py', 'requirements.txt', 'requirements-system-one.txt') {
     Copy-Item (Join-Path $root "python\decision\$name") (Join-Path $Out 'python\decision')
 }
+Copy-Item (Join-Path $root 'scripts\ensure-windows-runtime.ps1') $Out
 Copy-Item (Join-Path $root 'python\windows\verify_runtime.py') (Join-Path $Out 'python\windows')
+Copy-Item (Join-Path $root 'python\windows\use_system_runtime.py') (Join-Path $Out 'python\windows')
 & (Join-Path $root 'scripts\prepare-windows-runtime.ps1') -App $Out -AllowDownloads
 # Inspect the real cgo executable and every app-local imported DLL. A hosted
 # runner may have VC/MinGW runtimes installed, so a launch alone is insufficient.
@@ -79,6 +83,7 @@ Copy-Item (Join-Path $root 'internal\tui\thirdparty\textarea\LICENSE') (Join-Pat
 Copy-Item (Join-Path $root 'FIRST-USE-WINDOWS.md') $Out
 Copy-Item (Join-Path $root 'SERVER-MODELS.md') $Out
 Copy-Item (Join-Path $root 'scripts\install-windows.ps1') $Out
+Copy-Item (Join-Path $root 'scripts\start-windows.ps1') (Join-Path $Out 'start.ps1')
 $goroot = (& go env GOROOT).Trim()
 Copy-Item (Join-Path $goroot 'LICENSE') (Join-Path $Out 'notices\Go-LICENSE')
 & go version -m (Join-Path $Out 'caliper.exe') | Out-File -Encoding utf8 (Join-Path $Out 'notices\DEPENDENCIES.txt')

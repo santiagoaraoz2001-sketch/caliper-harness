@@ -10,7 +10,8 @@ const app = require('./install.cjs');
   try { selected = JSON.parse(fs.readFileSync(path.join(base, 'current.json'), 'utf8')); }
   catch (error) { if (error.code !== 'ENOENT') throw error; await app.install(); selected = JSON.parse(fs.readFileSync(path.join(base, 'current.json'), 'utf8')); }
   if (!/^\d+\.\d+\.\d+$/.test(selected.version) || selected.platform !== app.identity || selected.root !== path.join(base, 'versions', selected.version, app.identity, 'Caliper')) throw new Error('Invalid installed version selection');
-  app.validate(selected.root);
+  app.validate(selected.root, true);
+  await app.ensurePrerequisites(selected.root);
   const env = { ...process.env, PATH: path.join(selected.root, 'bin') + path.delimiter + (process.env.PATH || '') };
   if (process.platform === 'linux') env.LD_LIBRARY_PATH = path.join(selected.root, 'lib') + (process.env.LD_LIBRARY_PATH ? path.delimiter + process.env.LD_LIBRARY_PATH : '');
   const child = spawn(app.executable(selected.root), process.argv.slice(2), { env, stdio: 'inherit', windowsHide: false });
