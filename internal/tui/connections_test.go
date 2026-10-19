@@ -166,7 +166,7 @@ func TestChangingJudgeKeepsOldOwnedSidecarVisible(t *testing.T) {
 	}
 }
 
-func TestCustomNativeJudgeRecipeWinsAndEmptyKnownRecipeResolves(t *testing.T) {
+func TestCustomNativeJudgeRecipeWinsAndExplicitPresetResolves(t *testing.T) {
 	t.Chdir("../..")
 	m := settingsModel(t)
 	m.Cfg.Serve.Recipes = []config.RecipeConfig{{Name: "custom-d1", Kind: serve.KindSidecar, URL: m.Cfg.Decision.Server, Argv: []string{"custom-judge", "--model", "{model}"}}}
@@ -176,6 +176,10 @@ func TestCustomNativeJudgeRecipeWinsAndEmptyKnownRecipeResolves(t *testing.T) {
 		t.Fatal("explicit native argv ignored", rec)
 	}
 	m.Cfg.Serve.Recipes[0].Argv = nil
+	if rec := m.recipeFor(&row); rec == nil || len(rec.Argv) != 0 {
+		t.Fatal("blank launcher must remain external", rec)
+	}
+	m.Cfg.Serve.Recipes[0].Launcher = "preset"
 	for _, rec := range m.serveRecipes() {
 		if rec.Name == "custom-d1" {
 			if len(rec.Argv) == 0 {
