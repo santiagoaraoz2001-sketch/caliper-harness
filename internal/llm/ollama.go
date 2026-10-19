@@ -103,7 +103,11 @@ func (c *Client) chatOllama(ctx context.Context, msgs []Message, stream bool, on
 		}
 	}()
 	done := false
+	var framingErr *ToolFramingError
 	consume := func(chunk ollamaResponse) error {
+		if framingErr != nil {
+			return fmt.Errorf("native server sent data after failed tool boundary; reply is partial")
+		}
 		if done {
 			if msg, refused := errorMessage(chunk.Error); refused {
 				return fmt.Errorf("native server refused after done: %s; reply is partial", msg)
@@ -145,6 +149,11 @@ func (c *Client) chatOllama(ctx context.Context, msgs []Message, stream bool, on
 			onDelta(chunk.Message.Content)
 		}
 		if msg, refused := errorMessage(chunk.Error); refused {
+			if candidate := toolFramingError(chunk.Error); candidate != nil && capture != nil && len(tools) > 0 &&
+				candidate.CallIndex == len(capture.Message.ToolCalls) && (chunk.DoneReason == "" || chunk.DoneReason == "stop") {
+				framingErr = candidate
+				return nil // A settled failure is repairable only after a clean transfer.
+			}
 			return fmt.Errorf("native model server refused the request: %s; reply is partial", msg)
 		}
 		if chunk.Done {
@@ -211,6 +220,15 @@ func (c *Client) chatOllama(ctx context.Context, msgs []Message, stream bool, on
 		if consumeErr != nil {
 			return "", served, usage, consumeErr
 		}
+	}
+	if framingErr != nil {
+		if cause := context.Cause(ctx); cause != nil {
+			return "", served, usage, cause
+		}
+		if err := assignNativeIDs(capture.Message.ToolCalls); err != nil {
+			return "", served, usage, err
+		}
+		return "", served, usage, framingErr
 	}
 	if !done {
 		return "", served, usage, fmt.Errorf("native reply ended before done; reply is incomplete")

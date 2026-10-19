@@ -9,6 +9,9 @@ import "strings"
 func (r *Registry) ReconstructCall(raw string) (Definition, Args, string, bool) {
 	refuse := func() (Definition, Args, string, bool) { return Definition{}, nil, "", false }
 	s := strings.TrimSpace(raw)
+	if strings.HasPrefix(strings.TrimSpace(strings.TrimPrefix(s, "<tool_call>")), "<function=") {
+		return r.reconstructQwen(s)
+	}
 	wrapped := strings.HasPrefix(s, "<tool_call>")
 	if wrapped {
 		s = strings.TrimPrefix(s, "<tool_call>")
@@ -77,4 +80,59 @@ func (r *Registry) ReconstructCall(raw string) (Definition, Args, string, bool) 
 		return refuse()
 	}
 	return d, args, "reconstruct complete scalar arguments using the current tool schema", true
+}
+
+// reconstructQwen accepts complete authored parameter spans, even when the
+// settled generation omitted the outer closing tags. It never fills a value
+// or resolves duplicate fields; those need correction by the worker.
+func (r *Registry) reconstructQwen(raw string) (Definition, Args, string, bool) {
+	refuse := func() (Definition, Args, string, bool) { return Definition{}, nil, "", false }
+	s := strings.TrimSpace(strings.TrimPrefix(raw, "<tool_call>"))
+	s = strings.TrimSpace(strings.TrimSuffix(s, "</tool_call>"))
+	s = strings.TrimSpace(strings.TrimSuffix(s, "</function>"))
+	name, body, ok := strings.Cut(strings.TrimPrefix(s, "<function="), ">")
+	if !ok {
+		return refuse()
+	}
+	d, ok := r.ResolveName(name)
+	if !ok {
+		return refuse()
+	}
+	slots := map[string]string{}
+	for body = strings.TrimSpace(body); body != ""; body = strings.TrimSpace(body) {
+		if !strings.HasPrefix(body, "<parameter=") {
+			return refuse()
+		}
+		key, rest, ok := strings.Cut(strings.TrimPrefix(body, "<parameter="), ">")
+		if !ok {
+			return refuse()
+		}
+		key = ArgumentName(d, key)
+		if !d.hasParam(key) {
+			return refuse()
+		}
+		if _, exists := slots[key]; exists {
+			return refuse()
+		}
+		value, rest, ok := strings.Cut(rest, "</parameter>")
+		if !ok {
+			return refuse()
+		}
+		// Nested framing is ambiguous, not a basis for guessing argument ends.
+		for _, marker := range []string{"<parameter=", "<function=", "</function>", "<tool_call>", "</tool_call>"} {
+			if strings.Contains(value, marker) {
+				return refuse()
+			}
+		}
+		// Qwen treats one LF at either boundary as parameter framing.
+		// Match both native runtimes; retain additional whitespace verbatim.
+		value = strings.TrimPrefix(value, "\n")
+		value = strings.TrimSuffix(value, "\n")
+		slots[key], body = value, rest
+	}
+	args, gap := Validate(d, slots)
+	if gap != "" {
+		return refuse()
+	}
+	return d, args, "reconstruct complete Qwen parameter spans using the current tool schema", true
 }

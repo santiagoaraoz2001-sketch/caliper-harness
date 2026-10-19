@@ -49,6 +49,24 @@ def parsed_native_calls(parser, text, tools):
             parsed = parser(json.dumps(item, ensure_ascii=False), tools)
             result.extend(parsed if isinstance(parsed, list) else [parsed])
         return result
+    if (getattr(parser, "__module__", "").rsplit(".", 1)[-1] == "qwen3_coder"
+            or stripped.startswith("<function=")):
+        # Qwen's native regex parser can skip unfinished fields and overwrite
+        # repeated names. Account for every field before giving it the draft;
+        # any reconciliation belongs to the existing explicit recovery path.
+        function = re.fullmatch(r"<function=[^\s<>]+>(.*)</function>", stripped, re.DOTALL)
+        if function is None:
+            raise ValueError("unfinished native function framing; entire payload refused")
+        tail, names = function.group(1).strip(), set()
+        field = re.compile(r"<parameter=([^\s<>]+)>(.*?)</parameter>", re.DOTALL)
+        while tail:
+            match = field.match(tail)
+            if match is None:
+                raise ValueError("unfinished native parameter framing; entire payload refused")
+            if match.group(1) in names:
+                raise ValueError("duplicate native parameter key")
+            names.add(match.group(1))
+            tail = tail[match.end():].strip()
     if getattr(parser, "__module__", "").rsplit(".", 1)[-1] in ("glm47", "laguna") and "<arg_key>" in stripped:
         # An empty arg_key tag with no paired arg_value carries no data at
         # all; Laguna emits it as framing noise around zero-argument calls.
@@ -272,6 +290,12 @@ def install_continuation_hooks(native):
                     state.raw.append(item.text)
                 content, reasoning, calls = state.feed(item.text)
                 if item.finish_reason == "stop":
+                    # A possible closing marker is still generated tool text
+                    # when EOS interrupts it. Keep it in the failed draft;
+                    # discarding it can even turn incomplete framing into an
+                    # apparently valid call before the recovery owner sees it.
+                    if state.previous == "tool":
+                        state.tool_text += state.state[3]
                     state.state, _ = native.TextStateMachine.discard(state.state)
                     if state.previous == "tool" and state.tool_text:
                         calls.extend(state.calls(boundary="stop"))

@@ -71,3 +71,35 @@ func TestReconstructRejectsAmbiguousIncompleteOrUnavailableCalls(t *testing.T) {
 		t.Fatal("hidden tool was reconstructed")
 	}
 }
+
+func TestReconstructQwenCompleteValuesOnly(t *testing.T) {
+	r := NewRegistry()
+	r.Register(Definition{Name: "read", Params: []Param{{Name: "path", Type: TypeString, Required: true}}})
+	for _, suffix := range []string{"", "</function>", "</function></tool_call>"} {
+		d, a, why, ok := r.ReconstructCall("<tool_call><function=read><parameter=path>  dir/µ.go\n</parameter>" + suffix)
+		if !ok || d.Name != "read" || a["path"] != "  dir/µ.go" || why == "" {
+			t.Fatalf("%v %v %q", ok, a, why)
+		}
+	}
+	for _, body := range []string{
+		"", "<parameter=path>unfinished", "<parameter=path>x</parameter>extra",
+		"<parameter=path>x</parameter><parameter=path>x</parameter>",
+		"<parameter=path>x</parameter><parameter=path>y</parameter>",
+		"<parameter=unknown>x</parameter>", "<parameter=path><function=read></parameter>",
+	} {
+		if _, _, _, ok := r.ReconstructCall("<function=read>" + body); ok {
+			t.Fatal(body)
+		}
+	}
+}
+
+func TestReconstructQwenMatchesNativeBoundaryNewlines(t *testing.T) {
+	r := NewRegistry()
+	r.Register(Definition{Name: "write", Params: []Param{{Name: "content", Type: TypeString, Required: true}}})
+	for _, tc := range []struct{ raw, want string }{{"\nREADME.md\n", "README.md"}, {"\n\n  source \n\n", "\n  source \n"}, {"  source ", "  source "}} {
+		_, a, _, ok := r.ReconstructCall("<function=write><parameter=content>" + tc.raw + "</parameter>")
+		if !ok || a["content"] != tc.want {
+			t.Fatalf("raw=%q got=%q want=%q", tc.raw, a["content"], tc.want)
+		}
+	}
+}
