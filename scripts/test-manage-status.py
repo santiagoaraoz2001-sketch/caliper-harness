@@ -6,6 +6,7 @@ or run. The endpoint is a catalog fixture, so this qualifies setup/navigation,
 not inference. Every write stays in a new evidence directory.
 """
 import argparse
+import hashlib
 import http.server
 import json
 import os
@@ -132,6 +133,10 @@ def main():
                LOCALAPPDATA=str(home / 'AppData/Local'), XDG_CONFIG_HOME=str(home / 'config'),
                XDG_DATA_HOME=str(home / 'data'), TERM='xterm-256color', COLORTERM='truecolor',
                CALIPER_HARNESS_REDUCED_MOTION='1', PYWINPTY_BACKEND='0')
+    # This child owns a real color-capable PTY. Inherited operator/CI flags can
+    # otherwise silently turn a visual proof into an unstyled text-only check.
+    for key in ('CI', 'NO_COLOR', 'CLICOLOR', 'CLICOLOR_FORCE'):
+        env.pop(key, None)
     for key in ('APPDATA', 'LOCALAPPDATA', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME'):
         Path(env[key]).mkdir(parents=True, exist_ok=True)
     env['PATH'] = str(app / 'bin') + os.pathsep + env.get('PATH', '')
@@ -183,6 +188,10 @@ def main():
         term = Terminal([str(binary), 'tui', '--config', str(cfg)], work, env)
         terminals.append(term)
         term.expect('', 'Ask anything to begin.', 'Enter send', timeout=90)
+        # termenv's float conversion can round #4AF6C3's red channel down by one.
+        checks['brand_mint_rendered'] = bool(re.search(rb'\x1b\[[0-9;]*38;2;7[34];246;195(?:;[0-9;]*)?m', term.raw))
+        if not checks['brand_mint_rendered']:
+            raise AssertionError('Actual color PTY lacks the existing brand mint')
         term.send('/setup\r')
         status = term.expect('/status\r', 'Generated tokens', 'Model request')
         checks['status_dashboard'] = True
@@ -202,8 +211,8 @@ def main():
         # apart from presentation. No clipboard write touches the operator's OS.
         checks['assisted_actual_config_path'] = ''.join(str(connections).split()) in ''.join(plain(assisted).split())
         checks['assisted_actual_project_path'] = ''.join(str(cfg).split()) in ''.join(plain(assisted).split())
-        term.expect('\x1b[F', 'what remains untested.')
-        checks['assisted_full_document_reachable'] = True
+        assisted_end = term.expect('\x1b[F', 'untested.')
+        checks['assisted_full_document_reachable'] = 'whatremainsuntested.' in ''.join(plain(assisted_end).split())
         term.expect('\x1b', 'Models & Servers', 'Add model')
         term.field('zsetup-draft')  # Start with a key that is not a Manage action.
         draft = term.send('g')
@@ -251,10 +260,13 @@ def main():
         term.expect('/status\r', 'Generated tokens')
         term.send('/chat\r')
         checks['chat_available'] = term.alive()
+        # Manage has rendered selected rows by this point; an empty chat does
+        # not have a user turn and its composer intentionally has no surface.
+        checks['selected_surface_rendered'] = bool(re.search(rb'\x1b\[[0-9;]*48;2;42;42;42(?:;[0-9;]*)?m', term.raw))
         checks['clean_exit'] = term.quit() == 0
         term.close()
         # A second actual process must use persisted connections, not prior UI state.
-        reopened = Terminal([str(binary), 'tui', '--config', str(cfg)], work, env)
+        reopened = Terminal([str(binary), 'tui', '--config', str(cfg)], work, dict(env, NO_COLOR='1'))
         terminals.append(reopened)
         reopened.expect('', 'Enter send', timeout=90)
         reopened.expect('/manage\r', 'Catalog renamed', 'manually-added-model')
@@ -262,6 +274,7 @@ def main():
         reopened.expect('/status\r', 'Generated tokens')
         checks['reopened_status'] = True
         checks['reopened_clean_exit'] = reopened.quit() == 0
+        checks['explicit_no_color_respected'] = not re.search(rb'\x1b\[[0-9;]*m', reopened.raw)
         checks['project_marker_preserved'] = (work / 'keep.txt').read_text() == 'owner work\n'
         checks['only_explicit_endpoint_probed'] = bool(requests) and all(p == '/v1/models' for p in requests)
     except Exception as exc:
@@ -273,6 +286,10 @@ def main():
         server.shutdown()
         server.server_close()
         result = {'platform': sys.platform, 'app': str(app), 'scope': 'real native TUI with owned catalog fixture; no inference',
+                  'proof_script_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+                  'terminal_environment': {'TERM': env['TERM'], 'COLORTERM': env['COLORTERM'],
+                                           'cleared': ['CI', 'NO_COLOR', 'CLICOLOR', 'CLICOLOR_FORCE'],
+                                           'reopened': {'NO_COLOR': '1'}},
                   'checks': checks, 'requests': requests, 'error': error}
         (out / 'RESULT.json').write_text(json.dumps(result, indent=2) + '\n')
         print(json.dumps(result, indent=2))

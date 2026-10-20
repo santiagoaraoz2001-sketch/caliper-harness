@@ -832,7 +832,16 @@ func (m *Model) onEvent(msg eventMsg) {
 		m.Chat.appendLine(lineResult, msg.text)
 	case "error":
 		m.Chat.appendLine(lineSys, msg.text)
+	case decision.KindJudgment:
+		if j, ok := decision.ParseJudgment(msg.text); ok {
+			m.Chat.appendLine(lineSys, fmt.Sprintf("Judge: %s · confidence %.2f · %s · /decisions", j.Pick, j.Confidence, j.Resolution))
+		} else {
+			m.Chat.appendLine(lineSys, truncate(msg.text, 120))
+		}
 	case "prompt", "done", "behavior", "evidence", "coding", "continuation":
+	case "judgment-input", "judgment_protocol", "call_resolution", "bound_call":
+		// Internal evidence remains in the session archive. Calls/results and
+		// parsed judgments already have their own user-facing transcript rows.
 	case "recall":
 		m.Chat.Recalled = countMemories(msg.text)
 	default:

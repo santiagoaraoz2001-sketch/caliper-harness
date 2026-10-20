@@ -143,8 +143,9 @@ The Go module is `specific-harness` for compatibility; the public executable
 is `caliper-harness`. `make bundle-macos OUT=...` prepares a fresh
 self-contained app folder. On Windows, `make bundle-windows OUT=...` builds
 an offline developer folder using installed Go, mingw-w64 GCC, Bash and ripgrep.
-Private runtime acquisition is a separate explicit command documented in
-[PORTABILITY.md](PORTABILITY.md). The managed mode is used by native release checks;
+For the managed Windows folder with private runtimes, run
+`powershell -ExecutionPolicy Bypass -File scripts/bundle-windows-managed.ps1 -Out NEW_FOLDER -AllowDownloads`
+on Windows with the same build tools and `uv`. This mode is used by native release checks;
 the offline developer mode has a separate environment and acceptance scope.
 
 On first run with no coding model configured, Setup opens. Add your server
@@ -193,7 +194,7 @@ See [Server and model connections](SERVER-MODELS.md) for details.
                                      └──────────────────┘
 ```
 
-- **Worker model** — any OpenAI-compatible local server. The Python worker
+- **Worker model** — an OpenAI-compatible local server. The Python worker
   side (`python/worker/`) owns native tool-call parsing for framed
   tool-call formats, including literal continuation of unfinished responses.
 - **Agent loop** — one executor. It validates every call against the
@@ -303,9 +304,9 @@ reviewer agreement do not guarantee correctness.
 
 The published v0.1.6 packages passed native build, installation, runtime-import
 and terminal UI checks on macOS arm64, Windows x64 and Linux x64/ARM64.
-Those checks do not establish Windows/Linux model inference. The final v0.2.0
-native package and upgrade gates are pending at this source revision; release
-notes record their results before publication. See [PORTABILITY.md](PORTABILITY.md).
+Those checks do not establish Windows/Linux model inference. Each release's
+notes identify the exact source, native package checks and upgrade tests that
+passed before publication. See [PORTABILITY.md](PORTABILITY.md).
 
 Development plans, benchmark traces and scratch notes stay local. Release
 changes and qualification notes are published on [GitHub Releases](https://github.com/santiagoaraoz2001-sketch/caliper-harness/releases).

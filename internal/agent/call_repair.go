@@ -32,6 +32,8 @@ type callRepairPacket struct {
 // Capacity reduction changes only this judge projection, never worker context.
 // The failed arguments, candidates, user messages and instructions stay intact.
 func (p *callRepairPacket) reduceForCapacity() bool {
+	best, saving := -1, 0
+	var omission progressOmission
 	for i := range p.WorkerContext {
 		m := &p.WorkerContext[i]
 		if m.Role != "assistant" && m.Role != "tool" {
@@ -44,13 +46,24 @@ func (p *callRepairPacket) reduceForCapacity() bool {
 		if m.Content == "" && m.Reasoning == "" && m.ReasoningContent == "" && m.Thinking == "" && len(m.ToolCalls) == 0 {
 			continue
 		}
+		stripped, _ := json.Marshal(llm.Message{Role: m.Role, Name: m.Name, ToolCallID: m.ToolCallID})
+		note := progressOmission{fmt.Sprintf("WorkerContext[%d]", i), fmt.Sprintf("%x", sha256.Sum256(raw)), len(raw)}
+		disclosure, _ := json.Marshal(note)
+		if net := len(raw) - len(stripped) - len(disclosure); net > saving {
+			best, saving, omission = i, net, note
+		}
+	}
+	// Remove the largest eligible historical body before retrying the server,
+	// rather than spending a request on each small early receipt.
+	if best >= 0 {
 		before, err := json.Marshal(p)
 		if err != nil {
 			return false
 		}
+		m := &p.WorkerContext[best]
 		original := m.Clone()
 		*m = llm.Message{Role: original.Role, Name: original.Name, ToolCallID: original.ToolCallID}
-		p.Progress.CapacityOmissions = append(p.Progress.CapacityOmissions, progressOmission{fmt.Sprintf("WorkerContext[%d]", i), fmt.Sprintf("%x", sha256.Sum256(raw)), len(raw)})
+		p.Progress.CapacityOmissions = append(p.Progress.CapacityOmissions, omission)
 		after, err := json.Marshal(p)
 		if err == nil && len(after) < len(before) {
 			return true

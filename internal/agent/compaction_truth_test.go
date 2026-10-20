@@ -123,10 +123,18 @@ func TestCompactionTruthKindsAndRawReferences(t *testing.T) {
 			t.Errorf("missing typed content/instruction %q", line)
 		}
 	}
-	for _, instruction := range []string{"only recorded observations establish recorded execution, not general correctness", "Entries marked reference-only=true remain verbatim outside this summary"} {
+	for _, instruction := range []string{
+		"only recorded observations establish recorded execution, not general correctness",
+		"Entries marked reference-only=true remain verbatim outside this summary",
+		"replaceable history contains necessary information not already preserved in the anchors",
+		"retain the recorded next action and prerequisites; do not invent a plan",
+	} {
 		if !strings.Contains(m.seen[0][0].Content, instruction) {
 			t.Errorf("missing instruction %q", instruction)
 		}
+	}
+	if strings.Contains(m.seen[0][0].Content, "restate the original task") {
+		t.Error("summary instructions must not require duplicating protected user intent")
 	}
 	for _, excluded := range []string{"TRANSIENT_BEHAVIOR_NOT_A_REFERENCE", "SECOND_SCHEMA", "THIRD_SCHEMA", "FOURTH_SCHEMA"} {
 		if strings.Contains(input, excluded) {

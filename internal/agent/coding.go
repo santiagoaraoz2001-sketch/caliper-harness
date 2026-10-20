@@ -81,6 +81,9 @@ func (r *Runner) CodingExec(next Exec) Exec {
 		res, e := next(ctx, d, a)
 		if d.Name == "bash" {
 			after, afterErr := r.WorkspaceFingerprint(ctx)
+			if beforeErr == nil && afterErr == nil && before != after {
+				res.Changed = true
+			}
 			if beforeErr != nil || afterErr != nil || before != after {
 				c.Invalidate("shell changed project contents or content observation was unavailable")
 				e = errors.Join(e, r.codingRecord(ctx))

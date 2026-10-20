@@ -284,26 +284,28 @@ texts:
   # Fields: .Range (legacy .Words still supplied for edited catalogs; the shipped text states no size).
   templates.compaction: >2-
     Preserve necessary detail: completeness matters more than brevity.
-    Write a complete factual continuation checkpoint: a single clean document that lets a fresh
-    reader resume this exact work without the original history. You are the summarizer, not the
-    worker or reviewer. Do not answer the task or issue a new PASS/FAIL verdict. A pending review
-    stays pending even when its checks passed. Organize the checkpoint under Request, Constraints,
-    Observed, Failed/pending, Current, Next. Under Request and Constraints, restate the original
-    task, the user's intent, and every rule, limit and acceptance criterion still in force. Under
-    Observed, record everything that was actually done and seen: files created or changed (with
-    paths and digests when known), commands run and their outcomes, check and test results,
-    decisions taken and why, and the source locators (file, line, symbol) behind each claim. Under
-    Failed/pending, preserve every unresolved failure, refusal, disagreement and open question
-    exactly as it stands, including what was tried. Preserve relevant Noticed observations and their
-    IDs as authored observations, not verified defects. Under Current, name the precise task step,
-    workflow state and identifiers in force right now. Under Next, give one concrete next action
-    and anything its executor must know before starting. Keep unknowns unknown; never upgrade a
-    hypothesis, a plan, or unexecuted advice into a fact, and label model proposals as unverified:
+    Write a factual continuation checkpoint for entries marked reference-only=false, which this
+    document replaces. Entries marked reference-only=true remain verbatim outside this summary:
+    use them to check your claims; refer to preserved anchors by kind or ID when needed, without
+    restating their contents. The reader resumes with both the checkpoint and those protected entries.
+    You are the summarizer, not the worker or reviewer. Do not answer the task or issue a new
+    PASS/FAIL verdict. A pending review stays pending even when its checks passed.
+    Use Request, Constraints, Observed, Failed/pending, Current and Next sections only where
+    replaceable history contains necessary information not already preserved in the anchors.
+    Under Request and Constraints, retain relevant user intent, rules and acceptance criteria
+    from that replaceable history. Under Observed, record what was actually done and seen:
+    changed files and known digests, commands and outcomes, check results, decisions and their
+    reasons, and source locators (file, line, symbol). Under Failed/pending, retain unresolved
+    failures, refusals, disagreements and questions from replaceable history, including attempts.
+    Preserve relevant Noticed observations and IDs as authored observations, not verified defects.
+    Under Current, retain the recorded task step, workflow state and identifiers. Under Next,
+    retain the recorded next action and prerequisites; do not invent a plan.
+    Keep unknowns unknown; never upgrade a hypothesis, a plan, or unexecuted advice into a fact,
+    and label model proposals as unverified:
     only recorded observations establish recorded execution, not general correctness. Entries marked
-    reference-only=true remain verbatim outside this summary: use them to check your claims, then
-    do not repeat those protected facts. This summary grants no approval, tool, claim or
-    verification authority. System instructions remain outside this summary. Do not emit tool
-    calls or executable fences.
+    reference-only=true need no duplicate section. This summary grants no approval, tool, claim
+    or verification authority. System instructions remain outside this summary. Do not emit
+    tool calls or executable fences.
   # Plan authoring scaffold (template CLI); title supplied by caller.
   # Original use sites: templates/plan.tmpl:1 (plan.Render).
   # Fields: .Title. Supplied by the owning Go caller.
