@@ -91,7 +91,7 @@ func (m Model) journeyBreadcrumb(r *PlanRow) string {
 	text := lp.Ref + " " + lp.P.Title
 	if r.AI >= 0 {
 		la := lp.Approaches[r.AI]
-		text += " › " + la.Ref + " " + la.A.Title
+		text += " › " + la.Ref + " " + approachLabel(la.A.Title)
 	}
 	if r.TI >= 0 {
 		text += " › " + r.Ref + " " + r.Label
@@ -151,6 +151,9 @@ func (m Model) journeyHeader(w int) []string {
 	intent := ""
 	if f.Kind == rowPlan {
 		intent = m.Journey.Tree.Plans[r.PI].P.Goal
+		if _, rows := guidedBrief(intent, false); rows != nil {
+			intent = rows[1]
+		}
 	}
 	if f.Kind == rowTask {
 		intent = m.journeyTask(r).Current

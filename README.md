@@ -49,11 +49,11 @@ claimed result outrun an observed one.
 - **Evidence, not vibes.** Every run writes a durable session record: model
   replies, tool receipts, judgments with confidence, file effects, and the
   final outcome. `caliper-harness judgments <session>` replays the verdicts.
-- **Your style, on the record.** Save project conventions in the state graph
-  under knowledge key `styleguide`. They can be queried and revised explicitly.
-  With `decision.style_enforcement` enabled, an advisory judge compares the
-  final answer with that guide and can request one adjustment round. It does
-  not learn rules automatically or audit source code for style compliance.
+- **Your style, shared with every role.** `/style add <rule>` saves a project
+  convention. Coding agents and independent reviewers receive the same
+  version from the start of a run, including when D1 is off. Changes apply
+  to the next run; earlier versions remain in the state graph. Optional
+  `decision.style_enforcement` adds final-answer advice, not a source audit.
 - **Keyboard-driven TUI.** Tabs, plan navigation, live tool activity, and
   model/settings management without leaving the terminal — plus a headless
   `run` mode for scripts and evaluation.
@@ -253,9 +253,23 @@ Project rules can live in two model-readable places: `behavior.md` for how
 the agent should conduct itself, and the styleguide document in the state
 graph for how code should be written:
 
-```sh
-caliper-harness graph --query 'query { knowledge(key:"styleguide") { body } }'
+```text
+/style add Prefer pure functions for game state.
+/style
+/style set Use explicit names and keep state updates pure.
+/style clear
 ```
+
+`add` appends a rule; `set` replaces the document; `clear` saves an empty
+version. Each write preserves history and reports its project and version.
+The guide applies to the next run and is shared by coding and review. It
+does not override your request, permissions, or required checks.
+
+Use `/remember <text>` to save a project note and `/recall <query>` to find
+project notes, model-authored knowledge and earlier shared memories. Search
+also matches saved note keys and file paths. `/remember --global <text>`
+explicitly shares a new note across projects; existing global memories remain
+available. These commands use Caliper's state store and add no project files.
 
 ## Record what you notice
 

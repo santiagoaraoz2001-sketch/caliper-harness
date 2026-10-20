@@ -45,12 +45,14 @@ func (s TaskSettlement) rejected() bool {
 
 // BookkeepingFacts preserves bounded owning evidence; Preparation is advice, never authority.
 type BookkeepingFacts struct {
-	Assignment  any
-	Unfinished  json.RawMessage
-	Knowledge   []map[string]string
-	Disclosure  string
-	Preparation string
-	Checkpoint  ProgressCheckpoint
+	Assignment any
+	Unfinished json.RawMessage
+	Knowledge  []map[string]string
+	Disclosure string
+	// Internal inputs to currentProgress; the judge receives the enriched
+	// top-level Checkpoint once, never a stale nested preparation snapshot.
+	Preparation string             `json:"-"`
+	Checkpoint  ProgressCheckpoint `json:"-"`
 }
 
 // ProgressCheckpoint contains current owner state and receipt provenance, never a diagnosis.

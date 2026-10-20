@@ -48,6 +48,7 @@ type Usage struct {
 // Client uses the selected runtime contract; URLs do not select a dialect.
 type Client struct {
 	requestObserver func(RequestMeasurement)
+	streamObserver  func(string)
 	baseURL         string
 	model           string
 	http            *http.Client
@@ -81,7 +82,7 @@ func New(server, model string) *Client {
 func (c *Client) WithoutThinking() *Client {
 	off := false
 	return &Client{
-		baseURL: c.baseURL, model: c.model, http: c.http, runtime: c.runtime, requestObserver: c.requestObserver,
+		baseURL: c.baseURL, model: c.model, http: c.http, runtime: c.runtime, requestObserver: c.requestObserver, streamObserver: c.streamObserver,
 		toolProtocol: c.toolProtocol, idleTimeout: c.idleTimeout,
 		Temperature: c.Temperature, TopK: c.TopK,
 		RepetitionPenalty: c.RepetitionPenalty, Thinking: &off,
@@ -329,6 +330,8 @@ func (c *Client) chatStream(ctx context.Context, msgs []Message, onDelta func(st
 	if c.runtime == RuntimeOllama {
 		return c.chatOllama(ctx, msgs, true, onDelta, tools, capture)
 	}
+	activity := c.streamActivity()
+	defer activity("")
 	request := c.request(msgs, true)
 	request.Tools = tools
 	if continuing {
@@ -396,6 +399,9 @@ func (c *Client) chatStream(ctx context.Context, msgs []Message, onDelta func(st
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if !strings.HasPrefix(line, "data:") {
+			if strings.HasPrefix(line, ":") {
+				activity("active")
+			}
 			continue // SSE comments, keepalives and event metadata carry no answer.
 		}
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
@@ -461,6 +467,15 @@ func (c *Client) chatStream(ctx context.Context, msgs []Message, onDelta func(st
 				if e := assembleCalls(calls, ch.Delta.ToolCalls); e != nil {
 					return "", servedModel, usage, e
 				}
+			}
+			if ch.Delta.Reasoning != "" || ch.Delta.ReasoningContent != "" {
+				activity("thinking")
+			}
+			if len(ch.Delta.ToolCalls) > 0 {
+				activity("tool")
+			}
+			if ch.Delta.Content != "" {
+				activity("content")
 			}
 			full.WriteString(ch.Delta.Content)
 			reasoning.WriteString(ch.Delta.Reasoning)

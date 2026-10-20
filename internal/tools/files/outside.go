@@ -91,7 +91,11 @@ func (w *Workspace) normalizeOutsidePath(def tool.Definition) tool.Definition {
 			return nil, err
 		}
 		input, _ := args["path"].(string)
-		path, err := search.DiscoveryPath(w.Path, search.ExistingPath(w.Path, input), true)
+		decoded, err := search.ExistingPath(w.Path, input)
+		if err != nil {
+			return nil, err
+		}
+		path, err := search.DiscoveryPath(w.Path, decoded, true)
 		if err != nil {
 			return nil, err
 		}

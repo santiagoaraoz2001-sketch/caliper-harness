@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -186,7 +187,7 @@ func (st *PlansState) rebuild(target string) {
 				}
 			}
 			rows = append(rows, PlanRow{Depth: 1, Kind: rowApproach, ID: la.A.ID, Ref: la.Ref,
-				Label: la.A.Title, State: la.A.State, Done: done, Total: total, PI: pi, AI: ai, TI: -1})
+				Label: approachLabel(la.A.Title), State: la.A.State, Done: done, Total: total, PI: pi, AI: ai, TI: -1})
 			for ti, t := range la.Tasks {
 				rows = append(rows, PlanRow{Depth: 2, Kind: rowTask, ID: t.ID, Ref: taskRef(la.Ref, ti),
 					Label: t.Title, State: t.State, Tries: t.Attempts, Execution: string(t.Execution), Verification: string(t.Verification), PI: pi, AI: ai, TI: ti})
@@ -379,6 +380,52 @@ func (m *Model) plansScroll(d, h int) {
 	}
 }
 
+// Guided Q&A uses these existing JSON shapes in Goal/Title. Presentation alone
+// expands them; unknown or freeform documents retain their complete literal text.
+func guidedBrief(raw string, approach bool) (label string, rows []string) {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal([]byte(raw), &fields) != nil {
+		return "", nil
+	}
+	stringField := func(key string) (string, bool) {
+		var value string
+		valueRaw, ok := fields[key]
+		if !ok || string(valueRaw) == "null" || json.Unmarshal(valueRaw, &value) != nil {
+			return "", false
+		}
+		return value, true
+	}
+	if approach {
+		article, aok := stringField("article")
+		strategy, sok := stringField("strategy")
+		var index int
+		if len(fields) != 3 || !aok || !sok || string(fields["article_index"]) == "null" || json.Unmarshal(fields["article_index"], &index) != nil || index < 0 {
+			return "", nil
+		}
+		label = fmt.Sprintf("Article %d: %s", index+1, article)
+		return label, []string{label, "strategy:", strategy}
+	}
+	outcome, ook := stringField("outcome")
+	rules, rok := stringField("rules")
+	proof, pok := stringField("proof")
+	var articles []string
+	if len(fields) != 4 || !ook || !rok || !pok || json.Unmarshal(fields["articles"], &articles) != nil || articles == nil {
+		return "", nil
+	}
+	rows = []string{"goal:", outcome, "rules:", rules, "articles:"}
+	for i, article := range articles {
+		rows = append(rows, fmt.Sprintf("%d. %s", i+1, article))
+	}
+	return "", append(rows, "completion evidence:", proof)
+}
+
+func approachLabel(title string) string {
+	if label, _ := guidedBrief(title, true); label != "" {
+		return label
+	}
+	return title
+}
+
 // detailLogical is the dive content as numbered logical lines: title,
 // state, then kind-specific body. Wrapping happens in display so
 // line numbers stay stable.
@@ -398,9 +445,13 @@ func detailLogical(d *PlanDetail) []string {
 				}
 			}
 		}
-		out := []string{d.Ref + " " + lp.P.Title, "state: " + lp.P.State,
-			"goal: " + lp.P.Goal, fmt.Sprintf("progress: %d/%d tasks qualified", done, total),
-			"", "approaches:"}
+		out := []string{d.Ref + " " + lp.P.Title, "state: " + lp.P.State}
+		if _, fields := guidedBrief(lp.P.Goal, false); fields != nil {
+			out = append(out, fields...)
+		} else {
+			out = append(out, "goal: "+lp.P.Goal)
+		}
+		out = append(out, fmt.Sprintf("progress: %d/%d tasks qualified", done, total), "", "approaches:")
 		for _, la := range lp.Approaches {
 			ad, at := 0, len(la.Tasks)
 			for _, t := range la.Tasks {
@@ -408,7 +459,7 @@ func detailLogical(d *PlanDetail) []string {
 					ad++
 				}
 			}
-			out = append(out, fmt.Sprintf("%s %s · %s · %d/%d", la.Ref, la.A.Title, la.A.State, ad, at))
+			out = append(out, fmt.Sprintf("%s %s · %s · %d/%d", la.Ref, approachLabel(la.A.Title), la.A.State, ad, at))
 		}
 		return out
 	case rowApproach:
@@ -419,8 +470,11 @@ func detailLogical(d *PlanDetail) []string {
 				done++
 			}
 		}
-		out := []string{d.Ref + " " + la.A.Title, "state: " + la.A.State,
-			fmt.Sprintf("progress: %d/%d tasks qualified", done, total), "", "tasks:"}
+		out := []string{d.Ref + " " + approachLabel(la.A.Title), "state: " + la.A.State}
+		if _, fields := guidedBrief(la.A.Title, true); fields != nil {
+			out = append(out, fields...)
+		}
+		out = append(out, fmt.Sprintf("progress: %d/%d tasks qualified", done, total), "", "tasks:")
 		for ti, t := range la.Tasks {
 			out = append(out, fmt.Sprintf("%s %s · %s", taskRef(la.Ref, ti), t.Title, t.State))
 		}

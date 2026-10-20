@@ -17,9 +17,9 @@ import (
 // copied from another surface (URL escapes, shell-escaped spaces). The
 // original spelling always wins when it exists; a respelling is used only
 // when the original does not exist and the respelling does.
-func ExistingPath(workspace, input string) string {
+func ExistingPath(workspace, input string) (string, error) {
 	if strings.Contains(input, "://") {
-		return input
+		return input, nil
 	}
 	abs := func(path string) string {
 		if filepath.IsAbs(path) {
@@ -28,7 +28,7 @@ func ExistingPath(workspace, input string) string {
 		return filepath.Join(workspace, path)
 	}
 	if _, err := os.Lstat(abs(input)); !os.IsNotExist(err) {
-		return input
+		return input, nil
 	}
 	var candidates []string
 	if strings.Contains(input, "%") {
@@ -39,12 +39,21 @@ func ExistingPath(workspace, input string) string {
 	if unescaped := strings.ReplaceAll(input, "\\ ", " "); unescaped != input {
 		candidates = append(candidates, unescaped)
 	}
+	matched := ""
 	for _, candidate := range candidates {
 		if _, err := os.Lstat(abs(candidate)); err == nil {
-			return candidate
+			if matched != "" && filepath.Clean(abs(matched)) != filepath.Clean(abs(candidate)) {
+				return "", fmt.Errorf("path %q is ambiguous; existing interpretations are %q and %q; use the intended literal path", input, matched, candidate)
+			}
+			matched = candidate
+		} else if !os.IsNotExist(err) {
+			return "", fmt.Errorf("cannot resolve copied path %q as %q: %w", input, candidate, err)
 		}
 	}
-	return input
+	if matched != "" {
+		return matched, nil
+	}
+	return input, nil
 }
 
 func normalizeSearchPath(dir string, def tool.Definition) tool.Definition {
@@ -60,8 +69,12 @@ func normalizeSearchPath(dir string, def tool.Definition) tool.Definition {
 			normalized[key] = value
 		}
 		input, _ := args["path"].(string)
-		normalized["path"] = ExistingPath(dir, input)
-		normalized, err := scopedArgs(dir, normalized)
+		path, err := ExistingPath(dir, input)
+		if err != nil {
+			return nil, err
+		}
+		normalized["path"] = path
+		normalized, err = scopedArgs(dir, normalized)
 		return normalized, err
 	}
 	return def

@@ -49,8 +49,9 @@ func Commands() []Command {
 		{Name: "btw", Desc: "interject the running model", Usage: "/btw <text>"},
 		{Name: "tools", Desc: "coding/full tool exposure; checks remain required", Usage: "/tools [coding|full]", Args: []string{"coding", "full"}},
 		{Name: "auth", Desc: "switch auth mode", Usage: "/auth <yolo|risky|all>", Args: []string{"yolo", "risky", "all"}},
-		{Name: "recall", Desc: "search memories", Usage: "/recall <query>"},
-		{Name: "remember", Desc: "save a memory", Usage: "/remember <text>"},
+		{Name: "recall", Desc: "search project notes and shared memories", Usage: "/recall <query>"},
+		{Name: "remember", Desc: "save a project note; --global shares it", Usage: "/remember [--global] <text>"},
+		{Name: "style", Desc: "project rules shared by coding and review", Usage: "/style [show|add <rule>|set <text>|clear]", Args: []string{"show", "add", "set", "clear"}},
 		{Name: "compact", Desc: "compact context now", Usage: "/compact"},
 		{Name: "context", Desc: "show context usage", Usage: "/context"},
 		{Name: "clear", Desc: "clear chat view", Usage: "/clear"},
@@ -90,6 +91,21 @@ func (r *Registry) Parse(input string) (Command, []string, bool) {
 		return Command{}, nil, false
 	}
 	c, ok := r.byName[strings.TrimPrefix(fields[0], "/")]
+	if c.Name == "remember" || c.Name == "style" {
+		rest := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(input), fields[0]))
+		if rest == "" {
+			return c, nil, true
+		}
+		arg := strings.Fields(rest)[0]
+		if c.Name == "style" || arg == "--global" {
+			tail := strings.TrimSpace(strings.TrimPrefix(rest, arg))
+			if tail != "" {
+				return c, []string{arg, tail}, true
+			}
+			return c, []string{arg}, true
+		}
+		return c, []string{rest}, true
+	}
 	if !ok {
 		return Command{}, nil, false
 	}
@@ -150,7 +166,7 @@ func (r *Registry) Help() string {
 		{"MODELS", []string{"models"}},
 		{"RUN", []string{"new", "stop", "retry", "btw", "tools", "workflow"}},
 		{"AUTH", []string{"auth"}},
-		{"MEMORY", []string{"recall", "remember"}},
+		{"MEMORY", []string{"recall", "remember", "style"}},
 		{"CONTEXT", []string{"compact", "context", "clear", "turns"}},
 		{"COMMENT", []string{"comment", "goto"}},
 		{"CHANGES", []string{"open-diff", "changes"}},

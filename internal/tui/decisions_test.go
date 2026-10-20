@@ -59,7 +59,7 @@ func TestDecisionsFeedNewestFirst(t *testing.T) {
 		t.Errorf("newest run first: %+v", m.Decisions.Rows)
 	}
 	r := m.Decisions.Rows[0]
-	if r.Source != decision.SourceJudgeTool || r.Pick != "approve refund" || r.Resolution != "returned" {
+	if r.Source != decision.SourceCoherence || r.Pick != "coherent" || r.Resolution != "returned" {
 		t.Errorf("row=%+v", r)
 	}
 }
@@ -263,7 +263,7 @@ func TestDecisionsViewportRefreshResizeAndEscape(t *testing.T) {
 	m, _, _ := decisionsViewportModel(t, 80, 24, 100)
 	m = decisionsViewportKey(t, m, tea.KeyEnd)
 	last := viewportFrame(t, m)
-	if !strings.Contains(last, "VERDICT_099") || strings.Contains(last, "VERDICT_000") {
+	if !strings.Contains(last, "VERDICT_000") || strings.Contains(last, "VERDICT_099") {
 		t.Fatal("End does not reveal the final verdict")
 	}
 	m = decisionsViewportKey(t, m, tea.KeyPgUp)
@@ -290,22 +290,22 @@ func TestDecisionsViewportRefreshResizeAndEscape(t *testing.T) {
 		m = viewportUpdate(m, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
 		viewportFrame(t, m)
 		m = decisionsViewportKey(t, m, tea.KeyEnd)
-		if !strings.Contains(m.View(), "VERDICT_099") {
+		if !strings.Contains(m.View(), "VERDICT_000") {
 			t.Fatal("resize hid the final verdict")
 		}
 	}
 	m.Cfg.UI.MaxDecisionRows = 3
 	m = viewportUpdate(m, m.refreshDecisions()())
-	if len(m.Decisions.Rows) != 3 || !strings.Contains(viewportFrame(t, m), "VERDICT_000") {
+	if len(m.Decisions.Rows) != 3 || !strings.Contains(viewportFrame(t, m), "VERDICT_099") {
 		t.Fatal("smaller feed did not clamp the visible page")
 	}
 	m.Cfg.UI.MaxDecisionRows = 100
 	m = viewportUpdate(m, m.refreshDecisions()())
-	if !strings.Contains(viewportFrame(t, m), "VERDICT_000") {
+	if !strings.Contains(viewportFrame(t, m), "VERDICT_099") {
 		t.Fatal("smaller-feed refresh left a stale offset")
 	}
 	m = decisionsViewportKey(t, m, tea.KeyHome)
-	if !strings.Contains(viewportFrame(t, m), "VERDICT_000") {
+	if !strings.Contains(viewportFrame(t, m), "VERDICT_099") {
 		t.Fatal("Home does not restore the first verdict")
 	}
 	m.alert("warn", "owned notice")
@@ -324,7 +324,7 @@ func TestDecisionsViewportWrappedValuesAndRetention(t *testing.T) {
 	longPick := "LONG_VERDICT_" + strings.Repeat("界α", 50) + "_TAIL"
 	for i := range 32 {
 		pick, source := fmt.Sprintf("VERDICT_%03d", i), decision.SourceCoherence
-		if i == 1 {
+		if i == 30 {
 			pick, source = longPick, decision.SourceJudgeTool
 		}
 		text := fmt.Sprintf("source=%s | pick=%s | conf=0.920 | resolution=returned | options=a; b | context=c", source, pick)
@@ -368,7 +368,7 @@ func TestDecisionsViewportWrappedValuesAndRetention(t *testing.T) {
 			break
 		}
 	}
-	if !strings.Contains(reconstructed, longPick) || !strings.Contains(visible, "unreadable or malformed") || strings.Contains(visible, "FOREIGN_CHAT") || strings.Contains(visible, "VERDICT_017") {
+	if !strings.Contains(reconstructed, longPick) || !strings.Contains(visible, "unreadable or malformed") || strings.Contains(visible, "FOREIGN_CHAT") || strings.Contains(visible, "VERDICT_014") {
 		t.Fatal("wrapped values, malformed disclosure or current-chat/retention scope was lost")
 	}
 	current, err := os.ReadFile(path)

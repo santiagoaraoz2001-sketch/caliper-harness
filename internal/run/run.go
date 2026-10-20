@@ -112,6 +112,13 @@ func New(d Deps, prompt string) (*agent.Runner, []string, error) {
 	if err != nil {
 		return nil, notes, err
 	}
+	behavior, guide, styleNote := projectStyle(d.Store, w.Path, behavior, pc)
+	if styleNote != "" {
+		if note != "" {
+			note += "\n"
+		}
+		note += styleNote
+	}
 	if note != "" {
 		notes = append(notes, note)
 	}
@@ -163,15 +170,7 @@ func New(d Deps, prompt string) (*agent.Runner, []string, error) {
 		Btw:                  d.Btw,
 	}
 
-	if d.Cfg.Decision.StyleEnforcement && d.Store != nil {
-		// The styleguide document stays readable either way; a failed
-		// read disables judging for this run and is disclosed, not fatal.
-		if guide, gerr := memory.ReadStyleguide(context.Background(), d.Store, w.Path); gerr == nil {
-			r.StyleEnforcement, r.Styleguide = true, guide
-		} else {
-			notes = append(notes, "note: styleguide read failed, style enforcement off for this run: "+gerr.Error())
-		}
-	}
+	r.StyleEnforcement, r.Styleguide = d.Cfg.Decision.StyleEnforcement && guide != "", guide
 	ld.ReviewGate = gate.Wrap
 	assigned := &launch.Assigned{Deps: ld, Root: w.Path, Command: d.Cfg.Coding.CheckCommand}
 	r.TaskComments = assigned.Comments
@@ -601,6 +600,13 @@ func LaunchDeps(cfg config.Config, s *store.Store, server, model string, maxStep
 	behavior, note, e := loadBehavior(cfg)
 	if e != nil {
 		return launch.Deps{Prompts: cfg.PromptCatalog}, e
+	}
+	behavior, _, styleNote := projectStyle(s, w.Path, behavior, pc)
+	if styleNote != "" {
+		if note != "" {
+			note += "\n"
+		}
+		note += styleNote
 	}
 	d := launchDeps(cfg, s, server, model, maxSteps, window, in, out, w, behavior)
 	d.BehaviorNote = note

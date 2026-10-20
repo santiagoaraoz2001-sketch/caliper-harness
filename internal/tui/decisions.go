@@ -75,7 +75,8 @@ func (m *Model) refreshDecisions() tea.Cmd {
 				continue
 			}
 			st.Sessions++
-			for _, e := range events {
+			for j := len(events) - 1; j >= 0; j-- {
+				e := events[j]
 				if e.Kind != decision.KindJudgment {
 					continue
 				}

@@ -140,9 +140,9 @@ func decode(raw []byte, source string, expected *Catalog) (*Catalog, error) {
 	if expected != nil {
 		for key := range expected.texts {
 			if _, ok := d.Texts[key]; !ok {
-				// This exported UI guide never enters inference requests. Older
-				// customized catalogs remain valid; the UI names the missing guide.
-				if key == "setup.assisted" {
+				// These later additions preserve older customized catalogs.
+				// Their owners explicitly disclose a missing guide or fallback.
+				if key == "setup.assisted" || key == "continuation.project_style" {
 					continue
 				}
 				return nil, fmt.Errorf("prompt catalog %s missing key %s", source, key)

@@ -46,7 +46,7 @@ func planStatus(storePath string, bufferPoolBytes uint64) (title string, approac
 		if a.State == plan.ApproachComplete && len(tasks) > 0 && done == len(tasks) {
 			continue
 		}
-		text := fmt.Sprintf("%s %d/%d qualified", truncate(a.Title, 20), done, len(tasks))
+		text := fmt.Sprintf("%s %d/%d qualified", truncate(approachLabel(a.Title), 20), done, len(tasks))
 		if a.State == plan.ApproachComplete {
 			text += " (complete, unverified)"
 		}

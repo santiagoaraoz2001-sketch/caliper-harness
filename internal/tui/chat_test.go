@@ -668,7 +668,7 @@ func TestRecallNoMatch(t *testing.T) {
 func TestRememberSaves(t *testing.T) {
 	m := New(testCfg(), "test")
 	m.StorePath = tempStore(t)
-	m = submit(m, "/remember hello world")
+	m = submit(m, "/remember --global hello world")
 	s, err := store.Open(m.StorePath)
 	if err != nil {
 		t.Fatal(err)

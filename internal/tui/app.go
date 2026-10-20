@@ -555,7 +555,7 @@ func (m *Model) submit(raw string) tea.Cmd {
 		}
 		return nil
 	}
-	if len(args) == 0 && len(c.Args) > 0 && c.View == "" && c.Name != "tools" {
+	if len(args) == 0 && len(c.Args) > 0 && c.View == "" && c.Name != "tools" && c.Name != "style" {
 		m.openMenu(c.Name)
 		return nil
 	}
@@ -581,6 +581,8 @@ func (m *Model) submit(raw string) tea.Cmd {
 		m.recallChat(args)
 	case "remember":
 		m.rememberChat(args)
+	case "style":
+		m.styleChat(args)
 	case "compact":
 		return m.compactChat()
 	case "context":

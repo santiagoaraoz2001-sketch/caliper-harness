@@ -53,7 +53,7 @@ func TestPreparationRecoveryCurrentNextWire(t *testing.T) {
 					}
 					var input struct {
 						PendingRepair string
-						Facts         struct{ Preparation string }
+						Checkpoint    agent.ProgressCheckpoint
 					}
 					if err := json.Unmarshal([]byte(q.Context), &input); err != nil {
 						t.Error(err)
@@ -70,7 +70,7 @@ func TestPreparationRecoveryCurrentNextWire(t *testing.T) {
 					if sequence == "normal-final combined repair" {
 						option, pick = "request both PAT and product knowledge updates", 3
 					}
-					pending = pc.Text("continuation.bookkeeping.request_prefix") + option + pc.Text("continuation.bookkeeping.authority_suffix") + pc.Text("continuation.bookkeeping.next_action") + input.Facts.Preparation
+					pending = pc.Text("continuation.bookkeeping.request_prefix") + option + pc.Text("continuation.bookkeeping.authority_suffix") + pc.Text("continuation.bookkeeping.next_action") + input.Checkpoint.NextAction
 					return pick
 				})
 				n, taskID := 0, ""

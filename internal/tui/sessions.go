@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"specific-harness/internal/config"
 	"specific-harness/internal/llm"
 	"specific-harness/internal/prompts"
 	"specific-harness/internal/session"
@@ -147,7 +148,9 @@ func (m *Model) resumeSession() {
 		return
 	}
 	argv := []string{exe, "tui"}
-	if m.CfgPath != "" {
+	// Explicit project choices stay explicit. An automatic workspace path must
+	// be rediscovered normally, or --config would override personal defaults.
+	if m.CfgPath != "" && (m.Cfg.ProjectOverride || !config.ManagedWorkspaceConfig(m.CfgPath)) {
 		argv = append(argv, "--config", m.CfgPath)
 	}
 	argv = append(argv, "--resume", d.ID)

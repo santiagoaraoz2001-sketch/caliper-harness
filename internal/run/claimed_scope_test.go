@@ -48,13 +48,13 @@ func TestClaimedTaskScopeNativeCoding(t *testing.T) {
 				var f struct {
 					NormalFinal       bool
 					Checkpoint        agent.ProgressCheckpoint
-					Facts             agent.BookkeepingFacts
+					Facts             map[string]json.RawMessage
 					ProvisionalAnswer string
 				}
 				_ = json.Unmarshal([]byte(q.Context), &f)
 				if variant.postclaim && f.Checkpoint.Phase == "EXECUTE" && !f.NormalFinal {
-					if strings.Contains(f.Facts.Preparation, "Read actual assigned-task") {
-						t.Error("claimed facts direct preparation readback")
+					if f.Facts["Preparation"] != nil || f.Facts["Checkpoint"] != nil {
+						t.Error("claimed facts duplicate the authoritative checkpoint")
 					}
 					return 1
 				}

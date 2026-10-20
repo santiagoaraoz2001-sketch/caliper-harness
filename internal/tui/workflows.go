@@ -125,7 +125,7 @@ func (m *Model) refreshWorkflows() tea.Cmd {
 // wfRow shapes one approach: done/total, summed attempts, and the
 // holding step — the running task, else the next queued one.
 func wfRow(planTitle string, a *plan.Approach, tasks []*plan.Task) WfRow {
-	r := WfRow{Approach: a.ID, Plan: planTitle, Title: a.Title, State: a.State, Total: len(tasks)}
+	r := WfRow{Approach: a.ID, Plan: planTitle, Title: approachLabel(a.Title), State: a.State, Total: len(tasks)}
 	for _, t := range tasks {
 		r.Attempts += t.Attempts
 		if t.Qualified() {

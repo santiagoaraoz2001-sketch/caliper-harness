@@ -220,6 +220,9 @@ func TestOriginalCommandsRemainUnchangedWithAdditions(t *testing.T) {
 	commands := slash.Commands()
 	names := map[string]bool{}
 	for _, c := range commands {
+		if names[c.Name] {
+			t.Fatalf("duplicate command %s", c.Name)
+		}
 		names[c.Name] = true
 	}
 	for _, name := range original {
@@ -227,7 +230,13 @@ func TestOriginalCommandsRemainUnchangedWithAdditions(t *testing.T) {
 			t.Fatalf("original command %s missing", name)
 		}
 	}
-	if len(commands) != len(original)+6 || !names["open-diff"] || !names["changes"] || !names["turns"] || !names["setup"] || !names["update"] || !names["manage"] {
+	additions := []string{"open-diff", "changes", "turns", "setup", "update", "manage", "style"}
+	for _, name := range additions {
+		if !names[name] {
+			t.Fatalf("added command %s missing", name)
+		}
+	}
+	if len(commands) != len(original)+len(additions) {
 		t.Fatal("unexpected registry changes")
 	}
 }

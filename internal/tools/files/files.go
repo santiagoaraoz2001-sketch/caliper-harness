@@ -311,7 +311,10 @@ func (w *Workspace) normalizePath(def tool.Definition) tool.Definition {
 			return nil, err
 		}
 		input, _ := args["path"].(string)
-		decoded := search.ExistingPath(w.Path, input)
+		decoded, err := search.ExistingPath(w.Path, input)
+		if err != nil {
+			return nil, err
+		}
 		path, _, err := w.filePath(decoded, def.Name == "read" || def.Name == "find_dir")
 		if err != nil {
 			return nil, err

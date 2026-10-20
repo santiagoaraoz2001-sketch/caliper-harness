@@ -19,7 +19,6 @@ import (
 	"specific-harness/internal/graph"
 	"specific-harness/internal/launch"
 	"specific-harness/internal/llm"
-	"specific-harness/internal/memory"
 	"specific-harness/internal/outcome"
 	"specific-harness/internal/plan"
 	"specific-harness/internal/run"
@@ -90,36 +89,37 @@ type Chat struct {
 	// Stream buffers are pointers: bubbletea copies the Model by
 	// value on every message, and a copied strings.Builder panics
 	// on its next write. Shared pointers make copies safe.
-	Stream        *strings.Builder
-	FlushedAll    *strings.Builder
-	Streaming     bool
-	Running       bool
-	Seq           int
-	History       []llm.Message // compatibility input only; continuation is authoritative after a run
-	Context       session.Continuation
-	ID            string
-	compactCancel context.CancelFunc
-	Compacting    bool
-	LastPrompt    string
-	LastFull      string
-	LastIn        int
-	LastOut       int
-	LastUnknown   bool
-	Runtime       runtimeMetrics
-	LastCostKnown bool // settled new-run accounting; prior totals are unavailable after resume
-	Recalled      int
-	Dialog        *Dialog
-	pinTop        int
-	readOrigin    chatOrigin
-	pinned        bool
-	scrollDrag    bool
-	scrollDragY   int
-	scrollDragTop int
-	stopFlag      bool
-	pendingNew    bool
-	cancel        context.CancelFunc
-	btw           *btwBox
-	carry         []string
+	Stream         *strings.Builder
+	FlushedAll     *strings.Builder
+	Streaming      bool
+	StreamActivity string
+	Running        bool
+	Seq            int
+	History        []llm.Message // compatibility input only; continuation is authoritative after a run
+	Context        session.Continuation
+	ID             string
+	compactCancel  context.CancelFunc
+	Compacting     bool
+	LastPrompt     string
+	LastFull       string
+	LastIn         int
+	LastOut        int
+	LastUnknown    bool
+	Runtime        runtimeMetrics
+	LastCostKnown  bool // settled new-run accounting; prior totals are unavailable after resume
+	Recalled       int
+	Dialog         *Dialog
+	pinTop         int
+	readOrigin     chatOrigin
+	pinned         bool
+	scrollDrag     bool
+	scrollDragY    int
+	scrollDragTop  int
+	stopFlag       bool
+	pendingNew     bool
+	cancel         context.CancelFunc
+	btw            *btwBox
+	carry          []string
 	// Turns counts completed assistant turns for the tab retitler.
 	Turns int
 	// SessionIDs are this chat's run ids, oldest first: the Decisions
@@ -482,6 +482,7 @@ func (m *Model) startRun(raw string) {
 	m.Chat.Stream.Reset()
 	m.Chat.FlushedAll.Reset()
 	m.Chat.Running, m.Chat.Streaming = true, true
+	m.Chat.StreamActivity = ""
 	m.Chat.stopFlag = false
 	box := &btwBox{notes: m.Chat.carry}
 	m.Chat.carry = nil
@@ -532,6 +533,9 @@ func (m *Model) startRun(raw string) {
 		}
 	}
 	if client, ok := r.Model.(*llm.Client); ok {
+		client.WithStreamObserver(func(stage string) {
+			send(eventMsg{seq: seq, kind: "stream_activity", text: stage})
+		})
 		client.WithRequestObserver(func(measurement llm.RequestMeasurement) {
 			raw, _ := json.Marshal(measurement)
 			if err := fanout.Append(context.WithoutCancel(ctx), id, "model_request", string(raw)); err != nil {
@@ -723,6 +727,8 @@ func (m *Model) onEvent(msg eventMsg) {
 		return
 	}
 	switch msg.kind {
+	case "stream_activity":
+		m.Chat.StreamActivity = msg.text
 	case "measurement_error":
 		m.Chat.Runtime.Incomplete = true
 		m.alert("err", "Runtime measurement could not be recorded: "+msg.text)
@@ -1117,56 +1123,6 @@ func (m *Model) contextChat() {
 		s += " (some exchanges unreported)"
 	}
 	m.alert("info", s)
-}
-
-// recallChat searches memories into the transcript.
-func (m *Model) recallChat(args []string) {
-	q := strings.Join(args, " ")
-	if q == "" {
-		m.alert("err", "usage: /recall <query>")
-		return
-	}
-	s, err := store.OpenWithBufferPool(m.StorePath, uint64(m.Cfg.Store.BufferPoolBytes))
-	if err != nil {
-		m.alert("err", fmt.Sprintf("cannot open store: %v", err))
-		return
-	}
-	block, err := memory.Query(s, "", q, m.Cfg.Recall.TopN, m.Cfg.Recall.MaxChars, m.Cfg.Recall.MinWord)
-	s.Close()
-	if err != nil {
-		m.alert("err", fmt.Sprintf("recall failed: %v", err))
-		return
-	}
-	if block == "" {
-		m.alert("info", fmt.Sprintf("no memories match %q", q))
-		return
-	}
-	m.Chat.appendLine(lineSys, block)
-	m.Chat.unpin()
-	m.showChat()
-}
-
-// rememberChat saves one note memory.
-func (m *Model) rememberChat(args []string) {
-	text := strings.Join(args, " ")
-	if text == "" {
-		m.alert("err", "usage: /remember <text>")
-		return
-	}
-	s, err := store.OpenWithBufferPool(m.StorePath, uint64(m.Cfg.Store.BufferPoolBytes))
-	if err != nil {
-		m.alert("err", fmt.Sprintf("cannot open store: %v", err))
-		return
-	}
-	_, err = memory.Add(s, "note", text, "")
-	s.Close()
-	if err != nil {
-		m.alert("err", fmt.Sprintf("remember failed: %v", err))
-		return
-	}
-	m.Chat.appendLine(lineSys, "remembered.")
-	m.Chat.unpin()
-	m.showChat()
 }
 
 // compactChat owns one bounded call; navigation does not transfer its ownership.

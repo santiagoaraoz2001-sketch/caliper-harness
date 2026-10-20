@@ -83,3 +83,42 @@ func TestProgressCheckpointSeparatesStateFromReceiptProvenance(t *testing.T) {
 		t.Fatal("compact judge view changed the original source result")
 	}
 }
+
+func TestProgressWireHasOneCurrentCheckpointAfterSettlement(t *testing.T) {
+	facts := BookkeepingFacts{
+		Unfinished:  json.RawMessage(`{"plan":"active","task":"done"}`),
+		Preparation: "Draft the next recorded article.",
+		Checkpoint:  ProgressCheckpoint{Phase: "PREPARE", PATStep: "inspect-assignment"},
+	}
+	r := &Runner{
+		Prompts:      prompts.Builtin(),
+		Continuation: session.Continuation{Workflow: &session.WorkflowScope{Store: "owner", Kind: "task", ID: "done-task"}},
+		Assigned:     &AssignedOps{Facts: func(context.Context) (any, error) { return facts, nil }},
+		settlement:   &TaskSettlement{TaskID: "done-task", State: "done", Qualified: true},
+	}
+	r.progressCheckpoint(27, time.Now().Add(-time.Minute))
+	packet, err := r.progressEvidence(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(packet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		Checkpoint ProgressCheckpoint
+		Facts      map[string]json.RawMessage
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire.Checkpoint.Phase != "HANDOFF" || wire.Checkpoint.RunStep != 27 || wire.Checkpoint.NextAction != facts.Preparation {
+		t.Fatalf("current owner phase missing: %+v", wire.Checkpoint)
+	}
+	if wire.Facts["Checkpoint"] != nil || wire.Facts["Preparation"] != nil || string(wire.Facts["Unfinished"]) != string(facts.Unfinished) {
+		t.Fatalf("duplicated advice or lost owning state: %s", raw)
+	}
+	if facts.Checkpoint.Phase != "PREPARE" || facts.Preparation == "" {
+		t.Fatal("wire projection mutated internal planning inputs")
+	}
+}

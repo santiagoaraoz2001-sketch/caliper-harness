@@ -276,8 +276,17 @@ func chatRows(m *Model, w int) []chatRow {
 			prose(stripToolBlocks(buf) + "▍")
 		} else {
 			origin.Line, origin.Stream = -1, true
-			set("waiting", "Waiting for model")
-			rows = append(rows, mk("waiting", "Waiting for model…"))
+			label := "Waiting for model…"
+			switch m.Chat.StreamActivity {
+			case "active":
+				label = "Server is responding…"
+			case "thinking":
+				label = "Thinking…"
+			case "tool":
+				label = "Receiving tool call…"
+			}
+			set("waiting", label)
+			rows = append(rows, mk("waiting", label))
 		}
 	}
 	if len(rows) == 0 {

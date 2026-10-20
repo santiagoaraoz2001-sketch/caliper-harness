@@ -18,7 +18,9 @@ import (
 	"specific-harness/internal/decision"
 	"specific-harness/internal/launch"
 	"specific-harness/internal/llm"
+	"specific-harness/internal/memory"
 	"specific-harness/internal/plan"
+	"specific-harness/internal/prompts"
 	"specific-harness/internal/session"
 	"specific-harness/internal/store"
 )
@@ -64,6 +66,15 @@ func TestBehaviorPropagationCapturedRoles(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			style, err := memory.AppendStyleguideRule(ctx, s, root, "explicit-user", "STYLE_ROLE_RULE: keep artifact checks explicit.")
+			if err != nil {
+				t.Fatal(err)
+			}
+			styleBlock, err := prompts.Builtin().Render("continuation.project_style", map[string]any{"Project": root, "Revision": style.ID, "Body": style.Body})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want += "\n\n" + styleBlock
 			p, err := plan.CreatePlanContext(plan.WithProject(ctx, root), s, "p", "create artifact")
 			if err != nil {
 				t.Fatal(err)
@@ -226,7 +237,7 @@ func TestBehaviorPropagationCapturedRoles(t *testing.T) {
 				for i, msgs := range calls {
 					expected := want
 					if role == "parent" && i == len(calls)-1 && lane == "parent registry" {
-						expected = "LATER_RULE_β"
+						expected = "LATER_RULE_β\n\n" + styleBlock
 					}
 					count := 0
 					for _, m := range msgs {

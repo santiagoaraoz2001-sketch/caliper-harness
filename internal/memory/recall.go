@@ -6,6 +6,7 @@ import (
 	"sort"
 	"specific-harness/internal/prompts"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"specific-harness/internal/store"
@@ -27,17 +28,15 @@ var stopwords = map[string]bool{
 func words(text string, min int) map[string]bool {
 	out := map[string]bool{}
 	for _, w := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
-		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	}) {
-		if len(w) >= min && !stopwords[w] {
+		if utf8.RuneCountInString(w) >= min && !stopwords[w] {
 			out[w] = true
 		}
 	}
 	return out
 }
 
-// Rank orders entries by distinct query-word overlap, most first. Ties
-// keep List's newest-first order (stable sort).
 // rooted matches inflections: either word contains the other, so
 // refund finds refunds. Both words cleared the length floor.
 func rooted(ew map[string]bool, w string) bool {
@@ -49,16 +48,38 @@ func rooted(ew map[string]bool, w string) bool {
 	return false
 }
 
-func Rank(entries []*Entry, query string, minWord int) []*Entry {
-	scored := make([]*Entry, len(entries))
-	copy(scored, entries)
-	score := func(e *Entry) int {
-		return overlap(e.Body, query, minWord)
+type scoredEntry struct {
+	entry *Entry
+	score int
+}
+
+func rank(entries []*Entry, query string, minWord int) []scoredEntry {
+	queryWords := words(query, minWord)
+	scored := make([]scoredEntry, len(entries))
+	for i, e := range entries {
+		scored[i].entry = e
+		entryWords := words(e.Key+"\n"+e.FilePath+"\n"+e.Body, minWord)
+		for w := range queryWords {
+			if entryWords[w] || rooted(entryWords, w) {
+				scored[i].score++
+			}
+		}
 	}
 	sort.SliceStable(scored, func(i, j int) bool {
-		return score(scored[i]) > score(scored[j])
+		return scored[i].score > scored[j].score
 	})
 	return scored
+}
+
+// Rank orders entries by distinct query-word overlap in their key, path and
+// body. Scores are computed once; ties keep the input's newest-first order.
+func Rank(entries []*Entry, query string, minWord int) []*Entry {
+	ranked := rank(entries, query, minWord)
+	out := make([]*Entry, len(ranked))
+	for i, scored := range ranked {
+		out[i] = scored.entry
+	}
+	return out
 }
 
 // Recall ranks entries against the query and formats the top matches:
@@ -68,16 +89,16 @@ func Rank(entries []*Entry, query string, minWord int) []*Entry {
 // end in a separate ellipsis line; routine topN selection does not add one.
 // If no whole body fits, return the top head plus an ellipsis (cap1: only …).
 func Recall(entries []*Entry, query string, topN, maxChars, minWord int, catalogs ...*prompts.Catalog) string {
-	if topN <= 0 || len(words(query, minWord)) == 0 {
+	if topN <= 0 {
 		return ""
 	}
-	ranked := Rank(entries, query, minWord)
+	ranked := rank(entries, query, minWord)
 	var matches []*Entry
-	for _, e := range ranked {
-		if overlap(e.Body, query, minWord) == 0 {
+	for _, scored := range ranked {
+		if scored.score == 0 {
 			break
 		}
-		matches = append(matches, e)
+		matches = append(matches, scored.entry)
 	}
 	if len(matches) == 0 {
 		return ""
@@ -116,7 +137,14 @@ func recallBlocks(entries []*Entry, topN, maxChars int, compact bool, catalogs .
 			}
 			block := e.Body
 			if !compact {
-				block = fmt.Sprintf("- [%s] %s", e.Kind, e.Body)
+				label := e.Kind
+				if e.Key != "" {
+					label += fmt.Sprintf(" key=%q", e.Key)
+				}
+				if e.FilePath != "" {
+					label += fmt.Sprintf(" file=%q", e.FilePath)
+				}
+				block = fmt.Sprintf("- [%s] %s", label, e.Body)
 			}
 			size := utf8.RuneCountInString(block)
 			if len(blocks) > 0 {
@@ -150,20 +178,6 @@ func recallBlocks(entries []*Entry, topN, maxChars int, compact bool, catalogs .
 		text += "\n…"
 	}
 	return text
-}
-
-// overlap counts query words found in the body, tolerating
-// inflections (refund matches refunds). Rank and Recall share
-// it: one matching rule, one place to change it.
-func overlap(body, query string, minWord int) int {
-	ew := words(body, minWord)
-	n := 0
-	for w := range words(query, minWord) {
-		if ew[w] || rooted(ew, w) {
-			n++
-		}
-	}
-	return n
 }
 
 // Query recalls legacy global entries. Project-bound callers use QueryProject
@@ -200,7 +214,7 @@ AND NOT EXISTS { MATCH (n:MemoryEntry) WHERE n.previous_id = m.id }
 		q += " AND m.kind = $kind"
 		params["kind"] = kind
 	}
-	q += ` RETURN m.id AS id, m.kind AS kind, m.body AS body,
+	q += ` RETURN m.id AS id, m.kind AS kind, m.body AS body, m.key AS key, m.file_path AS file_path,
 m.created_at AS created_at, m.session_ref AS ref ORDER BY created_at DESC, id`
 	rows, err := s.QueryContext(ctx, q, params)
 	if err != nil {

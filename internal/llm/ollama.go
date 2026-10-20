@@ -41,6 +41,11 @@ func (c *Client) ollamaRoot() string { return strings.TrimSuffix(c.baseURL, "/v1
 // chatOllama is the native plain/NDJSON text branch. Thinking never enters the
 // answer, callback or tool parser. Every completed answer needs a done event.
 func (c *Client) chatOllama(ctx context.Context, msgs []Message, stream bool, onDelta func(string), tools []ToolDefinition, capture *Reply) (reply, served string, usage Usage, err error) {
+	activity := func(string) {}
+	if stream {
+		activity = c.streamActivity()
+		defer activity("")
+	}
 	defer func() {
 		if err != nil {
 			err = fmt.Errorf("native model server at %s: %w", c.baseURL, err)
@@ -135,6 +140,15 @@ func (c *Client) chatOllama(ctx context.Context, msgs []Message, stream bool, on
 				return fmt.Errorf("unexpected tool calls in native text reply")
 			}
 			capture.Message.ToolCalls = append(capture.Message.ToolCalls, calls...)
+		}
+		if chunk.Message.Thinking != "" {
+			activity("thinking")
+		}
+		if len(calls) > 0 {
+			activity("tool")
+		}
+		if chunk.Message.Content != "" {
+			activity("content")
 		}
 		full.WriteString(chunk.Message.Content)
 		thinking.WriteString(chunk.Message.Thinking)

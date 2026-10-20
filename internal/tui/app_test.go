@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -249,12 +250,17 @@ func TestAuthBogus(t *testing.T) {
 func TestPickerPages(t *testing.T) {
 	m := New(testCfg(), "test")
 	m.Input.SetValue("/")
-	if v := m.View(); !strings.Contains(v, "1/32") || !strings.Contains(v, "/chat") || strings.Contains(v, "/quit") {
+	total := len(m.suggestions())
+	if v := m.View(); !strings.Contains(v, fmt.Sprintf("1/%d", total)) || !strings.Contains(v, "/chat") || strings.Contains(v, "/quit") {
 		t.Fatal("page 1 must show head only")
 	}
 	m.PickerIdx = 20
-	if v := m.View(); !strings.Contains(v, "21/32") || !strings.Contains(v, "…16 above") || strings.Contains(v, "/chat") {
+	if v := m.View(); !strings.Contains(v, fmt.Sprintf("21/%d", total)) || !strings.Contains(v, "…16 above") || strings.Contains(v, "/chat") {
 		t.Error("page 3 must show tail with above-count")
+	}
+	m.PickerIdx = total - 1
+	if v := m.View(); !strings.Contains(v, fmt.Sprintf("%d/%d", total, total)) || !strings.Contains(v, "/quit") || strings.Contains(v, "/chat") || strings.Contains(v, " more") {
+		t.Error("last page must show final command without a remaining-page hint")
 	}
 }
 

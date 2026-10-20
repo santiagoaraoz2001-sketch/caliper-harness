@@ -835,15 +835,7 @@ func TestAssignedPreparationAdvice(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		raw, e := json.Marshal(facts)
-		if e != nil {
-			t.Fatal(e)
-		}
-		var v struct{ Preparation string }
-		if e = json.Unmarshal(raw, &v); e != nil {
-			t.Fatal(e)
-		}
-		return v.Preparation
+		return facts.(agent.BookkeepingFacts).Preparation
 	}
 	rr := makeRunner(nil)
 	if _, available := rr.Registry.Lookup("prepare_task"); !available {
