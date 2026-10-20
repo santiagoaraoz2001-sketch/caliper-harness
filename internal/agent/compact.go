@@ -337,17 +337,19 @@ func (r *Runner) reviewCompaction(ctx context.Context, c session.Continuation, s
 			ids = append(ids, call.ID)
 		}
 	}
+	anchors, repeated := shareAnchorContent(anchors)
 	raw, err := json.Marshal(struct {
-		Summary       string
-		Anchors       []session.Entry
-		Coding        *session.CodingState
-		Assignment    *session.Assignment
-		Workflow      *session.WorkflowScope
-		SourceSHA256  string
-		SourceBytes   int
-		SourceCallIDs []string
-		SessionID     string
-	}{summary, anchors, c.Coding, c.Assignment, c.Workflow, fmt.Sprintf("%x", sha256.Sum256([]byte(source))), len(source), ids, r.SessionID})
+		Summary               string
+		Anchors               []session.Entry
+		Coding                *session.CodingState
+		Assignment            *session.Assignment
+		Workflow              *session.WorkflowScope
+		SourceSHA256          string
+		SourceBytes           int
+		SourceCallIDs         []string
+		SessionID             string
+		RepeatedAnchorContent []anchorContentReference `json:",omitempty"`
+	}{summary, anchors, c.Coding, c.Assignment, c.Workflow, fmt.Sprintf("%x", sha256.Sum256([]byte(source))), len(source), ids, r.SessionID, repeated})
 	if err != nil {
 		return false, err
 	}
@@ -374,4 +376,28 @@ func (r *Runner) reviewCompaction(ctx context.Context, c session.Continuation, s
 		return false, errors.Join(compactionRecordFailure, saved)
 	}
 	return resolution == "accepted", ctx.Err()
+}
+
+// References use zero-based anchor indices. Only exact repeated text is shared;
+// every entry keeps its position, provenance, call ID and unread status.
+type anchorContentReference struct{ Anchor, ContentFromAnchor int }
+
+func shareAnchorContent(anchors []session.Entry) ([]session.Entry, []anchorContentReference) {
+	out := make([]session.Entry, len(anchors))
+	copy(out, anchors)
+	first := make(map[string]int)
+	var refs []anchorContentReference
+	for i, e := range out {
+		text := e.Message.Content
+		if text == "" {
+			continue
+		}
+		if source, ok := first[text]; ok {
+			out[i].Message.Content = ""
+			refs = append(refs, anchorContentReference{i, source})
+		} else {
+			first[text] = i
+		}
+	}
+	return out, refs
 }

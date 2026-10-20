@@ -5,17 +5,25 @@ import (
 	"encoding/json"
 	"fmt"
 	tea "github.com/charmbracelet/bubbletea"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
 	"specific-harness/internal/config"
+	"specific-harness/internal/decision"
 	"specific-harness/internal/llm"
 	"specific-harness/internal/serve"
 	"specific-harness/internal/session"
 	"strings"
 	"testing"
 )
+
+type nativeHealthRoundTrip func(*http.Request) (*http.Response, error)
+
+func (f nativeHealthRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+const nativeManageHealth = `{"pid":123,"status":"ok","loaded":true,"ready":true,"loading":false,"model":"active/judge","active":{"model":"active/judge","runtime":"system_one","source":"/models/active","path":"/models/active","revision":"revision-a","device":"gpu","native_device":"mps:0","architecture":"D1Model","parameters":123,"selection":{"model":"active/judge","runtime":"system_one","device":"gpu","path":"/models/active","revision":"revision-a","trust_remote_code":true}},"requested":{"model":"pending/judge","runtime":"system_one","device":"gpu","path":"/models/pending","revision":"revision-b","trust_remote_code":false},"error":null,"backends":["gpu"]}`
 
 func TestExplicitManageFreshNoDiscoveryOrGuessedEndpoints(t *testing.T) {
 	m := New(config.Defaults(), "test")
@@ -28,6 +36,128 @@ func TestExplicitManageFreshNoDiscoveryOrGuessedEndpoints(t *testing.T) {
 		t.Fatalf("ambient discovery called=%t rows=%+v", scanned, result.rows)
 	}
 }
+func TestExplicitManageNativeHealthOffersActiveModelWithoutAssigningRole(t *testing.T) {
+	m := setupFixture(t, 100, 30)
+	m.Setup = SetupState{}
+	m.Cfg.Model.Name = ""
+	m.Cfg.Decision.Disabled = true
+	endpoint := "http://127.0.0.1:19990"
+	m.Cfg.Serve.Recipes = []config.RecipeConfig{{Name: "External D1", Kind: serve.KindSidecar, Runtime: "system_one", URL: endpoint}}
+	before := m.Cfg.Decision
+	var requests []string
+	client := &http.Client{Transport: nativeHealthRoundTrip(func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(nativeManageHealth)), Header: make(http.Header)}, nil
+	})}
+	m.onServeProbed(m.probeServeWith(client)().(serveProbedMsg))
+	if len(m.Serve.Rows) != 2 || !m.Serve.Rows[1].IsModel || !m.Serve.Rows[1].Sidecar || m.Serve.Rows[1].Ep.Model != "active/judge" {
+		t.Fatalf("ready active native model not selectable: %+v", m.Serve.Rows)
+	}
+	if !reflect.DeepEqual(m.Cfg.Decision, before) || len(m.Serve.Spawned) != 0 || m.Serve.Rows[1].Ours {
+		t.Fatal("read-only discovery assigned a role or claimed the external server")
+	}
+	m.Serve.Sel = 1
+	m.serveUseJudge()
+	if m.Settings.DecisionDraft == nil || m.Settings.DecisionDraft.Model != "active/judge" || m.Settings.DecisionDraft.Server != endpoint || m.Settings.DecisionDraft.Runtime != "system_one" {
+		t.Fatalf("explicit Judge selection did not stage native identity: %+v", m.Settings.DecisionDraft)
+	}
+	if !reflect.DeepEqual(requests, []string{"GET /health"}) || !reflect.DeepEqual(m.Cfg.Decision, before) {
+		t.Fatalf("staging applied a remote effect or changed current selection: %v", requests)
+	}
+}
+
+func TestExplicitManageActiveJudgeReusesIdentityButNeverTrustPermission(t *testing.T) {
+	for _, tc := range []struct {
+		name, model string
+		unready     bool
+		trust       bool
+		stagedTrust bool
+		adopt       bool
+		checkpoint  bool
+	}{
+		{"active-needs-explicit-trust", "active/judge", false, false, false, true, false},
+		{"active-already-trusted", "active/judge", false, true, false, true, false},
+		{"active-preserves-staged-trust", "active/judge", false, false, true, true, false},
+		{"active-after-saved-checkpoint-reopen", "active/judge", false, true, false, true, true},
+		{"other-model-keeps-request", "other/judge", false, false, false, false, false},
+		{"unready-does-not-copy-requested", "active/judge", true, false, false, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := setupFixture(t, 100, 30)
+			m.Setup = SetupState{}
+			m.Cfg.Decision.TrustRemoteCode = tc.trust
+			if tc.stagedTrust {
+				draft := m.Cfg.Decision
+				draft.TrustRemoteCode = true
+				m.Settings.DecisionDraft = &draft
+			}
+			h, err := decision.DecodeHealth(strings.NewReader(nativeManageHealth))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.unready {
+				unready := false
+				h.Ready, h.Active = &unready, nil
+			}
+			before := m.Cfg.Decision
+			m.Serve.Rows = []ServeRow{{Ep: serve.Endpoint{URL: "http://external", Model: tc.model}, IsModel: true, Sidecar: true, Health: serve.Health{Up: true, Decision: &h}, Recipe: &serve.Recipe{Runtime: "system_one"}}}
+			if tc.checkpoint {
+				m.Serve.Rows[0].Asset = &serve.Asset{ID: "snapshot-directory", Path: "/models/active", Runtime: "system_one", Format: "safetensors", Complete: true}
+				row := serveModelRow(m, 0, m.Serve.Rows[0], 100)
+				if !strings.Contains(row, "active/judge") || strings.Contains(row, "snapshot-directory") {
+					t.Fatalf("active native model displayed as snapshot: %s", row)
+				}
+			}
+			m.Serve.Sel = 0
+			m.serveUseJudge()
+			draft := m.Settings.DecisionDraft
+			trusted := tc.trust || tc.stagedTrust
+			if draft == nil || draft.Model != tc.model || draft.TrustRemoteCode != trusted || !reflect.DeepEqual(m.Cfg.Decision, before) {
+				t.Fatalf("explicit selection changed permission/current state: %+v", draft)
+			}
+			if tc.adopt {
+				if draft.Path != "/models/active" || draft.Revision != "revision-a" || draft.Runtime != "system_one" || draft.Device != "gpu" {
+					t.Fatalf("active identity not reused: %+v", draft)
+				}
+				if !trusted && !strings.Contains(m.Settings.DecisionNotice, "/settings → trust decision remote code") {
+					t.Fatal("missing explicit trust action")
+				}
+			} else if draft.Path != "" || draft.Revision != "" {
+				t.Fatalf("copied another or unready identity: %+v", draft)
+			}
+			if cmd := m.applyDecisionSelection(); cmd != nil || len(m.Serve.Spawned) != 0 {
+				t.Fatal("external selection sent a lifecycle action")
+			}
+			if tc.adopt && trusted && !strings.Contains(m.Settings.DecisionNotice, "matches last health check") {
+				t.Fatal("matching external identity still claimed pending")
+			}
+			if tc.adopt && !trusted && !strings.Contains(m.Settings.DecisionNotice, "/settings → trust decision remote code") {
+				t.Fatal("Apply lost the required explicit trust action")
+			}
+		})
+	}
+}
+
+func TestExplicitManageDifferentNativeCheckpointRemainsRequested(t *testing.T) {
+	m := setupFixture(t, 100, 30)
+	m.Setup = SetupState{}
+	h, err := decision.DecodeHealth(strings.NewReader(nativeManageHealth))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Serve.Rows = []ServeRow{{Ep: serve.Endpoint{URL: "http://external", Model: "active/judge"}, IsModel: true, Sidecar: true, Health: serve.Health{Up: true, Decision: &h}, Recipe: &serve.Recipe{Runtime: "system_one"}, Asset: &serve.Asset{ID: "active/judge", Path: path, Revision: "requested-revision", Runtime: "system_one", Format: "safetensors", Complete: true}}}
+	m.Serve.Sel = 0
+	m.serveUseJudge()
+	draft := m.Settings.DecisionDraft
+	if draft == nil || draft.Path != path || draft.Revision != "requested-revision" || draft.TrustRemoteCode {
+		t.Fatalf("active identity overrode a different explicit checkpoint: %+v", draft)
+	}
+}
+
 func TestExplicitManageOfflineInteractionAndMachineRoundtrip(t *testing.T) {
 	m := setupFixture(t, 100, 30)
 	m.Setup = SetupState{}

@@ -638,7 +638,7 @@ func verifyPass(ctx context.Context, d Deps, results []Result, indices []int, wi
 	return errors.Join(errs...)
 }
 
-// reviewToken reads a leading verdict, including a standalone Markdown heading.
+// reviewToken reads a leading verdict, including Markdown emphasis or a heading.
 // It never searches quoted examples or later prose for a success marker.
 func reviewToken(out string) string {
 	first := ""
@@ -652,10 +652,13 @@ func reviewToken(out string) string {
 	if len(fields) == 0 {
 		return ""
 	}
+	indent := first[:len(first)-len(strings.TrimLeft(first, " \t"))]
+	if len(indent) >= 4 || strings.Contains(indent, "\t") {
+		return "" // An indented code example is not a verdict.
+	}
 	if strings.Trim(fields[0], "#") == "" {
-		indent := first[:len(first)-len(strings.TrimLeft(first, " \t"))]
-		if len(fields[0]) > 6 || len(indent) >= 4 || strings.Contains(indent, "\t") {
-			return "" // Not a Markdown heading, or an indented code block.
+		if len(fields[0]) > 6 {
+			return "" // Not a Markdown heading.
 		}
 		if len(fields) == 3 && strings.Trim(fields[2], "#") == "" {
 			fields = fields[:2] // Optional closing heading markers.
@@ -663,9 +666,46 @@ func reviewToken(out string) string {
 		if len(fields) != 2 {
 			return "" // A heading must contain one unambiguous verdict.
 		}
-		return strings.TrimSuffix(strings.ToUpper(fields[1]), ":")
+		return reviewWord(fields[1])
 	}
-	return strings.ToUpper(strings.SplitN(fields[0], ":", 2)[0])
+	// Reject a list of verdict choices at the start, without searching the
+	// supporting prose (which can legitimately discuss another verdict).
+	for _, word := range fields[1:] {
+		switch strings.ToLower(word) {
+		case "/", "|", "or", "and", ",":
+			continue
+		}
+		if reviewWord(word) != "" {
+			return ""
+		}
+		break
+	}
+	return reviewWord(fields[0])
+}
+
+func reviewWord(word string) string {
+	// Formatting is not part of the verdict. Require a paired wrapper around
+	// the whole word rather than stripping arbitrary punctuation or searching.
+	word = strings.TrimSuffix(word, ":")
+	for _, marker := range []string{"**", "__", "*", "_"} {
+		if strings.HasPrefix(word, marker) {
+			if len(word) <= 2*len(marker) || !strings.HasSuffix(word, marker) {
+				return ""
+			}
+			word = strings.TrimSuffix(strings.TrimPrefix(word, marker), marker)
+			break
+		}
+	}
+	word, explanation, _ := strings.Cut(strings.ToUpper(word), ":")
+	switch explanation {
+	case "PASS", "FAIL", "UNVERIFIED":
+		return "" // Conflicting choices, not an explanation.
+	}
+	switch word {
+	case "PASS", "FAIL", "UNVERIFIED":
+		return word
+	}
+	return ""
 }
 func reviewVerdict(out string) outcome.Verification {
 	switch reviewToken(out) {

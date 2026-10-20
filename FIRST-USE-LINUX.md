@@ -26,7 +26,11 @@ New workspace state lives in `$XDG_DATA_HOME/caliper`, or
 `~/.local/share/caliper` when that variable is unset. Each project has a separate
 workspace keyed by its canonical path. Existing project-local data and explicit
 configuration paths remain in use. Reusable connections live in the OS user
-configuration directory. Keep these user directories when removing old versions.
+configuration directory. Ordinary Settings saves become personal defaults across
+directories; project checks and graph/session state stay with their workspace.
+An authored project YAML or explicit `--config` overrides personal defaults, and
+Settings displays that scope before saving. Keep these user directories when
+removing old versions.
 
 ## Downloadable folder
 
@@ -34,9 +38,9 @@ Large Linux archives are split to fit GitHub's per-file release size. Download
 all matching parts and the checksum file from the same release. For example:
 
 ```sh
-cat caliper-0.1.2-linux-amd64.tar.gz.part-* > caliper-0.1.2-linux-amd64.tar.gz
-sha256sum -c caliper-0.1.2-linux-amd64.tar.gz.sha256
-tar -xzf caliper-0.1.2-linux-amd64.tar.gz
+cat caliper-0.2.0-linux-amd64.tar.gz.part-* > caliper-0.2.0-linux-amd64.tar.gz
+sha256sum -c caliper-0.2.0-linux-amd64.tar.gz.sha256
+tar -xzf caliper-0.2.0-linux-amd64.tar.gz
 cd Caliper
 sh ./install.sh
 ```

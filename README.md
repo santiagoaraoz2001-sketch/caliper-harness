@@ -124,8 +124,9 @@ models. See [FIRST-USE.md](FIRST-USE.md) for macOS prerequisites.
 
 On Windows, run `powershell -ExecutionPolicy Bypass -File .\install-windows.ps1`
 inside the extracted folder, reopen the terminal application, then run `caliper`.
-Both Windows packaging modes include the installer. Windows and Linux native
-execution still require qualification; source portability is not runtime proof.
+Both Windows packaging modes include the installer. Native release checks cover
+installation, selected Go packages and terminal workflows on Windows and Linux;
+they do not qualify model inference or every GPU/driver combination.
 See [FIRST-USE-WINDOWS.md](FIRST-USE-WINDOWS.md) and [PORTABILITY.md](PORTABILITY.md).
 
 ### Build from source
@@ -143,7 +144,8 @@ is `caliper-harness`. `make bundle-macos OUT=...` prepares a fresh
 self-contained app folder. On Windows, `make bundle-windows OUT=...` builds
 an offline developer folder using installed Go, mingw-w64 GCC, Bash and ripgrep.
 Private runtime acquisition is a separate explicit command documented in
-[PORTABILITY.md](PORTABILITY.md); neither Windows packaging mode is natively qualified.
+[PORTABILITY.md](PORTABILITY.md). The managed mode is used by native release checks;
+the offline developer mode has a separate environment and acceptance scope.
 
 On first run with no coding model configured, Setup opens. Add your server
 and model, choose the Coding and Judge roles, optionally enter your project
@@ -294,16 +296,16 @@ template and examples.
 
 ## Release status
 
-Caliper is an early development release. Local-model runs have exercised
-planning, task claims, edits, paired checks and independent review. The latest
-completed benchmark qualified both Tasks but left their Approach and Plan open;
-v0.1.0 corrected that handoff and a fresh benchmark is still in progress.
-D1 can miss repetitive reasoning. Passing checks and reviewer agreement do not
-guarantee correctness.
+Caliper is an early development release. Mac GPU runs exercise planning,
+task claims, edits, paired checks, independent review and handoff. Results depend
+on the model and task; D1 can miss repetitive reasoning, and passing checks plus
+reviewer agreement do not guarantee correctness.
 
-The downloadable application folder targets Apple Silicon Macs. Windows and
-Linux share the source, but native builds and runtime behavior still need
-validation on those systems. See [PORTABILITY.md](PORTABILITY.md).
+The published v0.1.6 packages passed native build, installation, runtime-import
+and terminal UI checks on macOS arm64, Windows x64 and Linux x64/ARM64.
+Those checks do not establish Windows/Linux model inference. The final v0.2.0
+native package and upgrade gates are pending at this source revision; release
+notes record their results before publication. See [PORTABILITY.md](PORTABILITY.md).
 
 Development plans, benchmark traces and scratch notes stay local. Release
 changes and qualification notes are published on [GitHub Releases](https://github.com/santiagoaraoz2001-sketch/caliper-harness/releases).
@@ -311,7 +313,7 @@ changes and qualification notes are published on [GitHub Releases](https://githu
 ## Testing
 
 ```sh
-make test    # go test ./... — 31 packages
+make test    # go test ./...
 make vet     # go vet ./...
 ```
 

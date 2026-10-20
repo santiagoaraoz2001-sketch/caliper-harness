@@ -74,6 +74,7 @@ func TestCancellationCLIExitAndOwnedInput(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestOutcomeCLIProcess$")
+			prepareCancellationProcess(cmd)
 			cmd.Env = append(os.Environ(), "HARNESS_OUTCOME_COMPONENT_HELPER=1", "HARNESS_OUTCOME_COMPONENT_ARGV="+strings.Join([]string{"--config", path, "--prompt", "cancellation component", "--max-steps", steps}, "\x1f"))
 			input, err := cmd.StdinPipe()
 			if err != nil {
@@ -111,7 +112,7 @@ func TestCancellationCLIExitAndOwnedInput(t *testing.T) {
 					time.Sleep(5 * time.Millisecond)
 				}
 			}
-			if err := cmd.Process.Signal(os.Interrupt); err != nil {
+			if err := interruptCancellationProcess(cmd); err != nil {
 				t.Fatal(err)
 			}
 			err = cmd.Wait()

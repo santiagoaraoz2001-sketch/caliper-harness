@@ -281,7 +281,9 @@ func TestD09DiskCandidatesAndExactNameFocus(t *testing.T) {
 	}
 	m := New(testCfg(), "test")
 	m.Cfg.Serve.Models = []config.SavedModel{{Server: m.Cfg.Model.Server, Name: path, Path: path}}
-	m.Cfg.Serve.Recipes = []config.RecipeConfig{{Name: "my-mlx", Kind: "openai", Runtime: "mlx", URL: m.Cfg.Model.Server, Launcher: "preset"}}
+	// Explicit metadata-only recipe: this test selects a checkpoint, never
+	// launches MLX or depends on a platform's installed preset.
+	m.Cfg.Serve.Recipes = []config.RecipeConfig{{Name: "my-mlx", Kind: "openai", Runtime: "mlx", URL: m.Cfg.Model.Server, Argv: []string{"fixture-model-server", "--model", "{model}"}}}
 	msg := m.probeServeWith(&http.Client{Transport: &pathStub{}})().(serveProbedMsg)
 	var found ServeRow
 	for _, r := range msg.rows {

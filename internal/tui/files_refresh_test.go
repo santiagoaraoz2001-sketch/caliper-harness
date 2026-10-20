@@ -88,6 +88,9 @@ func TestFilesRefreshFailureAndRecovery(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer os.Chmod(p, 0600)
+				if _, err := os.ReadFile(p); err == nil {
+					t.Skip("file permissions do not deny reads for this process")
+				}
 			}
 			m = filesPoll(t, m)
 			if m.Files.Viewer != nil || m.Files.Err == "" {
@@ -238,6 +241,11 @@ func TestFilesRefreshReadErrorVisibleAtTerminalWidth(t *testing.T) {
 	if m.Files.Viewer != nil || m.Files.Err == "" {
 		t.Fatal("missing file did not clear viewer")
 	}
+	_, readErr := os.ReadFile(p)
+	pathErr, ok := readErr.(*os.PathError)
+	if !ok || !os.IsNotExist(pathErr) {
+		t.Fatalf("missing-file fixture: %v", readErr)
+	}
 	for _, width := range []int{120, 80} {
 		t.Run(strconv.Itoa(width), func(t *testing.T) {
 			m.Width, m.Height = width, 32
@@ -247,7 +255,7 @@ func TestFilesRefreshReadErrorVisibleAtTerminalWidth(t *testing.T) {
 				visible = append(visible, ansi.Truncate(ansi.Strip(row), width, ""))
 			}
 			screen := strings.Join(visible, "\n")
-			for _, want := range []string{"no such file", "retrying", "esc closes detail"} {
+			for _, want := range append(strings.Fields(pathErr.Err.Error()), "retrying", "esc closes detail") {
 				if !strings.Contains(screen, want) {
 					t.Fatalf("width%d hidden %q:\n%s", width, want, screen)
 				}

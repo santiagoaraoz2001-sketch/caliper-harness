@@ -1,6 +1,44 @@
 # Platform qualification
 
-MacOS, Windows and Linux retain the same shared source and platform-specific build files. Windows/Linux native acceptance remains separate from Mac validation.
+MacOS, Windows and Linux retain the same shared source and platform-specific
+build files. Each target has its own native release checks; a Mac result does not
+qualify Windows or Linux.
+
+## Current qualification
+
+The published v0.1.6 release, source `f8977791546e1b2685ca8320fbd9b0fabda069a5`,
+passed native release workflow
+[39448081115](https://github.com/santiagoaraoz2001-sketch/caliper-harness/actions/runs/39448081115)
+for macOS arm64, Windows x64, Linux x64 and Linux ARM64.
+The gate exercised product build and launch, private-runtime imports after
+relocation, selected native Go packages, `/status` and `/manage` through an actual
+terminal, whole-product npm installation, and command startup from another
+directory. Windows also exercised prerequisite and reinstall-preservation paths.
+Release archives were independently checked against their hashes and inventories.
+
+The v0.2.0 gate adds CLI and TUI Go tests and broader settings/setup regression
+coverage. Its final artifacts and upgrade-preservation check are pending at this
+source revision. Release notes identify the exact qualified commit and results;
+an earlier successful build is not evidence for an untested later commit.
+
+These checks do not run models on Windows or Linux. Model compatibility,
+inference quality, GPU drivers, unfamiliar terminal hosts, macOS notarization and
+arbitrary fresh-machine environments remain separate qualification work.
+Mac GPU model benchmarks are recorded separately from packaging tests.
+
+Managed releases include their private decision runtime and ripgrep; macOS also
+includes the MLX worker runtime. Linux bundles the CUDA dependencies upfront, but
+does not supply GPU drivers or the MLX worker. Windows uses Microsoft's installed
+x64 Visual C++ runtime after a prerequisite check; Caliper does not redistribute
+Microsoft's installer or runtime DLLs. Model weights and project check tools stay
+user-managed. See the platform's `FIRST-USE` document for installation.
+
+## Historical implementation record
+
+The dated development notes below describe what had and had not been exercised
+at those earlier checkpoints. Their “unrun” and “candidate” labels are historical;
+the current release scope is stated above. Offline developer packaging remains
+distinct from the managed release workflow.
 
 # Windows
 

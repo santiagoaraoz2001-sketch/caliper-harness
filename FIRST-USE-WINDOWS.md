@@ -65,6 +65,11 @@ Work from the project directory you want the model to edit and run `caliper`. Wh
 
 Use `/manage` to add, edit, test and select saved servers/models. `/status` shows runtime activity and measured usage. Caliper does not scan the computer for models or servers. `/help`, `/settings` and `/sessions` work as on macOS. In Settings, disabling the decision model uses human approval for readiness and Risky actions, preserves checks and independent review, and disables automatic progress advice and recovery. New terminal tabs require Windows Terminal (the `wt.exe` on your PATH); in other consoles Caliper prints the resume command instead of opening a tab.
 
+Ordinary Settings saves become personal defaults across directories. Project
+checks and graph/session state stay with their workspace. An authored project
+YAML or explicit `--config` overrides personal defaults; Settings displays that
+project scope before saving.
+
 ## Building from source (developers)
 
 Two native Windows amd64 packaging modes are available. Both require Go 1.25+, compatible mingw-w64 GCC/CGO, Bash and cached Go dependencies. Both require the system Microsoft Visual C++ x64 runtime described above. Build scripts check it without downloading or opening an installer; run `scripts\ensure-windows-runtime.ps1` interactively first if needed.

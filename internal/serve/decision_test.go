@@ -21,6 +21,30 @@ func TestDecisionProbeUnrelated200Refuses(t *testing.T) {
 	}
 }
 
+func TestDecisionProbeCatalogContainsOnlyReadyActiveModel(t *testing.T) {
+	ready := `{"pid":123,"status":"ok","loaded":true,"ready":true,"loading":false,"model":"active/judge","active":{"model":"active/judge","runtime":"system_one","source":"/models/active","path":"/models/active","revision":null,"device":"gpu","native_device":"mps:0","architecture":"D1Model","parameters":123,"selection":{"model":"active/judge","runtime":"system_one","device":"gpu","path":null,"revision":null,"trust_remote_code":false}},"requested":{"model":"pending/judge","runtime":"system_one","device":"gpu","path":null,"revision":null,"trust_remote_code":false},"error":null,"backends":["gpu"]}`
+	for _, tc := range []struct {
+		name, body string
+		up         bool
+		available  []string
+	}{
+		{"ready-active-not-requested", ready, true, []string{"active/judge"}},
+		{"unready-request-is-not-catalog", `{"pid":123,"status":"not_ready","loaded":false,"ready":false,"loading":true,"model":null,"active":null,"requested":{"model":"pending/judge","runtime":"system_one","device":"gpu","path":null,"revision":null,"trust_remote_code":false},"error":null,"backends":[]}`, true, nil},
+		{"malformed-active-refused", strings.Replace(ready, `"model":"active/judge","active"`, `"model":"wrong/judge","active"`, 1), false, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := client(map[string]struct {
+				status int
+				body   string
+			}{"/health": route(200, tc.body)})
+			h := Probe(c, Endpoint{Kind: KindSidecar, URL: "http://fixture.invalid"})
+			if h.Up != tc.up || !reflect.DeepEqual(h.Available, tc.available) || len(h.Loaded) != 0 {
+				t.Fatalf("native catalog: %+v", h)
+			}
+		})
+	}
+}
+
 func TestDecisionRecipeOpenSelectionAndOwnership(t *testing.T) {
 	path, rev := "/downloaded native", "fixed"
 	s := decision.Selection{Model: "third/compatible", Runtime: "system_one", Device: "gpu", Path: &path, Revision: &rev, TrustRemoteCode: true}

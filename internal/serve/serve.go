@@ -164,7 +164,13 @@ func probeSidecarContext(ctx context.Context, client *http.Client, base string) 
 	if err != nil {
 		return Health{Reachable: true, Err: err.Error()}
 	}
-	return Health{Reachable: true, Up: true, LatencyMs: ms, Decision: &h}
+	result := Health{Reachable: true, Up: true, LatencyMs: ms, Decision: &h}
+	// A validated active identity is the native server's selectable catalog.
+	// Pending requests and an unready service are not available models.
+	if h.IsReady() && h.Active != nil {
+		result.Available = []string{h.Active.Model}
+	}
+	return result
 }
 
 func probeOllama(client *http.Client, base string) Health {

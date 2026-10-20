@@ -5,7 +5,9 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -31,6 +33,36 @@ func TestFileInputNullReturnsEOFWithoutClosingCaller(t *testing.T) {
 	}
 	if _, err := file.Stat(); err != nil {
 		t.Fatalf("caller file closed: %v", err)
+	}
+}
+
+func TestFileInputRedirectedStdin(t *testing.T) {
+	if os.Getenv("CALIPER_STDIN_HELPER") == "1" {
+		input, err := NewFileInput(os.Stdin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer input.Close()
+		for _, want := range []string{"first\n", "second\n"} {
+			if got, err := input.ReadLine(context.Background()); got != want || err != nil {
+				t.Fatalf("piped stdin: %q, %v; want %q", got, err, want)
+			}
+		}
+		if err := input.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stdin.Stat(); err != nil {
+			t.Fatalf("caller stdin closed: %v", err)
+		}
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestFileInputRedirectedStdin$")
+	cmd.Env = append(os.Environ(), "CALIPER_STDIN_HELPER=1")
+	cmd.Stdin = strings.NewReader("first\nsecond\n")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("redirected stdin subprocess: %v\n%s", err, out)
 	}
 }
 

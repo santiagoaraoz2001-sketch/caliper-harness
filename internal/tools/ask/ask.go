@@ -35,11 +35,16 @@ func NewInput(in io.ReadCloser) *Input {
 }
 
 // NewFileInput owns cancellable reads for this invocation, without changing
-// stdin flags or closing the caller's file. Only its cancellation pipes close.
+// stdin flags or closing the caller's file. Only its owned handles close.
 func NewFileInput(in *os.File) (*Input, error) {
 	info, err := in.Stat()
 	if err != nil {
 		return nil, fmt.Errorf("cannot inspect input: %w", err)
+	}
+	if info.Mode()&os.ModeNamedPipe != 0 {
+		if input, err := ownedPipeInput(in); input != nil || err != nil {
+			return input, err
+		}
 	}
 	var source io.Reader = in
 	null, nullErr := os.Stat(os.DevNull)

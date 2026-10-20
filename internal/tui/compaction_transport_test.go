@@ -241,6 +241,9 @@ func TestManualCompactionTransportConfiguredTimeoutAndCancel(t *testing.T) {
 			defer srv.Close()
 			m := transportCompactModel(t, srv.URL)
 			m.Cfg.Agent.MaxRunSeconds = 1
+			if cancelled {
+				m.Cfg.Agent.MaxRunSeconds = 0
+			}
 			original := m.Chat.Context.Clone()
 			cmd := m.compactChat()
 			if cmd == nil {
@@ -249,10 +252,19 @@ func TestManualCompactionTransportConfiguredTimeoutAndCancel(t *testing.T) {
 			defer m.Chat.compactCancel()
 			done := make(chan compactDoneMsg, 1)
 			go func() { done <- cmd().(compactDoneMsg) }()
-			<-entered
 			if cancelled {
+				select {
+				case <-entered:
+				case result := <-done:
+					t.Fatalf("compaction returned before explicit cancellation: %v", result.runErr)
+				case <-time.After(3 * time.Second):
+					t.Fatal("compaction did not enter the transport")
+				}
 				m.Chat.compactCancel()
 			}
+			// The configured total budget includes opening Kuzu. On a cold host
+			// it can expire before HTTP starts; that completion is still the
+			// behavior under test, so do not wait unconditionally for entered.
 			var result compactDoneMsg
 			select {
 			case result = <-done:

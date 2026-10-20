@@ -598,7 +598,8 @@ func (m *Model) serveUseJudge() {
 	if r == nil || m.servingBusy() {
 		return
 	}
-	if r.Sidecar && r.Asset != nil {
+	active := activeNativeJudge(r)
+	if r.Sidecar && r.Asset != nil && active == nil {
 		next := m.Cfg
 		if m.Settings.DecisionDraft != nil {
 			next.Decision = *m.Settings.DecisionDraft
@@ -633,13 +634,29 @@ func (m *Model) serveUseJudge() {
 	}
 	if r.IsModel && r.Sidecar {
 		next := m.Cfg
+		if m.Settings.DecisionDraft != nil {
+			next.Decision = *m.Settings.DecisionDraft
+		}
 		next.Decision.Disabled = false
 		next.Decision.Server = r.Ep.URL
 		next.Decision.Model = r.Ep.Model
 		next.Decision.Path = ""
 		next.Decision.Revision = ""
+		notice := "Native Judge selection staged · availability unconfirmed · a apply · Settings s save"
 		if r.Recipe != nil && decision.NativeRuntime(r.Recipe.Runtime) {
 			next.Decision.Runtime = r.Recipe.Runtime
+		}
+		if active != nil {
+			selection := active.Selection
+			next.Decision.Runtime, next.Decision.Device = selection.Runtime, active.Device
+			if selection.Path != nil {
+				next.Decision.Path = *selection.Path
+			}
+			if selection.Revision != nil {
+				next.Decision.Revision = *selection.Revision
+			}
+			notice = "Active native Judge identity staged · a apply · Settings s save"
+			notice += nativeTrustNotice(next.Decision, selection)
 		}
 		if err := next.Validate(); err != nil {
 			m.alert("err", err.Error())
@@ -647,7 +664,7 @@ func (m *Model) serveUseJudge() {
 		}
 		m.Settings.DecisionDraft = &next.Decision
 		m.Settings.DecisionSeq++
-		m.Settings.DecisionNotice = "Native Judge selection staged · availability unconfirmed · a apply · Settings s save"
+		m.Settings.DecisionNotice = notice
 		m.alert("info", m.Settings.DecisionNotice)
 		return
 	}
@@ -692,6 +709,16 @@ func (m *Model) serveUseJudge() {
 		return
 	}
 	m.alert("err", "select a model row for the judge")
+}
+
+// Saved checkpoints with a different path retain their requested identity.
+func activeNativeJudge(r *ServeRow) *decision.Identity {
+	h := r.Health.Decision
+	if r.IsModel && r.Sidecar && h != nil && h.IsReady() && h.Active != nil &&
+		h.Active.Model == r.Ep.Model && (r.Asset == nil || r.Asset.Path == h.Active.Path) {
+		return h.Active
+	}
+	return nil
 }
 
 // labelOf names a row for messages: the model on model rows.
@@ -1077,8 +1104,26 @@ func (m *Model) commitExternalDecision() {
 	}
 	if !decision.NativeRuntime(m.Cfg.Decision.Runtime) {
 		m.Settings.DecisionNotice = "Chat judge selected for next request; server controls residency; confidence is self-reported"
+	} else {
+		for _, r := range m.Serve.Rows {
+			h := r.Health.Decision
+			if sameServeURL(r.Ep.URL, m.Cfg.Decision.Server) && h != nil && h.IsReady() && h.Active != nil && h.Active.Model == m.Cfg.Decision.Model {
+				if h.Matches(decision.SelectionFor(m.Cfg.Decision)) {
+					m.Settings.DecisionNotice = "External native Judge matches last health check · no service activation"
+				}
+				m.Settings.DecisionNotice += nativeTrustNotice(m.Cfg.Decision, h.Active.Selection)
+				break
+			}
+		}
 	}
 	m.alert("info", m.Settings.DecisionNotice)
+}
+
+func nativeTrustNotice(requested config.DecisionConfig, active decision.Selection) string {
+	if requested.TrustRemoteCode == active.TrustRemoteCode {
+		return ""
+	}
+	return fmt.Sprintf(" · server was loaded with trust_remote_code=%t; /settings → trust decision remote code must match before judging; your permission is unchanged", active.TrustRemoteCode)
 }
 
 type decisionApplied struct {
@@ -1350,6 +1395,10 @@ func serveModelRow(m Model, i int, r ServeRow, inner int) string {
 		if r.Asset.Revision != "" {
 			display += "@" + r.Asset.Revision
 		}
+	}
+	if active := activeNativeJudge(&r); active != nil {
+		display = active.Model
+		state = "active native Judge · j select"
 	}
 	dot := Muted.Render("○")
 	tone := Muted
