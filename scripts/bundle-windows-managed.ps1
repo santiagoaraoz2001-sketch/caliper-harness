@@ -1,4 +1,4 @@
-# Internal Windows x64 development folder with private runtime dependencies.
+# Windows x64 application folder with private runtime dependencies.
 # Builder acquires pinned packages; end users do not run Python setup commands.
 # The bundle's command is `caliper` (caliper.exe); install-windows.ps1 puts
 # the folder on the user's PATH.
@@ -99,12 +99,17 @@ foreach ($line in (Get-Content (Join-Path $Out 'notices\DEPENDENCIES.txt'))) {
 }
 $kuzuInput = Get-ChildItem (Join-Path $dyn '*.dll') -ErrorAction SilentlyContinue | Select-Object -First 1
 $kuzuNote = if ($kuzuInput) { (Get-FileHash -Algorithm SHA256 $kuzuInput.FullName).Hash + '  ' + $kuzuInput.Name } else { 'static' }
+$sourceNotes = @(Get-Content (Join-Path $Out 'notices\DEPENDENCIES.txt') |
+    Where-Object { $_ -match '\bvcs\.(revision|modified)=' } |
+    ForEach-Object { $_.Trim() })
+if ($sourceNotes.Count -eq 0) { $sourceNotes = @('Source revision: unavailable in executable build metadata.') }
 @(
-    'Internal development bundle: unsigned, not a public installer.'
+    'Caliper Windows application folder. Not code-signed.'
     'Private standalone Python, hash-locked runtime packages and ripgrep supplied.'
     'Project check tools, model weights and Ollama are not supplied.'
     "Kuzu v0.11.3 input: $kuzuNote"
     ("Go builder: " + (& go version))
+    $sourceNotes
 ) | Out-File -Encoding utf8 (Join-Path $Out 'notices\BUILD.txt')
 
 # A successful build must import after relocation, outside the source tree.
@@ -126,5 +131,5 @@ if ($LASTEXITCODE -ne 0) {
     Set-Content -LiteralPath (Join-Path $Out 'BUILD-INCOMPLETE') -Value 'Inventory failed; do not launch.'
     throw 'could not finalize bundle inventory'
 }
-Write-Output "Development bundle built; native application qualification remains required: $Out"
+Write-Output "Application folder built; native qualification is recorded separately: $Out"
 } finally { Pop-Location }

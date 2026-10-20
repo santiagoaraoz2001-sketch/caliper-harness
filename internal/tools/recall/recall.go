@@ -16,10 +16,11 @@ import (
 // Deps carries the store plus the recall caps (TopN 0 disables,
 // MaxChars 0 lifts the char cap, MinWord 0 keeps every word).
 type Deps struct {
-	Store    *store.Store
-	TopN     int
-	MaxChars int
-	MinWord  int
+	Store       *store.Store
+	ProjectRoot string // captured by the host; blank retains legacy global recall
+	TopN        int
+	MaxChars    int
+	MinWord     int
 }
 
 // New returns the recall definition: a query plus an optional kind
@@ -39,12 +40,12 @@ func New(d Deps, catalogs ...*prompts.Catalog) tool.Definition {
 			if err := ctx.Err(); err != nil {
 				return tool.Result{}, err
 			}
-			return run(d, args, pc)
+			return run(ctx, d, args, pc)
 		},
 	}
 }
 
-func run(d Deps, args tool.Args, catalogs ...*prompts.Catalog) (tool.Result, error) {
+func run(ctx context.Context, d Deps, args tool.Args, catalogs ...*prompts.Catalog) (tool.Result, error) {
 	pc := prompts.Select(catalogs...)
 	if d.Store == nil {
 		return tool.Result{}, fmt.Errorf("recall tool is not wired — needs the store")
@@ -56,7 +57,13 @@ func run(d Deps, args tool.Args, catalogs ...*prompts.Catalog) (tool.Result, err
 	default:
 		return tool.Result{}, fmt.Errorf("memory kind must be one of %s, got %q", memory.ValidKinds, kind)
 	}
-	block, err := memory.Query(d.Store, kind, query, d.TopN, d.MaxChars, d.MinWord, pc)
+	var block string
+	var err error
+	if d.ProjectRoot != "" {
+		block, err = memory.QueryProject(ctx, d.Store, d.ProjectRoot, kind, query, d.TopN, d.MaxChars, d.MinWord, pc)
+	} else {
+		block, err = memory.Query(d.Store, kind, query, d.TopN, d.MaxChars, d.MinWord, pc)
+	}
 	if err != nil {
 		return tool.Result{}, fmt.Errorf("cannot read memories: %v", err)
 	}

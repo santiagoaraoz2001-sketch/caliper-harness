@@ -121,7 +121,7 @@ func New(d Deps, prompt string) (*agent.Runner, []string, error) {
 	ld.JudgmentContextChars = d.Cfg.Decision.JudgmentContextChars
 	// Auto-insert is auxiliary context: a failed read warns and the
 	// run continues without it (session-sweep precedent).
-	memories, recallErr := memory.Query(d.Store, "", prompt, d.Cfg.Recall.TopN, d.Cfg.Recall.MaxChars, d.Cfg.Recall.MinWord, pc)
+	memories, recallErr := memory.QueryProject(context.Background(), d.Store, w.Path, "", prompt, d.Cfg.Recall.TopN, d.Cfg.Recall.MaxChars, d.Cfg.Recall.MinWord, pc)
 	if recallErr != nil {
 		notes = append(notes, fmt.Sprintf("warning: memory recall failed: %v", recallErr))
 	}
@@ -564,13 +564,13 @@ func registerOwning(reg *tool.Registry, cfg config.Config, ld launch.Deps, judge
 	for _, facade := range facades {
 		reg.Register(facade)
 	}
-	reg.Register(launch.FocusDefinition(s, cfg.Tools.Bash, cfg.PromptCatalog))
+	reg.Register(launch.FocusDefinitionAt(s, cfg.Tools.Bash, ld.Workspace, cfg.PromptCatalog))
 	reg.Register(launch.New(ld))
 	for _, def := range launch.NewBuild(ld, cfg.Coding.CheckCommand) {
 		reg.Register(def)
 	}
 	reg.Register(judge.New(judge.Deps{Judge: judgeFunc, Log: logFn, MaxContextChars: cfg.Decision.JudgmentContextChars}, cfg.PromptCatalog))
-	reg.Register(recall.New(recall.Deps{Store: s, TopN: cfg.Recall.TopN, MaxChars: cfg.Recall.MaxChars, MinWord: cfg.Recall.MinWord}, cfg.PromptCatalog))
+	reg.Register(recall.New(recall.Deps{Store: s, ProjectRoot: ld.Workspace, TopN: cfg.Recall.TopN, MaxChars: cfg.Recall.MaxChars, MinWord: cfg.Recall.MinWord}, cfg.PromptCatalog))
 	bashDef, _ := reg.Lookup("bash")
 	check := r.CheckDefinition(bashDef)
 	r.RetainHostCheck(check)

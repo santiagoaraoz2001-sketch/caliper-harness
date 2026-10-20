@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"specific-harness/internal/config"
 	"specific-harness/internal/prompts"
 	"strings"
@@ -26,7 +27,7 @@ func TestAssistedSetupPromptOpensWithoutChangingConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, needle := range []string{path, m.CfgPath, "caliper config --config", "Do not pass connections.yaml as --config", "system_one", "Only {model} is substituted"} {
+	for _, needle := range []string{path, m.CfgPath, "validate with `caliper config`", "Do not pass connections.yaml as --config", "system_one", "For a chat judge", "model reports its own confidence", "Only {model} is substituted"} {
 		if !strings.Contains(m.HelpText, needle) {
 			t.Errorf("prompt omitted %q", needle)
 		}
@@ -51,6 +52,71 @@ func TestAssistedSetupPromptOpensWithoutChangingConnections(t *testing.T) {
 	c.Model, c.Decision, c.Serve = v.Model, v.Decision, v.Serve
 	if err := c.Validate(); err != nil {
 		t.Fatalf("published connection example is invalid: %v", err)
+	}
+}
+
+func TestAssistedSetupValidationRespectsManagedAndExplicitScope(t *testing.T) {
+	m := setupFixture(t, 100, 30)
+	t.Chdir(t.TempDir())
+	path := config.DefaultFile()
+	if err := config.CreateWorkspaceConfigDir(path); err != nil {
+		t.Fatal(err)
+	}
+	old := config.Defaults()
+	old.Context.Window, old.Model.Name = 32768, "old-workspace-model"
+	if err := config.Save(path, old); err != nil {
+		t.Fatal(err)
+	}
+	personal, err := config.PreferencesPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(filepath.Dir(personal), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(personal, []byte("context:\n  window: 131072\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	current := config.Defaults()
+	current.Model.Name = "new-personal-model"
+	if err = config.SaveConnections(current); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, explicit := range []bool{false, true} {
+		loader := config.Load
+		wantWindow, wantModel := 131072, "new-personal-model"
+		command, scope := "caliper config", "automatic workspace storage; personal defaults apply"
+		if explicit {
+			loader = config.LoadProject
+			wantWindow, wantModel = 32768, "old-workspace-model"
+			quoted := shellQuote(path)
+			if runtime.GOOS == "windows" {
+				quoted = "'" + strings.ReplaceAll(path, "'", "''") + "'"
+			}
+			command += " --config " + quoted
+			scope = "project overrides personal defaults"
+		}
+		m.Cfg, _, err = loader(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m.CfgPath = path
+		m.openAssistedSetup()
+		if m.Cfg.Context.Window != wantWindow || m.Cfg.Model.Name != wantModel ||
+			!strings.Contains(m.HelpText, "validate with `"+command+"`") ||
+			!strings.Contains(m.HelpText, "Scope: "+scope) {
+			t.Fatalf("explicit=%v validation does not match loaded scope: window=%d model=%q prompt=%s",
+				explicit, m.Cfg.Context.Window, m.Cfg.Model.Name, m.HelpText)
+		}
+		viewportFrame(t, m)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("rendering the validation command changed the workspace file", err)
 	}
 }
 

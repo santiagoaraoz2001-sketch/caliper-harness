@@ -47,7 +47,7 @@ def native_cache_fixture():
     return namespace
 
 
-def native_fixture(text, cutoffs, parser=None):
+def native_fixture(text, cutoffs, parser=None, tool_markers=("<tool_call>", "</tool_call>")):
     ns = dict(abc=abc, deque=deque, dataclass=dataclass, json=json, logging=logging, uuid=uuid)
     definitions(LIB / "generate.py", {"_build_trie", "TextStateMachine"}, ns)
     definitions(LIB / "tokenizer_utils.py", {"StreamingDetokenizer", "NaiveStreamingDetokenizer"}, ns)
@@ -85,7 +85,7 @@ def native_fixture(text, cutoffs, parser=None):
             self.contexts = []
         def generate(self, request, args, progress_callback=None):
             prompt, _, _, initial = self._tokenize(self.model_provider.tokenizer, request, args)
-            sm = ns["TextStateMachine"]({"normal": [("<tool_call>", "tool"), ("<think>", "reasoning")], "reasoning": [("</think>", "normal"), ("<tool_call>", "tool")], "tool": [("</tool_call>", "normal")]})
+            sm = ns["TextStateMachine"]({"normal": [(tool_markers[0], "tool"), ("<think>", "reasoning")], "reasoning": [("</think>", "normal"), (tool_markers[0], "tool")], "tool": [(tool_markers[1], "normal")]})
             ctx = ns["GenerationContext"](True, True, self.model_provider.tokenizer.tool_parser, sm, initial, prompt)
             self.contexts.append(ctx)
             begin = len(prompt)-1
@@ -138,6 +138,37 @@ def rows(h):
 
 
 class LiteralContinuationControls(unittest.TestCase):
+    def test_buffered_tool_tokens_keep_connection_active_without_partial_calls(self):
+        draft = '{"name":"write","arguments":{"path":"a.go","content":"complete source"}}'
+        text = "</think><tool_call>" + draft + "</tool_call>"
+        native = native_fixture(text, [])
+        install_continuation_hooks(native)
+        generator = native.ResponseGenerator()
+        h = handler(native, generator)
+        original = generator.generate
+        observations = []
+        def observed(*args, **kwargs):
+            context, response = original(*args, **kwargs)
+            def stream():
+                for item in response:
+                    yield item
+                    observations.append(h.wfile.getvalue())
+            return context, stream()
+        generator.generate = observed
+        h.handle_completion(h.handle_chat_completions(), [])
+        start = len("</think><tool_call>")
+        end = start + len(draft)
+        for index in range(start, end):
+            with self.subTest(token=index):
+                self.assertNotIn(b'"tool_calls":', observations[index])
+                self.assertGreater(observations[index].count(b": keepalive\n\n"),
+                                   observations[index - 1].count(b": keepalive\n\n"))
+        calls = [row["choices"][0]["delta"]["tool_calls"] for row in rows(h)
+                 if row.get("choices") and row["choices"][0]["delta"].get("tool_calls")]
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(json.loads(calls[0][0]["function"]["arguments"]),
+                         {"path": "a.go", "content": "complete source"})
+
     def zero_argument_tools(self):
         return [{"type":"function", "function":{"name":"plan", "parameters":{
             "type":"object", "properties":{}, "required":[], "additionalProperties":False}}}]
@@ -324,8 +355,11 @@ class LiteralContinuationControls(unittest.TestCase):
                 with self.assertLogs(level='ERROR'):
                     h.handle_completion(h.handle_chat_completions(), [])
                 detail = rows(h)[-1]['error']
-                self.assertEqual(detail['native_tool_draft'], draft)
-                self.assertEqual(detail['native_tool_failure']['boundary'], 'tool_close')
+                unfinished_value = '<parameter=proof>unfinished' in draft
+                # An end marker inside an unclosed value is ambiguous until
+                # EOS; preserve those actual bytes for existing recovery.
+                self.assertEqual(detail['native_tool_draft'], draft + ('</tool_call>' if unfinished_value else ''))
+                self.assertEqual(detail['native_tool_failure']['boundary'], 'stop' if unfinished_value else 'tool_close')
                 self.assertNotIn(b'"tool_calls":', h.wfile.getvalue())
 
     def test_qwen_complete_parameter_bytes_reach_native_conversion(self):
@@ -394,7 +428,8 @@ class LiteralContinuationControls(unittest.TestCase):
                 generator = native.ResponseGenerator(); h = handler(native, generator); h.body['tools'] = self.zero_argument_tools()
                 with self.assertLogs(level='ERROR'):
                     h.handle_completion(h.handle_chat_completions(), [])
-                self.assertEqual(rows(h)[-1]['error']['native_tool_draft'], draft)
+                expected = draft + ('</tool_call>' if draft.endswith('<arg_value>{}') else '')
+                self.assertEqual(rows(h)[-1]['error']['native_tool_draft'], expected)
                 self.assertNotIn(b'"tool_calls":', h.wfile.getvalue())
                 self.assertNotIn(b'data: [DONE]', h.wfile.getvalue())
                 self.assertTrue(generator.contexts[-1]._should_stop)

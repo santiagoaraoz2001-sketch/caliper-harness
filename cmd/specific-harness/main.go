@@ -37,7 +37,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-const version = "0.1.6"
+const version = "0.2.0"
 
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "install-activate" {
@@ -100,13 +100,13 @@ func main() {
 // runConfig prints the effective configuration: file values over defaults.
 func runConfig(args cliArgs) {
 	path := args.string("config")
-	cfg, usedFile, err := config.Load(path)
+	cfg, usedFile, err := args.loadConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 	if !usedFile {
-		fmt.Fprintf(os.Stderr, "note: no config file at %s, using built-in defaults\n", path)
+		fmt.Fprintf(os.Stderr, "note: no config file at %s, using personal connections/settings over built-in defaults\n", path)
 	}
 	out, err := yaml.Marshal(cfg)
 	if err != nil {
@@ -121,10 +121,9 @@ func runConfig(args cliArgs) {
 func runChatParsed(args cliArgs) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	cfgPath := args.string("config")
 	server, model, prompt := args.string("server"), args.string("model"), args.string("prompt")
 	stream := !args.bool("no-stream")
-	cfg, _, err := config.Load(cfgPath)
+	cfg, _, err := args.loadConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		if ctx.Err() != nil {
@@ -198,7 +197,7 @@ func runTUI(args cliArgs) {
 	defer stopStartup()
 	boot := newStartup(version, args.string("config"))
 	boot.begin("Configuration", "Reading project settings")
-	cfg, used, err := config.Load(args.string("config"))
+	cfg, used, err := args.loadConfig()
 	if err != nil {
 		boot.finish("error", err.Error())
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -368,7 +367,7 @@ func ensureSidecarContext(ctx context.Context, cfg config.Config, note func(stri
 // runTool implements schema-on-demand: `tool` lists, `tool <name>`
 // prints purpose plus fillable slots.
 func runTool(args cliArgs) {
-	cfg, _, err := config.Load(args.string("config"))
+	cfg, _, err := args.loadConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -409,7 +408,7 @@ func runAgentParsed(args cliArgs) {
 	defer stop()
 	server, model, prompt, toolView := args.string("server"), args.string("model"), args.string("prompt"), args.string("tools")
 	maxSteps := args.integer("max-steps")
-	cfg, _, err := config.Load(args.string("config"))
+	cfg, _, err := args.loadConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -490,7 +489,7 @@ func runAgentParsed(args cliArgs) {
 // --query TEXT [--db path] [--sessions-dir path] [--config path].
 func runGraph(args cliArgs) {
 	db, sessionsDir, query := args.string("db"), args.string("sessions-dir"), args.string("query")
-	cfg, _, err := config.Load(args.string("config"))
+	cfg, _, err := args.loadConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -571,7 +570,7 @@ func sweepSessions(cfg config.Config) {
 // prints that run's events. Flags: --sessions-dir path, --config path.
 func runSessions(args cliArgs) {
 	dir, rest := args.string("sessions-dir"), args.positionals
-	cfg, _, err := config.Load(args.string("config"))
+	cfg, _, err := args.loadConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -607,7 +606,7 @@ func runSessions(args cliArgs) {
 // configured buckets. Flags: --sessions-dir path, --config path.
 func runJudgments(args cliArgs) {
 	dir, rest := args.string("sessions-dir"), args.positionals
-	cfg, _, err := config.Load(args.string("config"))
+	cfg, _, err := args.loadConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -647,7 +646,7 @@ func runJudgments(args cliArgs) {
 // [--templates-dir path] [--config path]. Name is plan, approach, or task.
 func runTemplate(args cliArgs) {
 	dir, title, rest := args.string("templates-dir"), args.string("title"), args.positionals
-	cfg, _, err := config.Load(args.string("config"))
+	cfg, _, err := args.loadConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -693,7 +692,7 @@ func runLaunch(args cliArgs) {
 	defer stop()
 	server, model, rest := args.string("server"), args.string("model"), args.positionals
 	maxSteps := args.integer("max-steps")
-	cfg, _, err := config.Load(args.string("config"))
+	cfg, _, err := args.loadConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -772,7 +771,7 @@ func usage() { printCLIHelp(os.Stderr, "") }
 // verdict. Flags fall back to the decision: config section.
 func runDecision(args cliArgs) {
 	ctxText, instructions, server, device, options := args.string("context"), args.string("instructions"), args.string("server"), args.string("device"), args.string("options")
-	cfg, _, err := config.Load(args.string("config"))
+	cfg, _, err := args.loadConfig()
 	if err != nil {
 		fatal(err)
 	}
@@ -813,7 +812,7 @@ func fatal(err error) {
 // plan-first, then approach; retirement is legal only from complete.
 func runRetire(args cliArgs) {
 	id := args.positionals[0]
-	cfg, _, err := config.Load(args.string("config"))
+	cfg, _, err := args.loadConfig()
 	if err != nil {
 		fatal(err)
 	}
@@ -844,7 +843,7 @@ func runRetire(args cliArgs) {
 // hidden unless --retired asks for the archive bucket.
 func runList(args cliArgs) {
 	retired, rest := args.bool("retired"), args.positionals
-	cfg, _, err := config.Load(args.string("config"))
+	cfg, _, err := args.loadConfig()
 	if err != nil {
 		fatal(err)
 	}

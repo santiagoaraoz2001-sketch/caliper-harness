@@ -156,7 +156,8 @@ func TestJudgeCompleteBodyLimit(t *testing.T) {
 	actual := len(<-bodies)
 	req.MaxBytes = actual - 1
 	before := calls.Load()
-	if _, err := c.Judge(context.Background(), req); err == nil || !strings.Contains(err.Error(), "complete request bytes") || calls.Load() != before {
+	var capacity *ContextCapacityError
+	if _, err := c.Judge(context.Background(), req); !errors.As(err, &capacity) || !capacity.EncodedRequest || !strings.Contains(err.Error(), "complete request bytes") || calls.Load() != before {
 		t.Fatalf("over-limit reached HTTP: %v calls=%d", err, calls.Load())
 	}
 	req.MaxBytes = actual

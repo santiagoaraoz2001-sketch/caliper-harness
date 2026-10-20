@@ -49,11 +49,11 @@ claimed result outrun an observed one.
 - **Evidence, not vibes.** Every run writes a durable session record: model
   replies, tool receipts, judgments with confidence, file effects, and the
   final outcome. `caliper-harness judgments <session>` replays the verdicts.
-- **Your style, on the record.** A per-workspace styleguide lives in the
-  state graph (knowledge key `styleguide`), evolving with rules you state.
-  Turn on `decision.style_enforcement` and a style judge can send finished
-  code back once for adjustment; leave it off and the document is still
-  there for the model to consult.
+- **Your style, on the record.** Save project conventions in the state graph
+  under knowledge key `styleguide`. They can be queried and revised explicitly.
+  With `decision.style_enforcement` enabled, an advisory judge compares the
+  final answer with that guide and can request one adjustment round. It does
+  not learn rules automatically or audit source code for style compliance.
 - **Keyboard-driven TUI.** Tabs, plan navigation, live tool activity, and
   model/settings management without leaving the terminal — plus a headless
   `run` mode for scripts and evaluation.
@@ -96,6 +96,15 @@ by a newer release; retaining a folder does not guarantee arbitrary downgrades.
 New workspaces store application state in Caliper's OS user-data directory, keyed
 by the project path. Existing project-local state and explicit configuration paths
 remain in use. Launching from a directory does not add application files to it.
+
+Settings saved in an ordinary workspace become personal defaults for every project.
+Caliper keeps these in `settings.yaml` beside the reusable `connections.yaml` in
+your OS configuration directory. Project checks and graph/session storage stay
+with their workspace. A project `caliper-harness.yaml`, legacy
+`specific-harness.yaml`, or explicit `--config` file overrides personal defaults;
+Settings shows that project scope before saving. Older automatic workspace
+snapshots are backed up when Settings first replaces their saved personal values.
+No project files are created by an ordinary Settings save.
 
 ### Managed bundle
 

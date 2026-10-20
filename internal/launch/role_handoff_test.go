@@ -70,7 +70,7 @@ func TestRoleSequentialChecksAndReviewBeforeNextWorker(t *testing.T) {
 	model := roleHandoffModel(func(messages []llm.Message) (string, error) {
 		request := fixtureRoleRequest(messages)
 		if strings.HasPrefix(request, "Review ") {
-			return "PASS: component review of actual paired checks", nil
+			return "## PASS\n\nComponent review of actual paired checks.", nil
 		}
 		if strings.HasPrefix(request, "TASK t1") {
 			first, err := plan.GetTask(d.Store, ids[0])

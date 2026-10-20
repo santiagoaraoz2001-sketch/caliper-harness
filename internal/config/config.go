@@ -61,29 +61,30 @@ type UIConfig struct {
 }
 
 type Config struct {
-	Prompts       PromptsConfig    `yaml:"prompts"`
-	PromptCatalog *prompts.Catalog `yaml:"-"`
-	UI            UIConfig         `yaml:"ui"`
-	Coding        CodingConfig     `yaml:"coding"`
-	Context       ContextConfig    `yaml:"context"`
-	Schemas       SchemaConfig     `yaml:"schemas"`
-	Retention     RetentionConfig  `yaml:"retention"`
-	Behavior      BehaviorConfig   `yaml:"behavior"`
-	Recall        RecallConfig     `yaml:"recall"`
-	Auth          AuthConfig       `yaml:"auth"`
-	Params        ParamsConfig     `yaml:"params"`
-	Model         ModelConfig      `yaml:"model"`
-	Tools         ToolsConfig      `yaml:"tools"`
-	Agent         AgentConfig      `yaml:"agent"`
-	Store         StoreConfig      `yaml:"store"`
-	Sessions      SessionsConfig   `yaml:"sessions"`
-	Templates     TemplatesConfig  `yaml:"templates"`
-	Subagents     SubagentsConfig  `yaml:"subagents"`
-	Workflows     WorkflowsConfig  `yaml:"workflows"`
-	Decision      DecisionConfig   `yaml:"decision"`
-	Watch         WatchConfig      `yaml:"watch"`
-	Serve         ServeConfig      `yaml:"serve"`
-	Tabs          TabsConfig       `yaml:"tabs"`
+	ProjectOverride bool             `yaml:"-"` // --config explicitly selects project scope, even for a managed path.
+	Prompts         PromptsConfig    `yaml:"prompts"`
+	PromptCatalog   *prompts.Catalog `yaml:"-"`
+	UI              UIConfig         `yaml:"ui"`
+	Coding          CodingConfig     `yaml:"coding"`
+	Context         ContextConfig    `yaml:"context"`
+	Schemas         SchemaConfig     `yaml:"schemas"`
+	Retention       RetentionConfig  `yaml:"retention"`
+	Behavior        BehaviorConfig   `yaml:"behavior"`
+	Recall          RecallConfig     `yaml:"recall"`
+	Auth            AuthConfig       `yaml:"auth"`
+	Params          ParamsConfig     `yaml:"params"`
+	Model           ModelConfig      `yaml:"model"`
+	Tools           ToolsConfig      `yaml:"tools"`
+	Agent           AgentConfig      `yaml:"agent"`
+	Store           StoreConfig      `yaml:"store"`
+	Sessions        SessionsConfig   `yaml:"sessions"`
+	Templates       TemplatesConfig  `yaml:"templates"`
+	Subagents       SubagentsConfig  `yaml:"subagents"`
+	Workflows       WorkflowsConfig  `yaml:"workflows"`
+	Decision        DecisionConfig   `yaml:"decision"`
+	Watch           WatchConfig      `yaml:"watch"`
+	Serve           ServeConfig      `yaml:"serve"`
+	Tabs            TabsConfig       `yaml:"tabs"`
 
 	templatesDefault bool
 }
@@ -562,12 +563,22 @@ func Save(path string, cfg Config) error {
 	return nil
 }
 
-// Load reads path over the defaults. A missing file yields pure defaults
-// with usedFile false. Malformed YAML, unknown fields, and out-of-range
+// Load reads a project file over personal defaults and connections. A missing
+// project file retains those defaults with usedFile false. Malformed YAML, unknown fields, and out-of-range
 // values are plain-language errors.
-func Load(path string) (cfg Config, usedFile bool, err error) {
+func Load(path string) (Config, bool, error) { return load(path, false) }
+
+// LoadProject retains explicit --config precedence even for a managed filename.
+func LoadProject(path string) (Config, bool, error) { return load(path, true) }
+
+func load(path string, explicit bool) (cfg Config, usedFile bool, err error) {
 	cfg = Defaults()
+	cfg.ProjectOverride = explicit
 	if err := workspaceDefaults(&cfg); err != nil {
+		return Config{}, false, err
+	}
+	personal, err := loadPreferences(&cfg)
+	if err != nil {
 		return Config{}, false, err
 	}
 	if err := loadConnections(&cfg); err != nil {
@@ -588,6 +599,13 @@ func Load(path string) (cfg Config, usedFile bool, err error) {
 	if err := dec.Decode(&merged); err != nil {
 		return Config{}, false, fmt.Errorf("config file %s has a problem: %s", path, plainYAML(err))
 	}
+	// Old automatically saved workspace snapshots must not freeze personal
+	// settings once the user has deliberately saved global defaults. Authored
+	// project files still overlay globals, preserving explicit project choices.
+	if personal && !explicit && ManagedWorkspaceConfig(path) {
+		preferences(cfg).apply(&merged)
+		merged.Model, merged.Decision, merged.Serve = cfg.Model, cfg.Decision, cfg.Serve
+	}
 	// Retire the historical fixed trigger without breaking strict loading of old files.
 	merged.Context.CompactionAbsoluteTokens = 0
 	if err := merged.Validate(); err != nil {
@@ -597,8 +615,8 @@ func Load(path string) (cfg Config, usedFile bool, err error) {
 	if err := yaml.Unmarshal(raw, &origin); err != nil {
 		return Config{}, false, fmt.Errorf("config file %s has a problem: %s", path, plainYAML(err))
 	}
-	_, explicit := origin.Templates["path"]
-	merged.templatesDefault = !explicit
+	_, templatesExplicit := origin.Templates["path"]
+	merged.templatesDefault = !templatesExplicit
 	return merged, true, nil
 }
 

@@ -55,6 +55,7 @@ func (m *Model) openManagedForm(mode string) {
 		f.Err = "Add a server first, then + Add model"
 		return
 	}
+	f.URLPinned = true
 	f.Values[0].SetValue(r.Ep.Label)
 	f.Values[2].SetValue(r.Ep.URL)
 	runtime := "custom"

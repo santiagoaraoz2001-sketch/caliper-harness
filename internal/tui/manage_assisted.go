@@ -2,9 +2,11 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"specific-harness/internal/config"
+	"strings"
 
 	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
@@ -32,12 +34,31 @@ func (m *Model) openAssistedSetup() {
 		m.alert("err", "cannot locate project settings: "+err.Error())
 		return
 	}
+	directory, err := os.Getwd()
+	if err != nil {
+		m.alert("err", "cannot locate current directory: "+err.Error())
+		return
+	}
+	scope, command := "automatic workspace storage; personal defaults apply", "caliper config"
+	if m.Cfg.ProjectOverride || !config.ManagedWorkspaceConfig(project) {
+		scope = "project overrides personal defaults"
+	}
+	if m.Cfg.ProjectOverride {
+		quoted := shellQuote(project)
+		if runtime.GOOS == "windows" {
+			quoted = "'" + strings.ReplaceAll(project, "'", "''") + "'"
+		}
+		command += " --config " + quoted
+	}
 	pc, err := m.Cfg.LoadPrompts()
 	if err != nil {
 		m.alert("err", "cannot load assisted setup prompt; check prompts.path: "+err.Error())
 		return
 	}
-	text, err := pc.Render("setup.assisted", map[string]any{"OS": runtime.GOOS, "Connections": path, "Project": project})
+	text, err := pc.Render("setup.assisted", map[string]any{
+		"OS": runtime.GOOS, "Connections": path, "Project": project,
+		"Directory": directory, "Scope": scope, "ValidationCommand": command,
+	})
 	if err != nil {
 		m.alert("err", "cannot render assisted setup; add setup.assisted from the shipped prompts.yaml to your selected catalog: "+err.Error())
 		return

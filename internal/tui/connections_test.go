@@ -214,3 +214,44 @@ func TestServeCandidatesStayUnderTheirServerAndRecipe(t *testing.T) {
 		}
 	}
 }
+
+func TestConnectionPresetUsesDefaultEndpointAndKeepsCustom(t *testing.T) {
+	for _, initial := range []string{"http://127.0.0.1:8080/v1", "http://127.0.0.1:19845/v1"} {
+		m := formModel(t)
+		f := m.Setup.Add
+		f.Field = 1
+		f.Values[1].SetValue("mlx")
+		f.Values[2].SetValue(initial)
+		m = viewportKey(m, tea.KeyRight)
+		want := initial
+		if initial == "http://127.0.0.1:8080/v1" {
+			want = serve.OllamaURL
+		}
+		if f.Values[1].Value() != "ollama" || f.Values[2].Value() != want {
+			t.Fatalf("Ollama preset endpoint: got %s want %s", f.Values[2].Value(), want)
+		}
+		m = viewportKey(m, tea.KeyLeft)
+		if f.Values[2].Value() != initial {
+			t.Fatal("returning preset changed custom or lost default")
+		}
+	}
+}
+
+func TestConnectionPresetPreservesAuthoredDefaultLookingEndpoint(t *testing.T) {
+	m := formModel(t)
+	f := m.Setup.Add
+	f.Values[1].SetValue("mlx")
+	f.Field = 2
+	// Editing the field makes its value authoritative even when it equals a default.
+	m = viewportKey(m, tea.KeyEnd)
+	m = key(m, "/")
+	m = viewportKey(m, tea.KeyBackspace)
+	if !f.URLPinned {
+		t.Fatal("authored endpoint not tracked")
+	}
+	f.Field = 1
+	m = viewportKey(m, tea.KeyRight)
+	if f.Values[2].Value() != serve.MLXURL {
+		t.Fatal("preset rewrote authored URL")
+	}
+}

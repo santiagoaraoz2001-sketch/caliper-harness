@@ -153,7 +153,11 @@ func (m *Model) updatePrepared(msg updatePreparedMsg) tea.Cmd {
 	if cfgPath == "" {
 		cfgPath = config.DefaultFile()
 	}
-	cfg, _, e := config.Load(cfgPath)
+	load := config.Load
+	if m.Cfg.ProjectOverride {
+		load = config.LoadProject
+	}
+	cfg, _, e := load(cfgPath)
 	if e == nil {
 		e = config.PreserveCustomPrompts(cfgPath, cfg, bundle.Root(), filepath.Join(msg.selection.Root, "prompts.yaml"))
 	}
@@ -161,7 +165,7 @@ func (m *Model) updatePrepared(msg updatePreparedMsg) tea.Cmd {
 		_, e = msg.manager.Activate(msg.selection)
 	}
 	if e == nil {
-		if saved, _, loadErr := config.Load(cfgPath); loadErr == nil {
+		if saved, _, loadErr := load(cfgPath); loadErr == nil {
 			m.Cfg.Prompts = saved.Prompts
 		}
 	}

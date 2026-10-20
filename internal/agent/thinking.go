@@ -113,34 +113,46 @@ func (r *Runner) thinkingContext(ctx context.Context, log func(string, string) e
 				return base64.StdEncoding.EncodeToString(data), "base64"
 			}
 			unitValue, unitEncoding := encode(sample[len(sample)-unit:])
-			sampleValue, sampleEncoding := encode(sample)
 			coding, sameCommand := r.Continuation.Coding, false
 			if coding != nil && strings.TrimSpace(coding.ConfigCommand) != "" && coding.ConfigCommand == coding.Command {
 				view := *coding
 				view.ConfigCommand = ""
 				coding, sameCommand = &view, true
 			}
-			raw, err := json.Marshal(struct {
-				OriginalUserIntent, CurrentUserRequest, Phase, Field, SampleSHA256    string
-				DeliveredUserComments                                                 []deliveredUserComment `json:",omitempty"`
-				DeliveredTaskComments                                                 []outcome.TaskComment  `json:",omitempty"`
-				Assignment                                                            *session.Assignment
-				ConfiguredCommandSameAsCommand                                        bool
-				Claimed                                                               bool
-				Coding                                                                *session.CodingState
-				Repeat, ObservedBytes, OmittedBytes, UnitValueBytes, SampleValueBytes int
-				UnitEncoding, SampleEncoding                                          string
-			}{OriginalUserIntent: original, CurrentUserRequest: current, Phase: phase, Field: field, SampleSHA256: fmt.Sprintf("%x", sha256.Sum256(sample)),
-				DeliveredUserComments: comments, DeliveredTaskComments: taskComments, Assignment: r.Continuation.Assignment,
-				ConfiguredCommandSameAsCommand: sameCommand, Claimed: claimed, Coding: coding, Repeat: p.Repeat, ObservedBytes: count,
-				OmittedBytes: count - used, UnitValueBytes: len(unitValue), SampleValueBytes: len(sampleValue), UnitEncoding: unitEncoding, SampleEncoding: sampleEncoding})
-			if err != nil {
-				return fmt.Errorf("%w: cannot encode evidence: %v", thinkingLoopStop, err)
+			buildRequest := func(kept []byte) (decision.Request, error) {
+				sampleValue, sampleEncoding := encode(kept)
+				originalHash, originalBytes := "", 0
+				if len(kept) < len(sample) {
+					originalHash, originalBytes = fmt.Sprintf("%x", sha256.Sum256(sample)), len(sample)
+				}
+				raw, err := json.Marshal(struct {
+					OriginalUserIntent, CurrentUserRequest, Phase, Field, SampleSHA256    string
+					OriginalSampleSHA256                                                  string                 `json:",omitempty"`
+					OriginalSampleBytes                                                   int                    `json:",omitempty"`
+					DeliveredUserComments                                                 []deliveredUserComment `json:",omitempty"`
+					DeliveredTaskComments                                                 []outcome.TaskComment  `json:",omitempty"`
+					Assignment                                                            *session.Assignment
+					ConfiguredCommandSameAsCommand                                        bool
+					Claimed                                                               bool
+					Coding                                                                *session.CodingState
+					Repeat, ObservedBytes, OmittedBytes, UnitValueBytes, SampleValueBytes int
+					UnitEncoding, SampleEncoding                                          string
+				}{OriginalUserIntent: original, CurrentUserRequest: current, Phase: phase, Field: field, SampleSHA256: fmt.Sprintf("%x", sha256.Sum256(kept)), OriginalSampleSHA256: originalHash, OriginalSampleBytes: originalBytes,
+					DeliveredUserComments: comments, DeliveredTaskComments: taskComments, Assignment: r.Continuation.Assignment,
+					ConfiguredCommandSameAsCommand: sameCommand, Claimed: claimed, Coding: coding, Repeat: p.Repeat, ObservedBytes: count,
+					OmittedBytes: count - len(kept), UnitValueBytes: len(unitValue), SampleValueBytes: len(sampleValue), UnitEncoding: unitEncoding, SampleEncoding: sampleEncoding})
+				if err != nil {
+					return decision.Request{}, fmt.Errorf("%w: cannot encode evidence: %v", thinkingLoopStop, err)
+				}
+				// Supply each value once, outside JSON escapes. Metadata lengths delimit
+				// untrusted text even when it contains the section labels itself.
+				evidence := string(raw) + "\nUnit:\n" + unitValue + "\nSample:\n" + sampleValue
+				return decision.Request{Context: evidence, Instructions: r.Prompts.Text("decision.thinking_loop.instructions"), Options: []string{loopStuck, loopProgress}, MaxBytes: p.MaxInputBytes}, nil
 			}
-			// Supply each value once, outside JSON escapes. Metadata lengths delimit
-			// untrusted text even when it contains the section labels itself.
-			evidence := string(raw) + "\nUnit:\n" + unitValue + "\nSample:\n" + sampleValue
-			req := decision.Request{Context: evidence, Instructions: r.Prompts.Text("decision.thinking_loop.instructions"), Options: []string{loopStuck, loopProgress}, MaxBytes: p.MaxInputBytes}
+			req, err := buildRequest(sample)
+			if err != nil {
+				return err
+			}
 			encoded, err := json.Marshal(req)
 			if cancel := callCtx.Err(); cancel != nil {
 				return cancel
@@ -159,18 +171,71 @@ func (r *Runner) thinkingContext(ctx context.Context, log func(string, string) e
 			if cancel := callCtx.Err(); cancel != nil {
 				return cancel
 			}
+			// A repetition judgment is advice, not permission to interrupt the
+			// worker. Mark this exact unit attempted even when its judge is
+			// unavailable so the next streamed byte does not repeat the call.
+			cleared, position = append([]byte(nil), sample[len(sample)-unit:]...), 0
+			failedAdvice := func(cause error) error {
+				if err := callCtx.Err(); err != nil {
+					return err
+				}
+				if log != nil {
+					return log("judgment-error", fmt.Sprintf("source=generation-thinking error=%q", cause))
+				}
+				return nil
+			}
 			if r.Judge == nil {
-				return fmt.Errorf("%w: no selected judge", thinkingLoopStop)
+				if err := failedAdvice(errors.New("no selected judge")); err != nil {
+					return err
+				}
+				continue
 			}
 			v, err := r.Judge(callCtx, req)
-			if cancel := callCtx.Err(); cancel != nil {
-				return cancel
+			kept := sample
+			for {
+				if cancel := callCtx.Err(); cancel != nil {
+					return cancel
+				}
+				var capacity *decision.ContextCapacityError
+				if !errors.As(err, &capacity) || len(kept) <= unit*p.Repeat {
+					break
+				}
+				// Only pre-inference admission may reduce optional judge evidence.
+				// Keep the actual repetition and all intent/claim facts; neither
+				// this projection nor its omissions alter the worker's stream.
+				kept = kept[len(kept)-max(unit*p.Repeat, len(kept)/2):]
+				req, err = buildRequest(kept)
+				if err != nil {
+					return err
+				}
+				encoded, err = json.Marshal(req)
+				if err != nil {
+					return err
+				}
+				if log != nil {
+					if err := log("thinking_loop", string(encoded)); err != nil {
+						if cancel := callCtx.Err(); cancel != nil {
+							return cancel
+						}
+						return err
+					}
+				}
+				if cancel := callCtx.Err(); cancel != nil {
+					return cancel
+				}
+				v, err = r.Judge(callCtx, req)
 			}
 			if err != nil {
-				return fmt.Errorf("%w: decision unavailable: %w", thinkingLoopStop, err)
+				if err := failedAdvice(err); err != nil {
+					return err
+				}
+				continue
 			}
 			if v.Pick < 0 || v.Pick >= len(req.Options) || v.Option != req.Options[v.Pick] || math.IsNaN(v.Confidence) || v.Confidence < 0 || v.Confidence > 1 {
-				return fmt.Errorf("%w: invalid decision verdict", thinkingLoopStop)
+				if err := failedAdvice(errors.New("invalid decision verdict")); err != nil {
+					return err
+				}
+				continue
 			}
 			resolution := "continued"
 			if v.Confidence < advisoryConfidence {
@@ -193,7 +258,6 @@ func (r *Runner) thinkingContext(ctx context.Context, log func(string, string) e
 			if resolution == "deferred-guidance" && len(deferAdvice) > 0 && deferAdvice[0] != nil {
 				deferAdvice[0](r.Prompts.Text("continuation.discovery.reconsider"))
 			}
-			cleared, position = append([]byte(nil), sample[len(sample)-unit:]...), 0
 		}
 		return callCtx.Err()
 	}

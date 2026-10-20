@@ -237,6 +237,12 @@ func FocusView(reg *tool.Registry, s *store.Store, scope *session.WorkflowScope,
 
 // FocusDefinition validates selection and an optional explicit brief page before effects.
 func FocusDefinition(s *store.Store, cap config.BashConfig, catalogs ...*prompts.Catalog) tool.Definition {
+	return FocusDefinitionAt(s, cap, "", catalogs...)
+}
+
+// FocusDefinitionAt binds model navigation to the host's captured project.
+// The unscoped wrapper remains available to trusted host callers.
+func FocusDefinitionAt(s *store.Store, cap config.BashConfig, root string, catalogs ...*prompts.Catalog) tool.Definition {
 	pc := prompts.Select(catalogs...)
 	d := tool.Definition{Name: "workflow_focus", Desc: pc.Text("tools.workflow_focus.description"), Params: []tool.Param{
 		{Name: "ref", Type: tool.TypeString, Required: true, Desc: pc.Text("tools.workflow_focus.parameters.ref")},
@@ -255,6 +261,9 @@ func FocusDefinition(s *store.Store, cap config.BashConfig, catalogs ...*prompts
 			return d, nil, err
 		}
 		if scope.ID != "" {
+			if err := plan.CheckProject(s, scope.Kind, scope.ID, root); err != nil {
+				return d, nil, err
+			}
 			args["ref"] = scope.ID
 		}
 		_, offset := args["offset"]
@@ -273,6 +282,11 @@ func FocusDefinition(s *store.Store, cap config.BashConfig, catalogs ...*prompts
 			}
 			if _, err := ScopeNode(s, scope); err != nil {
 				return tool.Result{}, err
+			}
+			if scope.ID != "" {
+				if err := plan.CheckProject(s, scope.Kind, scope.ID, root); err != nil {
+					return tool.Result{}, err
+				}
 			}
 			text := "workflow focus for next request: " + scope.Kind + " " + scope.ID
 			if pageRequested {

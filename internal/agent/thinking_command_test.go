@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -162,7 +161,7 @@ func TestThinkingCommandViewOwnership(t *testing.T) {
 	command := strings.Repeat("actual immutable command", 1000)
 	r.Continuation.Coding = &session.CodingState{Command: command, ConfigCommand: command}
 	_, err := thinkingFixture(t, r, [][2]string{{"reasoning", strings.Repeat("abcdefgh", 16)}}, true, nil)
-	if !errors.Is(err, thinkingLoopStop) || !strings.Contains(fmt.Sprint(err), "complete request bytes") {
-		t.Fatalf("immutable overflow %v", err)
+	if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, thinkingLoopStop) {
+		t.Fatalf("immutable advisory overflow stopped generation: %v", err)
 	}
 }

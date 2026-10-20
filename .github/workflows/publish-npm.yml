@@ -7,7 +7,7 @@ on:
       release_tag:
         description: Existing stable release or draft to validate (never publishes)
         required: true
-        default: v0.1.6
+        default: v0.2.0
 permissions:
   contents: read
 concurrency:

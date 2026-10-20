@@ -19,6 +19,7 @@ import (
 // The ordinary path requires an endpoint and model. Launch argv is an optional
 // advanced setting for servers whose installation Caliper does not recognize.
 type connectionForm struct {
+	URLPinned                                                    bool // A user-entered or saved endpoint survives preset changes.
 	Field                                                        int
 	Values                                                       [8]textarea.Model
 	Mode, OriginalName, OriginalURL, OriginalModel, OriginalPath string
@@ -240,6 +241,7 @@ func (m Model) connectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 	if f.Field == 1 && (msg.Type == tea.KeyLeft || msg.Type == tea.KeyRight) {
+		previous := f.Values[1].Value()
 		presets := []string{"custom", "mlx", "ollama", "llama.cpp", "laya", "system_one", "rulith", "gufo"}
 		idx := 0
 		for i, p := range presets {
@@ -251,6 +253,9 @@ func (m Model) connectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			idx = (idx + len(presets) - 1) % len(presets)
 		} else {
 			idx = (idx + 1) % len(presets)
+		}
+		if next := presetEndpoint(presets[idx]); !f.URLPinned && next != "" && (f.Values[2].Value() == "" || f.Values[2].Value() == presetEndpoint(previous)) {
+			f.Values[2].SetValue(next)
 		}
 		f.Values[1].SetValue(presets[idx])
 		if (presets[idx] == "mlx" || presets[idx] == "ollama") && (f.Values[7].Value() == "" || f.Values[7].Value() == "preset") {
@@ -440,7 +445,11 @@ func (m Model) connectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 	var cmd tea.Cmd
+	before := f.Values[f.Field].Value()
 	f.Values[f.Field], cmd = f.Values[f.Field].Update(msg)
+	if f.Field == 2 && f.Values[2].Value() != before {
+		f.URLPinned = true
+	}
 	f.Err = ""
 	return m, cmd, true
 }
@@ -513,4 +522,17 @@ func candidateRuntime(runtime string) string {
 		return "openai"
 	}
 	return runtime
+}
+
+// Reuse the serving owner's conventional endpoints only for untouched presets.
+func presetEndpoint(preset string) string {
+	switch preset {
+	case "ollama":
+		return serve.OllamaURL
+	case "laya", "system_one":
+		return serve.SidecarURL
+	case "openai", "custom", "mlx", "llama.cpp", "llama-server":
+		return serve.MLXURL
+	}
+	return ""
 }

@@ -169,6 +169,9 @@ func (m *Model) setupSave() {
 	candidate.Serve = m.Setup.Serve
 	candidate.Coding.CheckCommand = strings.TrimSpace(m.Setup.Check.Value())
 	saved, err := config.ProjectBytes(candidate)
+	if !candidate.ProjectOverride && config.ManagedWorkspaceConfig(m.Setup.Path) {
+		saved, err = config.WorkspaceBytes(candidate)
+	}
 	if err != nil {
 		m.Setup.Err = err.Error()
 		return

@@ -2,7 +2,9 @@ package tui
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"specific-harness/internal/config"
 	"specific-harness/internal/serve"
 	"strings"
@@ -29,7 +31,7 @@ func TestInstalledServersAndLegacyDirectoriesAreNeverEnumerated(t *testing.T) {
 
 func TestAlternativeRecipeDoesNotReplaceLiveOwner(t *testing.T) {
 	m := settingsModel(t)
-	p, err := serve.Start(serve.Recipe{Name: "owned-fixture", Runtime: "openai", Argv: []string{"sleep", "30"}}, filepath.Join(t.TempDir(), "owner.log"))
+	p, err := serve.Start(serve.Recipe{Name: "owned-fixture", Runtime: "openai", Argv: napCmd("30")}, filepath.Join(t.TempDir(), "owner.log"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +39,11 @@ func TestAlternativeRecipeDoesNotReplaceLiveOwner(t *testing.T) {
 	url := "http://127.0.0.1:18890/v1"
 	m.Serve.Spawned = map[string]*serve.Proc{url: p}
 	marker := filepath.Join(t.TempDir(), "unexpected-launch")
-	m.Serve.Rows = []ServeRow{{Ep: serve.Endpoint{URL: url, Label: "alternative"}, Have: true, Ours: true, Recipe: &serve.Recipe{Name: "alternative", Runtime: "openai", URL: url, Argv: []string{"/bin/sh", "-c", `printf started > "$1"; exec sleep 30`, "fixture", marker}}}}
+	alternate := []string{"/bin/sh", "-c", `printf started > "$1"; exec sleep 30`, "fixture", marker}
+	if runtime.GOOS == "windows" {
+		alternate = []string{"powershell", "-NoProfile", "-Command", "Set-Content -LiteralPath '" + strings.ReplaceAll(marker, "'", "''") + "' -Value started; Start-Sleep -Seconds 30"}
+	}
+	m.Serve.Rows = []ServeRow{{Ep: serve.Endpoint{URL: url, Label: "alternative"}, Have: true, Ours: true, Recipe: &serve.Recipe{Name: "alternative", Runtime: "openai", URL: url, Argv: alternate}}}
 	m.serveStart()
 	defer m.Serve.Spawned[url].Stop() // Reap even the deliberately broken overlay control.
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
@@ -57,7 +63,19 @@ func TestAlternativeRecipeDoesNotReplaceLiveOwner(t *testing.T) {
 func TestDiscoveredLauncherRequiresLocalCandidateAndLoadsLiteralPath(t *testing.T) {
 	isolateModelRoots(t)
 	bin, models := t.TempDir(), t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "gufo"), []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CALIPER_TEST_ARGV.tmp\"\n/bin/mv \"$CALIPER_TEST_ARGV.tmp\" \"$CALIPER_TEST_ARGV\"\n"), 0700); err != nil {
+	launcher := filepath.Join(bin, "gufo")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CALIPER_TEST_ARGV.tmp\"\n/bin/mv \"$CALIPER_TEST_ARGV.tmp\" \"$CALIPER_TEST_ARGV\"\n"
+	argv := []string{launcher}
+	if runtime.GOOS == "windows" {
+		powershell, err := exec.LookPath("powershell")
+		if err != nil {
+			t.Fatal(err)
+		}
+		launcher += ".ps1"
+		script = "[IO.File]::WriteAllText($env:CALIPER_TEST_ARGV + '.tmp', (($args -join \"`n\") + \"`n\"))\n[IO.File]::Move($env:CALIPER_TEST_ARGV + '.tmp', $env:CALIPER_TEST_ARGV)\n"
+		argv = []string{powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", launcher}
+	}
+	if err := os.WriteFile(launcher, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin)
@@ -71,7 +89,7 @@ func TestDiscoveredLauncherRequiresLocalCandidateAndLoadsLiteralPath(t *testing.
 	m.Cfg.Model.Server = "http://127.0.0.1:18890/v1"
 	m.Cfg.Model.Name = "remote/model"
 	m.Cfg.Serve.Models = []config.SavedModel{{Server: m.Cfg.Model.Server, Name: model, Path: model}}
-	m.Cfg.Serve.Recipes = []config.RecipeConfig{{Name: "my-gufo", Kind: "openai", Runtime: "openai", URL: m.Cfg.Model.Server, Argv: []string{filepath.Join(bin, "gufo"), "serve", "--model", "{model}"}}}
+	m.Cfg.Serve.Recipes = []config.RecipeConfig{{Name: "my-gufo", Kind: "openai", Runtime: "openai", URL: m.Cfg.Model.Server, Argv: append(argv, "serve", "--model", "{model}")}}
 	got := m.probeServeWith(probeClient())().(serveProbedMsg)
 	var candidate ServeRow
 	for _, r := range got.rows {

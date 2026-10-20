@@ -77,10 +77,13 @@ func (r *Runner) prune(c *session.Continuation) (int, string) {
 		}
 		// Settled reasoning was consumed when produced; only its text still
 		// rents context. Stub it without touching the reply's calls or text.
-		if e.Message.Reasoning != "" {
-			stub := fmt.Sprintf("[pruned reasoning (%d bytes; age %d estimated context tokens); full reasoning in raw session history]", len(e.Message.Reasoning), age)
-			if len(stub) < len(e.Message.Reasoning) {
-				e.Message.Reasoning = stub
+		for _, reasoning := range []*string{&e.Message.Reasoning, &e.Message.ReasoningContent, &e.Message.Thinking} {
+			if *reasoning == "" {
+				continue
+			}
+			stub := fmt.Sprintf("[pruned reasoning (%d bytes; age %d estimated context tokens); full reasoning in raw session history]", len(*reasoning), age)
+			if len(stub) < len(*reasoning) {
+				*reasoning = stub
 				n++
 			}
 		}

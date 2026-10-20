@@ -1,9 +1,21 @@
 """Literal unfinished-response prefills for the owned first-party MLX worker."""
+import ast
 import copy
 from dataclasses import replace
 import hashlib
+import io
 import json
 import re
+import tokenize
+
+
+def unique_json_pairs(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate native JSON argument/key")
+        result[key] = value
+    return result
 
 
 def validate_prefix(prefix):
@@ -29,17 +41,66 @@ def validate_prefix(prefix):
 def parsed_native_calls(parser, text, tools):
     """Admit a whole payload before the native parser can drop an unfinished tail."""
     stripped = text.strip()
+    if getattr(parser, "__module__", "").rsplit(".", 1)[-1] == "pythonic":
+        # Brackets also delimit Pythonic calls, not just JSON arrays. Reuse the
+        # selected native AST parser, without its permissive regex fallback.
+        strict = parser.__globals__.get("_parse_pythonic_tool_call")
+        literals = parser.__globals__.get("_JSONLiterals")
+        if not callable(strict) or not callable(literals):
+            raise RuntimeError("unsupported native Pythonic AST parser")
+        try:
+            tree = ast.parse(stripped, mode="eval").body
+        except SyntaxError as error:
+            raise ValueError("unfinished or malformed native Pythonic payload") from error
+        if not isinstance(tree, ast.List) or not tree.elts:
+            raise ValueError("native Pythonic payload needs a complete call list")
+        for call in tree.elts:
+            if not isinstance(call, ast.Call) or call.args:
+                raise ValueError("native Pythonic calls need named arguments")
+            function = call.func
+            while isinstance(function, ast.Attribute):
+                function = function.value
+            if not isinstance(function, ast.Name):
+                raise ValueError("native Pythonic function must have a literal name")
+            names = [keyword.arg for keyword in call.keywords]
+            if None in names or len(set(names)) != len(names):
+                raise ValueError("duplicate or expanded native Pythonic argument")
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Dict):
+                if None in node.keys:
+                    raise ValueError("expanded native Pythonic dictionary")
+                keys = [ast.literal_eval(literals().visit(copy.deepcopy(key))) for key in node.keys]
+                try:
+                    distinct = len(set(keys))
+                except TypeError as error:
+                    raise ValueError("invalid native Pythonic dictionary key") from error
+                if distinct != len(keys):
+                    raise ValueError("duplicate native Pythonic dictionary key")
+        parsed = strict(stripped)
+        if parsed is None:
+            raise ValueError("native Pythonic payload must contain complete function calls")
+        try:
+            encoded = json.dumps(parsed, allow_nan=False)
+            if json.loads(encoded, object_pairs_hook=unique_json_pairs) != parsed:
+                raise ValueError("native Pythonic arguments change when encoded as JSON")
+        except (TypeError, ValueError) as error:
+            raise ValueError("native Pythonic arguments must be lossless JSON values") from error
+        return parsed if isinstance(parsed, list) else [parsed]
+    if getattr(parser, "__module__", "").rsplit(".", 1)[-1] == "gemma4":
+        matches = list(parser.__globals__["_tool_call_regex"].finditer(stripped))
+        position = 0
+        for match in matches:
+            if stripped[position:match.start()].strip():
+                raise ValueError("unaccounted native Gemma tool text")
+            converted = parser.__globals__["_gemma4_args_to_json"](match.group(2))
+            json.loads(converted, object_pairs_hook=unique_json_pairs)
+            position = match.end()
+        if not matches or stripped[position:].strip():
+            raise ValueError("unfinished native Gemma payload; entire payload refused")
     if stripped.startswith(("{", "[")):
-        def unique(pairs):
-            result = {}
-            for key, value in pairs:
-                if key in result:
-                    raise ValueError("duplicate native JSON argument/key")
-                result[key] = value
-            return result
         def nonfinite(value):
             raise ValueError("nonfinite native JSON value: " + value)
-        raw = json.loads(stripped, object_pairs_hook=unique, parse_constant=nonfinite)
+        raw = json.loads(stripped, object_pairs_hook=unique_json_pairs, parse_constant=nonfinite)
         items = raw if isinstance(raw, list) else [raw]
         if not items or any(not isinstance(item, dict) for item in items):
             raise ValueError("native tool payload must contain complete function objects")
@@ -105,15 +166,98 @@ def parsed_native_calls(parser, text, tools):
     return parsed if isinstance(parsed, list) else [parsed]
 
 
+def pythonic_history(tokenizer, request, args):
+    """Bridge content-only Pythonic templates to the structured chat history."""
+    parser = getattr(tokenizer, "tool_parser", None)
+    template = getattr(tokenizer, "chat_template", None)
+    if isinstance(template, str):
+        template = re.sub(r"{#.*?#}", "", template, flags=re.DOTALL)
+    think_start, think_end = getattr(tokenizer, "think_start", None), getattr(tokenizer, "think_end", None)
+    tool_start, tool_end = getattr(tokenizer, "tool_call_start", None), getattr(tokenizer, "tool_call_end", None)
+    if (request.request_type != "chat"
+            or getattr(parser, "__module__", "").rsplit(".", 1)[-1] != "pythonic"
+            or not isinstance(template, str) or "tool_calls" in template
+            or not all(isinstance(marker, str) and marker for marker in (think_start, think_end, tool_start, tool_end))
+            or getattr(tokenizer, "_chat_template", None) is not None):
+        return request, args
+    # The native template still owns roles, separators, tool declarations and
+    # generation framing. Only its missing assistant fields become content.
+    rendered = copy.deepcopy(request)
+    for message in rendered.messages:
+        if message["role"] != "assistant":
+            continue
+        content = message.get("content") or ""
+        if isinstance(content, list):
+            if any(part.get("type") != "text" for part in content):
+                raise ValueError("Only 'text' content type is supported.")
+            content = "".join(part["text"] for part in content)
+        thinking = []
+        for key in ("reasoning", "reasoning_content", "thinking"):
+            value = message.pop(key, "") or ""
+            if value and value not in thinking:
+                thinking.append(value)
+        thought = "\n".join(thinking)
+        if thought and not content.startswith(think_start + thought + think_end):
+            content = think_start + thought + think_end + content
+        calls = message.pop("tool_calls", [])
+        if calls:
+            functions, expected = [], []
+            for call in calls:
+                function = call["function"]
+                values = function["arguments"]
+                if isinstance(values, str):
+                    values = json.loads(values, object_pairs_hook=unique_json_pairs)
+                expected.append({"name": function["name"], "arguments": values})
+                arguments = ", ".join(key + "=" + json.dumps(value, ensure_ascii=False, allow_nan=False)
+                                      for key, value in values.items())
+                functions.append(function["name"] + "(" + arguments + ")")
+            payload = "[" + ", ".join(functions) + "]"
+            if parsed_native_calls(parser, payload, request.tools) != expected:
+                raise ValueError("native Pythonic history changed function arguments")
+            content += tool_start + payload + tool_end
+        message["content"] = content
+    rendered_args = copy.copy(args)
+    # Context retention belongs to the existing host policy; this template's
+    # default otherwise silently strips thought from all but the last assistant.
+    rendered_args.chat_template_kwargs = {**(args.chat_template_kwargs or {}), "keep_past_thinking": True}
+    return rendered, rendered_args
+
+
+def native_tool_literal(parser, text):
+    """Whether this native format is still inside an authored argument value."""
+    kind = getattr(parser, "__module__", "").rsplit(".", 1)[-1]
+    if kind == "gemma4":
+        return text.count('<|"|>') % 2 == 1
+    if kind in ("glm47", "laguna") and "<arg_value>" in text:
+        return text.rfind("<arg_value>") > text.rfind("</arg_value>")
+    if kind == "qwen3_coder":
+        return text.rfind("<parameter=") > text.rfind("</parameter>")
+    if kind == "pythonic" or text.lstrip().startswith(("{", "[")):
+        try:
+            for item in tokenize.generate_tokens(io.StringIO(text).readline):
+                if item.type == tokenize.ERRORTOKEN and item.string in ("'", '"'):
+                    return True
+        except tokenize.TokenError as error:
+            return error.args[0].startswith(("EOF in multi-line string", "unterminated string literal",
+                                            "unterminated triple-quoted string literal"))
+        except (IndentationError, SyntaxError):
+            pass  # malformed non-string syntax remains the admission owner's error
+    return False
+
+
 class ResponseState:
     """The existing native text machine and tool parser, including their pending bytes."""
     def __init__(self, native, ctx, tools, prefix=None):
         self.native = native
+        self.text_sm = ctx.text_sm
         self.state = ctx.text_sm.make_state(ctx.initial_state)
         self.previous = ctx.initial_state
         self.tool_text = ""
         self.failed_boundary = ""
         self.formatter = native.ToolCallFormatter(ctx.tool_parser, tools, True)
+        kind = getattr(ctx.tool_parser, "__module__", "").rsplit(".", 1)[-1]
+        self.literal_end = (ctx.tool_parser.__globals__.get("tool_call_end")
+                            if kind in ("gemma4", "pythonic", "glm47", "laguna", "qwen3_coder") else None)
         self.tokens, self.raw = [], []
         if prefix is not None:
             for chunk in prefix["raw_chunks"]:
@@ -136,19 +280,27 @@ class ResponseState:
         return [self.formatter._format(copy.deepcopy(call)) for call in parsed]
 
     def feed(self, text, replay=False):
-        self.state, clean, current = self.native.TextStateMachine.step(self.state, text)
         content, reasoning, calls = "", "", []
-        if current == "reasoning":
-            reasoning = clean
-        elif current == "tool":
-            self.tool_text += clean
-        elif current == "normal":
-            if self.previous == "tool":
-                calls = self.calls(replay)
-            content = clean
-        elif current is not None:
-            raise ValueError("unsupported native response parser state")
-        self.previous = current
+        # Resolve a potential closing marker before consuming later text in the
+        # same native chunk. The native machine still owns marker matching.
+        for part in text if self.literal_end else [text]:
+            self.state, clean, current = self.native.TextStateMachine.step(self.state, part)
+            if (self.previous == "tool" and current == "normal" and self.literal_end
+                    and native_tool_literal(self.formatter._tool_parser, self.tool_text)):
+                self.tool_text += clean + self.literal_end
+                self.state = self.text_sm.make_state("tool")
+                current, clean = "tool", ""
+            if current == "reasoning":
+                reasoning += clean
+            elif current == "tool":
+                self.tool_text += clean
+            elif current == "normal":
+                if self.previous == "tool":
+                    calls.extend(self.calls(replay))
+                content += clean
+            elif current is not None:
+                raise ValueError("unsupported native response parser state")
+            self.previous = current
         return content, reasoning, calls
 
 
@@ -183,7 +335,8 @@ def install_continuation_hooks(native):
         return request
 
     def continued_tokenize(self, tokenizer, request, args):
-        result = tokenize(self, tokenizer, request, args)
+        rendered, rendered_args = pythonic_history(tokenizer, request, args)
+        result = tokenize(self, tokenizer, rendered, rendered_args)
         prompt, _, _, initial = result
         args._owned_base_prompt = list(prompt)
         args._owned_prompt_sha256 = hashlib.sha256(json.dumps(prompt, separators=(",", ":")).encode()).hexdigest()
@@ -301,6 +454,11 @@ def install_continuation_hooks(native):
                         calls.extend(state.calls(boundary="stop"))
                 if content or reasoning or calls:
                     send(content, reasoning, calls)
+                elif item.finish_reason is None:
+                    # Framing/tool arguments may buffer for a long generation.
+                    # A real token is activity, without admitting a partial call.
+                    self.wfile.write(b": keepalive\n\n")
+                    self.wfile.flush()
                 if item.finish_reason is not None:
                     finish = item.finish_reason
             if finish is None:

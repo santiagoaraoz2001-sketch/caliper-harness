@@ -304,7 +304,7 @@ func TestReadinessFailureUsesSelectedServiceRecovery(t *testing.T) {
 	if err == nil {
 		t.Fatal("outage admitted readiness")
 	}
-	for _, want := range []string{"18103", "/status", "external"} {
+	for _, want := range []string{"18103", "/manage", "external"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("missing %q in %v", want, err)
 		}

@@ -168,7 +168,7 @@ func (m Model) footer() string {
 	s.CtxKnown = c.Measured && c.ModelKey == m.contextKey()
 	view := m.Chat.Tools
 	if view == "" {
-		view = "coding (8), /tools full"
+		view = "coding, /tools full"
 	}
 	return strings.Replace(s.RenderWidth(m.Width), "esc back · /help", m.escapeHint()+" · /help · tools: "+view, 1)
 }

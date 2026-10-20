@@ -5,7 +5,7 @@ on:
       version:
         description: Immutable release version
         required: true
-        default: '0.1.6'
+        default: '0.2.0'
       platform:
         description: Platform to build and validate
         type: choice
@@ -70,8 +70,17 @@ jobs:
           $kuzu = (& go list -m -f '{{.Dir}}' github.com/kuzudb/go-kuzu).Trim()
           if ($LASTEXITCODE -ne 0) { throw 'Kuzu module lookup failed' }
           $env:PATH = (Join-Path $kuzu 'lib\dynamic\windows') + ';' + $env:PATH
-          go test -count=1 ./internal/update ./internal/bundle ./internal/config ./internal/session ./internal/tools/bash ./internal/store
-          if ($LASTEXITCODE -ne 0) { throw 'native tests failed' }
+          $testHome = Join-Path $env:RUNNER_TEMP 'go-test-home'
+          New-Item -ItemType Directory -Force $testHome | Out-Null
+          $testEnv = @{ HOME=$testHome; USERPROFILE=$testHome; APPDATA=(Join-Path $testHome 'AppData/Roaming'); LOCALAPPDATA=(Join-Path $testHome 'AppData/Local'); XDG_CONFIG_HOME=(Join-Path $testHome 'config'); XDG_DATA_HOME=(Join-Path $testHome 'data') }
+          $previousEnv = @{}
+          foreach ($key in $testEnv.Keys) { $previousEnv[$key] = [Environment]::GetEnvironmentVariable($key, 'Process'); [Environment]::SetEnvironmentVariable($key, $testEnv[$key], 'Process') }
+          try {
+            go test -count=1 ./internal/update ./internal/bundle ./internal/config ./internal/session ./internal/tools/bash ./internal/store ./cmd/specific-harness ./internal/tui
+            if ($LASTEXITCODE -ne 0) { throw 'native tests failed' }
+          } finally {
+            foreach ($key in $testEnv.Keys) { [Environment]::SetEnvironmentVariable($key, $previousEnv[$key], 'Process') }
+          }
           ./scripts/test-install-windows.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Windows installer preservation tests failed' }
           ./scripts/bundle-windows-managed.ps1 -Out "$env:RUNNER_TEMP/Caliper" -AllowDownloads
@@ -104,7 +113,8 @@ jobs:
           df -h "$RUNNER_TEMP"
           export GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local
           GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go mod download
-          GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go test -count=1 ./internal/update ./internal/bundle ./internal/config ./internal/session ./internal/tools/bash ./internal/store
+          mkdir -p "$RUNNER_TEMP/go-test-home"
+          HOME="$RUNNER_TEMP/go-test-home" USERPROFILE="$RUNNER_TEMP/go-test-home" APPDATA="$RUNNER_TEMP/go-test-home/AppData/Roaming" LOCALAPPDATA="$RUNNER_TEMP/go-test-home/AppData/Local" XDG_CONFIG_HOME="$RUNNER_TEMP/go-test-home/config" XDG_DATA_HOME="$RUNNER_TEMP/go-test-home/data" GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go test -count=1 ./internal/update ./internal/bundle ./internal/config ./internal/session ./internal/tools/bash ./internal/store ./cmd/specific-harness ./internal/tui
           bash scripts/bundle-linux.sh "$RUNNER_TEMP/Caliper"
           LD_LIBRARY_PATH="$RUNNER_TEMP/Caliper/lib" "$RUNNER_TEMP/Caliper/caliper-harness" version
           python scripts/test-manage-status.py "$RUNNER_TEMP/Caliper" "$RUNNER_TEMP/manage-status-proof" --component-tests
@@ -124,7 +134,8 @@ jobs:
           df -h "$RUNNER_TEMP"
           export GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local
           GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go mod download
-          GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go test -count=1 ./internal/update ./internal/bundle ./internal/config ./internal/session ./internal/tools/bash ./internal/store
+          mkdir -p "$RUNNER_TEMP/go-test-home"
+          HOME="$RUNNER_TEMP/go-test-home" USERPROFILE="$RUNNER_TEMP/go-test-home" APPDATA="$RUNNER_TEMP/go-test-home/AppData/Roaming" LOCALAPPDATA="$RUNNER_TEMP/go-test-home/AppData/Local" XDG_CONFIG_HOME="$RUNNER_TEMP/go-test-home/config" XDG_DATA_HOME="$RUNNER_TEMP/go-test-home/data" GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go test -count=1 ./internal/update ./internal/bundle ./internal/config ./internal/session ./internal/tools/bash ./internal/store ./cmd/specific-harness ./internal/tui
           bash scripts/bundle-macos.sh "$RUNNER_TEMP/Caliper"
           "$RUNNER_TEMP/Caliper/caliper-harness" version
           python scripts/test-manage-status.py "$RUNNER_TEMP/Caliper" "$RUNNER_TEMP/manage-status-proof" --component-tests

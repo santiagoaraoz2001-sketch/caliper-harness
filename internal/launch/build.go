@@ -81,7 +81,7 @@ func NewBuild(d Deps, configuredCommand ...string) []tool.Definition {
 					return tool.Result{}, err
 				}
 				title, _ := args["title"].(string)
-				a, err := plan.CreateApproach(d.Store, pid, title)
+				a, err := plan.CreateApproachContext(plan.WithProject(ctx, d.Workspace), d.Store, pid, title)
 				if err != nil {
 					return tool.Result{}, err
 				}
@@ -112,7 +112,7 @@ func NewBuild(d Deps, configuredCommand ...string) []tool.Definition {
 				}
 				title, _ := args["title"].(string)
 				prompt, _ := args["prompt"].(string)
-				t, err := plan.CreateTask(d.Store, aid, title, prompt)
+				t, err := plan.CreateTaskContext(plan.WithProject(ctx, d.Workspace), d.Store, aid, title, prompt)
 				if err != nil {
 					return tool.Result{}, err
 				}
@@ -140,6 +140,9 @@ func NewBuild(d Deps, configuredCommand ...string) []tool.Definition {
 				}
 				id, err := need(args, "task")
 				if err != nil {
+					return tool.Result{}, err
+				}
+				if err := plan.CheckProject(d.Store, "task", id, d.Workspace); err != nil {
 					return tool.Result{}, err
 				}
 				get := func(k string) string { v, _ := args[k].(string); return v }
@@ -172,7 +175,7 @@ func NewBuild(d Deps, configuredCommand ...string) []tool.Definition {
 						return tool.Result{}, err
 					}
 				}
-				_, err = plan.SetTaskBlockCommandsContext(ctx, d.Store, id,
+				_, err = plan.SetTaskBlockCommandsContext(plan.WithProject(ctx, d.Workspace), d.Store, id,
 					get("current"), get("target"), get("sketch"),
 					get("acceptance"), get("tests"), get("verify"), check, behavior)
 				if err != nil {
@@ -195,7 +198,7 @@ func NewBuild(d Deps, configuredCommand ...string) []tool.Definition {
 				if err != nil {
 					return tool.Result{}, err
 				}
-				a, err := Ready(ctx, d, id)
+				a, err := Ready(plan.WithProject(ctx, d.Workspace), d, id)
 				if err != nil {
 					return tool.Result{}, err
 				}
@@ -220,20 +223,23 @@ func NewBuild(d Deps, configuredCommand ...string) []tool.Definition {
 				}
 				kind, _ := args["kind"].(string)
 				to, _ := args["to"].(string)
+				if err := plan.CheckProject(d.Store, kind, id, d.Workspace); err != nil {
+					return tool.Result{}, err
+				}
 				if kind == "plan" && (to == plan.PlanActive || to == plan.PlanComplete) {
 					if d.ApproveContract != nil {
 						if err = d.ApproveContract(ctx, "plan", id); err != nil {
 							return tool.Result{}, err
 						}
 					}
-					p, err := plan.TransitionPlan(d.Store, id, to)
+					p, err := plan.TransitionPlanContext(plan.WithProject(ctx, d.Workspace), d.Store, id, to)
 					if err != nil {
 						return tool.Result{}, err
 					}
 					return tool.Result{Text: "plan " + p.ID + " " + p.State + d.Prompts.Text("continuation.workflow.plan_transition")}, nil
 				}
 				if kind == "task" && (to == plan.TaskFailed || to == plan.TaskQueued) {
-					t, err := plan.TransitionTask(d.Store, id, to)
+					t, err := plan.TransitionTaskContext(plan.WithProject(ctx, d.Workspace), d.Store, id, to)
 					if err != nil {
 						return tool.Result{}, err
 					}
@@ -255,6 +261,9 @@ func NewBuild(d Deps, configuredCommand ...string) []tool.Definition {
 				}
 				aid, err := need(args, "approach")
 				if err != nil {
+					return tool.Result{}, err
+				}
+				if err := plan.CheckProject(d.Store, "approach", aid, d.Workspace); err != nil {
 					return tool.Result{}, err
 				}
 				tasks, err := plan.ApproachTasks(d.Store, aid)
@@ -283,6 +292,9 @@ func NewBuild(d Deps, configuredCommand ...string) []tool.Definition {
 				if err != nil {
 					return tool.Result{}, err
 				}
+				if err := plan.CheckProject(d.Store, "approach", aid, d.Workspace); err != nil {
+					return tool.Result{}, err
+				}
 				if err := Pause(d.Store, aid); err != nil {
 					return tool.Result{}, err
 				}
@@ -304,12 +316,16 @@ func NewBuild(d Deps, configuredCommand ...string) []tool.Definition {
 				if err != nil {
 					return tool.Result{}, err
 				}
-				if p, err := plan.TransitionPlan(d.Store, id, plan.PlanRetired); err == nil {
+				if _, err := plan.GetPlan(d.Store, id); err == nil {
+					p, err := plan.TransitionPlanContext(plan.WithProject(ctx, d.Workspace), d.Store, id, plan.PlanRetired)
+					if err != nil {
+						return tool.Result{}, err
+					}
 					return tool.Result{Text: "retired plan " + p.ID}, nil
 				} else if !errors.Is(err, plan.ErrNotFound) {
 					return tool.Result{}, err
 				}
-				a, err := plan.TransitionApproach(d.Store, id, plan.ApproachRetired)
+				a, err := plan.TransitionApproachCheckedContext(plan.WithProject(ctx, d.Workspace), d.Store, id, plan.ApproachRetired, "")
 				if err != nil {
 					return tool.Result{}, err
 				}
@@ -329,6 +345,9 @@ func NewBuild(d Deps, configuredCommand ...string) []tool.Definition {
 				}
 				aid, err := need(args, "approach")
 				if err != nil {
+					return tool.Result{}, err
+				}
+				if err := plan.CheckProject(d.Store, "approach", aid, d.Workspace); err != nil {
 					return tool.Result{}, err
 				}
 				// Unchanged paused work may resume its admitted brief. Edited

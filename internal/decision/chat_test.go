@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"specific-harness/internal/llm"
@@ -81,7 +82,8 @@ func TestChatJudgeBudgetCancelAndCatalog(t *testing.T) {
 		t.Fatalf("%+v %v", h, err)
 	}
 	r := Request{Context: "x", Options: []string{"yes", "no"}, MaxBytes: 1}
-	if _, err := c.Judge(context.Background(), r); err == nil || calls != 1 {
+	var capacity *ContextCapacityError
+	if _, err := c.Judge(context.Background(), r); !errors.As(err, &capacity) || !capacity.EncodedRequest || calls != 1 {
 		t.Fatal("byte budget not enforced", calls, err)
 	}
 	r.MaxBytes = 0
@@ -89,6 +91,35 @@ func TestChatJudgeBudgetCancelAndCatalog(t *testing.T) {
 	cancel()
 	if _, err := c.Judge(ctx, r); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
+	}
+}
+
+func TestChatJudgeCompleteBodyLimit(t *testing.T) {
+	for _, runtime := range []string{"openai", "mlx", "ollama", "rulith"} {
+		t.Run(runtime, func(t *testing.T) {
+			calls, actual := 0, 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				body, _ := io.ReadAll(r.Body)
+				actual = len(body)
+				emitJudge(w, runtime, `{"pick":0,"option":"yes","confidence":0.8}`, "stop")
+			}))
+			defer srv.Close()
+			c := New(srv.URL+"/v1", "m", "auto", time.Second).WithSelection(Selection{Runtime: runtime, Model: "m"})
+			req := Request{Context: "Unicode é <body>", Instructions: "complete guidance", Options: []string{"yes", "no"}}
+			if _, err := c.Judge(t.Context(), req); err != nil {
+				t.Fatal(err)
+			}
+			req.MaxBytes = actual - 1
+			var capacity *ContextCapacityError
+			if _, err := c.Judge(t.Context(), req); !errors.As(err, &capacity) || !capacity.EncodedRequest || calls != 1 {
+				t.Fatalf("over-limit body reached HTTP or lost typed capacity: %v calls=%d", err, calls)
+			}
+			req.MaxBytes = actual
+			if _, err := c.Judge(t.Context(), req); err != nil || calls != 2 || actual != req.MaxBytes {
+				t.Fatalf("exact body did not fit: %v calls=%d bytes=%d", err, calls, actual)
+			}
+		})
 	}
 }
 

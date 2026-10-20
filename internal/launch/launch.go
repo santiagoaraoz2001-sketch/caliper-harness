@@ -638,12 +638,32 @@ func verifyPass(ctx context.Context, d Deps, results []Result, indices []int, wi
 	return errors.Join(errs...)
 }
 
-// isFail reads the reviewer's one-line verdict: FAIL leads.
+// reviewToken reads a leading verdict, including a standalone Markdown heading.
+// It never searches quoted examples or later prose for a success marker.
 func reviewToken(out string) string {
-	first := strings.TrimSpace(strings.SplitN(strings.TrimSpace(out), "\n", 2)[0])
+	first := ""
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) != "" {
+			first = line
+			break
+		}
+	}
 	fields := strings.Fields(first)
 	if len(fields) == 0 {
 		return ""
+	}
+	if strings.Trim(fields[0], "#") == "" {
+		indent := first[:len(first)-len(strings.TrimLeft(first, " \t"))]
+		if len(fields[0]) > 6 || len(indent) >= 4 || strings.Contains(indent, "\t") {
+			return "" // Not a Markdown heading, or an indented code block.
+		}
+		if len(fields) == 3 && strings.Trim(fields[2], "#") == "" {
+			fields = fields[:2] // Optional closing heading markers.
+		}
+		if len(fields) != 2 {
+			return "" // A heading must contain one unambiguous verdict.
+		}
+		return strings.TrimSuffix(strings.ToUpper(fields[1]), ":")
 	}
 	return strings.ToUpper(strings.SplitN(fields[0], ":", 2)[0])
 }
@@ -788,6 +808,9 @@ func New(d Deps) tool.Definition {
 			if d.Store == nil || d.NewModel == nil || d.NewRegistry == nil {
 				return workflowResult(d, id, nil, fmt.Errorf("launch tool is not wired — needs store, model, and registry"))
 			}
+			if err := plan.CheckProject(d.Store, "approach", id, d.Workspace); err != nil {
+				return tool.Result{}, err
+			}
 			snapshot, err := CheckReady(ctx, d, id)
 			if err != nil {
 				return workflowResult(d, id, nil, err)
@@ -867,6 +890,9 @@ func workflowRef(d Deps) func(context.Context, tool.Args) (string, error) {
 			return "", err
 		}
 		if err != nil {
+			return id, err
+		}
+		if err := plan.CheckProject(d.Store, "approach", a.ID, d.Workspace); err != nil {
 			return id, err
 		}
 		return a.ID, nil

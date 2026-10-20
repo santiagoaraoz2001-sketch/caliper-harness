@@ -93,7 +93,21 @@ func saveConnections(c Config, preservedPrompts *PromptsConfig) error {
 }
 
 // ProjectBytes keeps reusable choices out of a setup-managed project's file.
-func ProjectBytes(c Config) ([]byte, error) {
+func ProjectBytes(c Config) ([]byte, error) { return projectBytes(c, false) }
+
+// WorkspaceBytes retains legacy values until personal defaults have been saved.
+func WorkspaceBytes(c Config) ([]byte, error) {
+	p, err := PreferencesPath()
+	if err != nil {
+		return nil, err
+	}
+	_, err = os.Stat(p)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	return projectBytes(c, err == nil)
+}
+func projectBytes(c Config, omitPreferences bool) ([]byte, error) {
 	raw, err := yaml.Marshal(c)
 	if err != nil {
 		return nil, err
@@ -105,12 +119,44 @@ func ProjectBytes(c Config) ([]byte, error) {
 	delete(n, "model")
 	delete(n, "decision")
 	delete(n, "serve")
+	if omitPreferences {
+		for _, key := range preferenceSections {
+			delete(n, key)
+		}
+	}
 	return yaml.Marshal(n)
 }
 
-// SaveEffective preserves explicit project configuration. Files created by Setup
-// have no reusable sections, so subsequent Settings/Status choices stay reusable.
+// SaveEffective persists connection selections without changing personal settings.
+// Managed workspace files do not freeze shared selections; explicit project files
+// retain their existing override behavior.
 func SaveEffective(path string, c Config) error {
+	if !c.ProjectOverride && ManagedWorkspaceConfig(path) {
+		if err := c.Validate(); err != nil {
+			return err
+		}
+		if _, err := os.Stat(path); err == nil {
+			if _, _, err := Load(path); err != nil {
+				return err
+			}
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		out, err := WorkspaceBytes(c)
+		if err != nil {
+			return err
+		}
+		if err := CreateWorkspaceConfigDir(path); err != nil {
+			return err
+		}
+		if err := writeConfig(path, out); err != nil {
+			return err
+		}
+		if err := SaveConnections(c); err != nil {
+			return fmt.Errorf("workspace saved but reusable connections failed: %w", err)
+		}
+		return nil
+	}
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return Save(path, c)

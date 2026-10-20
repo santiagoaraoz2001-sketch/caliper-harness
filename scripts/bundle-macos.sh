@@ -1,5 +1,5 @@
 #!/bin/bash
-# Internal Mac arm64 development folder with private runtime dependencies.
+# Mac arm64 application folder with private runtime dependencies.
 # Builder acquires pinned packages; end users do not run Python setup commands.
 set -euo pipefail
 [[ $(uname -s) == Darwin && $(uname -m) == arm64 ]] || { echo 'Mac arm64 builder required' >&2; exit 1; }
@@ -45,13 +45,14 @@ while read -r name version; do
   done
 done < <(awk '$1 == "dep" {print $2, $3}' "$out/notices/DEPENDENCIES.txt")
 {
-  echo 'Internal development bundle: local ad-hoc signing, not a public installer.'
+  echo 'Caliper macOS arm64 application folder. Ad-hoc signed; not notarized.'
   echo 'Private standalone Python, hash-locked runtime packages and ripgrep supplied.'
   echo 'Project check tools, model weights and Ollama are not supplied.'
   echo 'Kuzu v0.11.3 input:'
   shasum -a 256 "$kuzu_dir/lib/dynamic/darwin/libkuzu.dylib"
   echo 'Go builder:'
   GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go version
+  echo 'Source revision: see executable vcs.revision and vcs.modified in DEPENDENCIES.txt.'
 } > "$out/notices/BUILD.txt"
 install_name_tool -rpath "$kuzu_dir/lib/dynamic/darwin" '@executable_path/lib' "$out/caliper-harness"
 for file in "$out/lib/libkuzu.dylib" "$out/caliper-harness"; do
@@ -76,4 +77,4 @@ mv "$out/runtime/manifest.json.tmp" "$out/runtime/manifest.json"
 rpaths=$(otool -l "$out/caliper-harness" | awk '/cmd LC_RPATH/ {r=1; next} r && /path / {print $2; r=0}')
 [[ $rpaths == '@executable_path/lib' ]] || { echo "unexpected RPATH: $rpaths" >&2; exit 1; }
 "$out/runtime/worker/bin/python3" -I python/macos/write_manifest.py "$out"
-printf 'Development bundle: %s\n' "$out"
+printf 'Complete macOS application folder: %s\n' "$out"

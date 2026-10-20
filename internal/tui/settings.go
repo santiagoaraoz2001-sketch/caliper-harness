@@ -362,11 +362,16 @@ func (m *Model) saveSettings() {
 		}
 		m.commitExternalDecision()
 	}
-	if err := m.persist(); err != nil {
+	if err := config.SaveSettings(m.CfgPath, m.Cfg); err != nil {
 		m.alert("err", err.Error())
 		return
 	}
-	m.alert("info", fmt.Sprintf("saved %s; %s", m.CfgPath, m.Settings.DecisionNotice))
+	m.syncSetupAfterSave()
+	notice := "Saved " + m.settingsScope() + "; project check stays in this workspace"
+	if m.Settings.DecisionNotice != "" {
+		notice += "; " + m.Settings.DecisionNotice
+	}
+	m.alert("info", notice)
 }
 
 // settingsKey drives the form: arrows move, enter edits or cycles,
@@ -409,6 +414,14 @@ func (m Model) settingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
+func (m Model) settingsScope() string {
+	if !m.Cfg.ProjectOverride && config.ManagedWorkspaceConfig(m.CfgPath) {
+		path, _ := config.PreferencesPath()
+		return "personal defaults for all projects · " + path
+	}
+	return "explicit project overrides · " + m.CfgPath
+}
+
 func (m Model) renderSettings(w, vh int) string {
 	inner := BoxInner(w)
 	fields := settingFields()
@@ -420,6 +433,7 @@ func (m Model) renderSettings(w, vh int) string {
 	}
 	hints := Wrap(m.ownedHint("↑↓ move · enter edit · ←/→ cycle · a apply decision · s save · "+m.escapeHint()), inner)
 	body := []string{Muted.Render("worker edits live; decision edits staged · a apply · s save")}
+	body = append(body, Wrap(m.settingsScope(), inner)...)
 	if m.CfgPath == "" {
 		body = append(body, WarnSt.Bold(false).Render("(no file: s refuses)"))
 	}

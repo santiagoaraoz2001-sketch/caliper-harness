@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"specific-harness/internal/prompts"
@@ -165,13 +166,53 @@ func overlap(body, query string, minWord int) int {
 	return n
 }
 
-// Query lists entries (kind narrows; blank searches all) and recalls
-// the top matches for query. Empty means nothing matched. Both the
-// auto-insert and the recall tool run through here — one path.
+// Query recalls legacy global entries. Project-bound callers use QueryProject
+// so authored knowledge follows the same ranking and output budget.
 func Query(s *store.Store, kind, query string, topN, maxChars, minWord int, catalogs ...*prompts.Catalog) (string, error) {
 	entries, err := List(s, kind, "", 0)
 	if err != nil {
 		return "", err
+	}
+	return Recall(entries, query, topN, maxChars, minWord, catalogs...), nil
+}
+
+// QueryProject recalls current authored notes for the captured workspace plus
+// legacy global entries. Guides remain available on demand; old versions and
+// other projects never compete for the caller's existing recall budget.
+func QueryProject(ctx context.Context, s *store.Store, root, kind, query string, topN, maxChars, minWord int, catalogs ...*prompts.Catalog) (string, error) {
+	if root == "" {
+		return "", fmt.Errorf("project recall requires a captured workspace")
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if topN <= 0 || len(words(query, minWord)) == 0 {
+		return "", nil
+	}
+	q := `MATCH (m:MemoryEntry) WHERE (
+coalesce(m.project_root,'') = '' OR (
+m.project_root = $root AND m.kind = 'note'
+AND NOT (coalesce(m.key,'') STARTS WITH 'harness/reference/')
+AND NOT EXISTS { MATCH (n:MemoryEntry) WHERE n.previous_id = m.id }
+))`
+	params := map[string]any{"root": root}
+	if kind != "" {
+		q += " AND m.kind = $kind"
+		params["kind"] = kind
+	}
+	q += ` RETURN m.id AS id, m.kind AS kind, m.body AS body,
+m.created_at AS created_at, m.session_ref AS ref ORDER BY created_at DESC, id`
+	rows, err := s.QueryContext(ctx, q, params)
+	if err != nil {
+		return "", err
+	}
+	entries := make([]*Entry, 0, len(rows))
+	for _, row := range rows {
+		entry, err := entryOf(row)
+		if err != nil {
+			return "", err
+		}
+		entries = append(entries, entry)
 	}
 	return Recall(entries, query, topN, maxChars, minWord, catalogs...), nil
 }

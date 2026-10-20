@@ -344,7 +344,9 @@ func (r *Runner) enforce(ctx context.Context, final bool, provisional string, lo
 	// under a claim is supervised by the existing progress watcher. Neither
 	// needs a second bookkeeping judgment after every call. Finals, failures,
 	// changed questions and delivered comments retain this enforcement path.
-	if note := r.enforcement.latest; !final && note != nil && note.Error == "" && !note.Result.Failed && !note.Result.Blocked && !note.Result.Truncated && (note.Result.ExitCode == nil || *note.Result.ExitCode == 0) && packet.PreflightRefusal == "" && len(packet.UnexecutedCalls) == 0 && len(packet.DeliveredUserComments) == 0 && len(packet.DeliveredTaskComments) == 0 {
+	// Older unexecuted calls remain evidence, but only the current refusal can
+	// override a newer successful receipt.
+	if note := r.enforcement.latest; !final && note != nil && note.Error == "" && !note.Result.Failed && !note.Result.Blocked && !note.Result.Truncated && (note.Result.ExitCode == nil || *note.Result.ExitCode == 0) && packet.PreflightRefusal == "" && len(packet.DeliveredUserComments) == 0 && len(packet.DeliveredTaskComments) == 0 {
 		guided := !r.assignedClaim && note.PlanningQuestion != "" && note.PlanningQuestion == packet.Checkpoint.NextAction
 		if guided || r.assignedClaim && r.settlement == nil {
 			return "", nil
@@ -437,16 +439,25 @@ func (r *Runner) enforce(ctx context.Context, final bool, provisional string, lo
 		request, prefix := v.Option, r.Prompts.Text("continuation.bookkeeping.request_prefix")
 		suffix := r.Prompts.Text("continuation.bookkeeping.authority_suffix")
 		nextAction := r.Prompts.Text("continuation.bookkeeping.next_action")
+		claimed := false
 		if a := r.Continuation.Assignment; a != nil && r.ClaimedTaskScope(&session.WorkflowScope{Store: a.Store, Kind: "task", ID: a.TaskID}) {
+			claimed = true
 			suffix = r.Prompts.Text("continuation.bookkeeping.claimed_authority_suffix")
-			nextAction = r.Prompts.Text("continuation.bookkeeping.claimed_next_action")
+			if r.enforcement.prepare {
+				// The owning phase already names the legal next step. A bare
+				// "PAT update" leaves an executor guessing at graph mutations.
+				request = r.currentProgress(facts).NextAction
+				if r.enforcement.knowledge {
+					request += " " + enforceOptions[2] + "."
+				}
+			}
 		}
 		r.enforcement.repair = prefix + request + suffix
 		r.enforcement.presentation = r.enforcement.repair
 		if r.enforcement.knowledge {
 			r.enforcement.knowledgePresentation = prefix + enforceOptions[2] + suffix
 		}
-		if facts, ok := facts.(BookkeepingFacts); ok && r.enforcement.prepare {
+		if facts, ok := facts.(BookkeepingFacts); ok && r.enforcement.prepare && !claimed {
 			r.enforcement.repair += nextAction + facts.Preparation
 		}
 		r.enforcement.repairFacts = owningFactsDigest(facts)

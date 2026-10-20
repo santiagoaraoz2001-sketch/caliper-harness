@@ -25,8 +25,11 @@ type judgmentTransport struct {
 }
 
 func (t judgmentTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	if t.maxBytes < 0 || t.maxBytes > 0 && (r.ContentLength < 0 || r.ContentLength > int64(t.maxBytes)) {
+	if t.maxBytes < 0 || t.maxBytes > 0 && r.ContentLength < 0 {
 		return nil, fmt.Errorf("judge complete request bytes %d exceed limit %d", r.ContentLength, t.maxBytes)
+	}
+	if t.maxBytes > 0 && r.ContentLength > int64(t.maxBytes) {
+		return nil, &ContextCapacityError{Message: fmt.Sprintf("judge complete request bytes %d exceed limit %d", r.ContentLength, t.maxBytes), EncodedRequest: true}
 	}
 	return t.base.RoundTrip(r)
 }

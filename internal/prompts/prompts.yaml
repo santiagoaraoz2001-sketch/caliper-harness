@@ -5,16 +5,18 @@
 # No variables, indirect/index lookups, control flow or template definitions/calls.
 texts:
   # External LLM setup prompt: copied by the user from /manage assisted, never injected into coding runs.
-  # Fields: .OS, .Connections, .Project. Actual paths are supplied by the TUI.
+  # Fields: .OS, .Connections, .Project, .Directory, .Scope, .ValidationCommand.
   setup.assisted: |
     Help me connect my existing servers and downloaded models to Caliper Harness.
     If you can access this computer, inspect it and propose the exact changes. If you cannot, ask me for the relevant paths and command output. Do not invent paths, model IDs, launch flags or runtime compatibility.
 
     This computer's OS: {{.OS}}
     Reusable connections file: {{.Connections}}
-    Current project's settings: {{.Project}}
+    Current directory: {{.Directory}}
+    Workspace settings: {{.Project}}
+    Scope: {{.Scope}}
 
-    First ask which models and servers I want to connect, which model should do coding, and whether I want a native decision model. Ask where my checkpoints are stored before searching. Inspect existing connection settings, installed server commands and their --help, checkpoint config/index files and the selected server's catalog. A checkpoint folder must contain all its shards; a GGUF selection uses the first shard. Exclude datasets. Use the exact model ID accepted by that server; MLX local model launchers use the checkpoint's absolute path. Confirm support for the architecture, quantization and any speculative decoding head from the installed runtime before configuring it.
+    First ask which models and servers I want to connect, which model should do coding, and whether I want a decision judge. Recommend a native decision model; compatible chat models are also supported. Ask where my checkpoints are stored before searching. Inspect existing connection settings, installed server commands and their --help, checkpoint config/index files and the selected server's catalog. A checkpoint folder must contain all its shards; a GGUF selection uses the first shard. Exclude datasets. Use the exact model ID accepted by that server; MLX local model launchers use the checkpoint's absolute path. Confirm support for the architecture, quantization and any speculative decoding head from the installed runtime before configuring it.
 
     Back up connections.yaml, then merge the requested choices without deleting other connections. Preserve the existing prompts selection and every unrelated setting. Leave project settings, workspaces, graph, sessions, prompts and model files intact. Explicit project model/decision/serve sections override these machine defaults: explain any override and ask before changing it. Stop Caliper before writing and reopen it after validation so it reloads the file. Do not download models or dependencies, start inference, enable downloaded Python code, or stop another application's processes without my approval. Keep credentials out of chat and the copied prompt.
 
@@ -52,9 +54,11 @@ texts:
 
     Each serve.models entry has server (the matching recipe URL), name (wire ID, or absolute path for an MLX checkpoint launcher), and optional path (checkpoint folder or first GGUF shard). Saving a model does not load it or assign a role. model.server/name/runtime selects Coding; model.tool_protocol is structured or text. model.plain_request_timeout_seconds is optional; preserve its existing value.
 
-    For a native judge, set decision.disabled: false and decision.server/model/runtime/path/device to its verified endpoint, exact model ID, native runtime, absolute checkpoint path and desired device (auto, cpu or gpu). Native runtimes are laya and system_one; select from the checkpoint's actual native API, not its name. A generic chat endpoint does not become a native judge. Optional revision pins the checkpoint; trust_remote_code permits downloaded checkpoint Python only with my explicit approval. Preserve existing decision timeout, input-token, threshold, logging and style settings. Add a matching recipe with kind: sidecar, the same native runtime and URL, and launcher: preset only when Caliper should own it. Otherwise use the existing external sidecar. No judge selected: leave it disabled; required decisions ask me instead.
+    For a native judge, set decision.disabled: false and decision.server/model/runtime/path/device to its verified endpoint, exact model ID, native runtime, absolute checkpoint path and desired device (auto, cpu or gpu). Native runtimes are laya and system_one; select from the checkpoint's actual native API, not its name. Optional revision pins the checkpoint; trust_remote_code permits downloaded checkpoint Python only with my explicit approval. Add a matching recipe with kind: sidecar, the same native runtime and URL, and launcher: preset only when Caliper should own it. Otherwise use the existing external sidecar.
 
-    Validate the merged settings with the existing command `caliper config --config <current-project-settings-path>`; quote the actual path for this shell. This reads configuration and does not run inference. Do not pass connections.yaml as --config: it is loaded automatically before the project file. Unknown YAML keys are errors. Check that the printed effective selections match my choices. In the reopened TUI use /manage, r to refresh saved endpoints, t to test, u to select Coding and j to select Judge (native selection may require a to apply). Use s to start, l to load and x to unload only when I request those actions. A responding catalog/health check proves availability, not generation, GPU residency or judge quality. Report what was configured, what actually passed, and what remains untested.
+    For a chat judge, use decision.disabled: false with decision.server/model/runtime matching its existing coding-capable connection (runtime openai, mlx, ollama or rulith). Reuse that server's recipe and model row; do not label it sidecar or a native runtime. Caliper validates complete structured verdicts, but the model reports its own confidence: catalog availability does not prove judgment quality. The server controls device and residency. Preserve existing decision timeout, input-token, threshold, logging and style settings. No judge selected: leave it disabled; required decisions ask me instead.
+
+    In the current directory shown above, validate with `{{.ValidationCommand}}` (PowerShell on Windows; a POSIX shell on macOS/Linux). This reads configuration and does not run inference. Retain this command's scope: adding --config to an automatic workspace path would turn it into an explicit override. Do not pass connections.yaml as --config: it is loaded automatically before the project file. Unknown YAML keys are errors. Check that the printed effective selections match my choices. In the reopened TUI use /manage, r to refresh saved endpoints, t to test, u to select Coding and j to select Judge (native selection may require a to apply). Use s to start, l to load and x to unload only when I request those actions. A responding catalog/health check proves availability, not generation, GPU residency or judge quality. Report what was configured, what actually passed, and what remains untested.
 
   # --- system ---
   # System role: source-grounded coding, minimal edits and actual verification.
@@ -64,8 +68,8 @@ texts:
     Inspect responsible source and tests. For a reported defect still unfixed, run its distinguishing regression before
     repairing it. For work already implemented, reuse known source and receipts; do not recreate the defect.
     Report missing pre-change evidence honestly. For a new deliverable, implement the target with meaningful behavioral assertions.
-    Use read's full-file sha256 as expected_hash. Edit one unique exact old span or a fully observed
-    inclusive start_line/end_line range, never both; reread only missing bytes or after hash refusal.
+    Edit a unique exact old span (expected_hash optional), or an observed inclusive start_line/end_line
+    range with read's current sha256 as expected_hash; never mix routes. Reread only missing or changed bytes.
     Implement the requested behavior and run check after changes: the frozen behavioral command first, project suite last. Keep the corrected
     deliverable; use an isolated copy for any genuinely needed later causal control, then check the
     final current source again. Report actual results and unexecuted checks. A normal final answer with no tool call requests
@@ -1215,7 +1219,7 @@ texts:
   # Fields: none. Supplied by the owning Go caller.
   help.edit: |2
     ## help.edit
-    Replace only fully observed source with a current expected_hash. Prefer the smallest unique exact old span for a small change, e.g. `edit(path="src/main.py", old="return 0", new="return value", expected_hash="<actual read hash>")`. For an entirely observed line span, use inclusive 1-based start_line/end_line plus new; untouched CRLF/LF bytes remain exact. Do not mix routes. `new=""` deletes intentionally; missing new refuses. Do not reconstruct unchanged functions. Stale hash/range/multiple matches refuse without publication. Encode newlines as \n in JSON strings; text literal slots contain raw lines.
+    Prefer the smallest unique exact old span for a small change; expected_hash is optional, e.g. `edit(path="src/main.py", old="return 0", new="return value")`. For an entirely observed line span, use inclusive 1-based start_line/end_line, new and read's current sha256 as expected_hash; untouched CRLF/LF bytes remain exact. Do not mix routes. `new=""` deletes intentionally; missing new refuses. Do not reconstruct unchanged functions. Stale hash/range/multiple matches refuse without publication. Encode newlines as \n in JSON strings; text literal slots contain raw lines.
 
   # Focused help.fetch documentation/examples; help labels current executable availability.
   # Original use sites: internal/tools/model-guide.md:124 (helpDefinition).
@@ -1753,8 +1757,8 @@ texts:
   # Original use sites: internal/tools/files/files.go:269 (Definitions).
   # Fields: none. Supplied by the owning Go caller.
   tools.edit.purpose: >2-
-    Use read's sha256 as expected_hash. For a small edit, prefer a unique exact old span.
-    Alternatively use inclusive start_line/end_line for fully observed source lines, omitting old.
+    Prefer a unique exact old span; expected_hash is optional.
+    For inclusive start_line/end_line, use read's current sha256 and fully observed source lines, omitting old.
     Choose one route. new is literal: include wanted line endings; none are inserted.
   # Model-facing desc prose for the current New registry constructor; executable schema/authority
   # remain Go-owned.
@@ -2699,7 +2703,7 @@ texts:
 
   # Corrective advice for internal/tools/judge/judge.go:67; no authority or effects implied.
   # Fields: none. Supplied by the owning Go caller.
-  guidance.judge.unreachable: "ask the user to check the selected decision server in the TUI /status page; start/load it there if harness-managed, or restore the configured external service through its own launcher. /status is a user UI action, not a coding tool. Do not search the project for server code or guess a launch command"
+  guidance.judge.unreachable: "ask the user to check the selected decision server in the TUI /manage page; start/load it there if harness-managed, or restore the configured external service through its own launcher. /manage is a user UI action, not a coding tool. Do not search the project for server code or guess a launch command"
 
 
   # Explicit outside discovery; ordinary bound tools retain workspace scope.

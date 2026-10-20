@@ -144,8 +144,11 @@ func (c *Client) Judge(ctx context.Context, r Request) (Verdict, error) {
 	if err != nil {
 		return Verdict{}, fmt.Errorf("judge cannot encode request: %v", err)
 	}
-	if r.MaxBytes < 0 || r.MaxBytes > 0 && len(buf) > r.MaxBytes {
+	if r.MaxBytes < 0 {
 		return Verdict{}, fmt.Errorf("judge complete request bytes %d exceed limit %d", len(buf), r.MaxBytes)
+	}
+	if r.MaxBytes > 0 && len(buf) > r.MaxBytes {
+		return Verdict{}, &ContextCapacityError{Message: fmt.Sprintf("judge complete request bytes %d exceed limit %d", len(buf), r.MaxBytes), EncodedRequest: true}
 	}
 	if c.expected != nil {
 		h, err := c.Health(ctx)
@@ -210,11 +213,18 @@ func (c *Client) Judge(ctx context.Context, r Request) (Verdict, error) {
 	return Verdict{Pick: *jr.Pick, Option: jr.Option, Confidence: *jr.Confidence, Model: jr.Model, Device: jr.Device}, nil
 }
 
-// ContextCapacityError is an explicit refusal before native inference, not a
-// verdict or retry permission for identity, transport or other request errors.
-type ContextCapacityError struct{ Message string }
+// ContextCapacityError is an explicit capacity refusal before inference, from
+// actual encoded request size or native token admission. It grants no retry
+// permission for identity, transport or other request errors.
+type ContextCapacityError struct {
+	Message        string
+	EncodedRequest bool
+}
 
 func (e *ContextCapacityError) Error() string {
+	if e.EncodedRequest {
+		return e.Message
+	}
 	return "decision sidecar refused: HTTP 400: " + e.Message
 }
 

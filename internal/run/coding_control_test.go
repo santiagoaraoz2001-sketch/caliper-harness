@@ -244,7 +244,11 @@ func TestCodingChecksRefuseAndInvalidateTruthfully(t *testing.T) {
 			}
 			defer owned.Close()
 			if scenario == "later launch" || scenario == "later workflow_resume" || scenario == "failed workflow" {
-				p, err := plan.CreatePlan(owned, "owned parent control", "preserve current check truth")
+				root, err := filepath.EvalSymlinks(dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				p, err := plan.CreatePlanContext(plan.WithProject(t.Context(), root), owned, "owned parent control", "preserve current check truth")
 				if err != nil {
 					t.Fatal(err)
 				}

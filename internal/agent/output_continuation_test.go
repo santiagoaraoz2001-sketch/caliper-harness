@@ -31,6 +31,7 @@ func writeContinuationChunk(w http.ResponseWriter, delta any, reason string, pre
 // The fixed model is a component oracle, not native inference qualification.
 func TestOutputLimitContinuationsRetainPrefixAndExecuteOnce(t *testing.T) {
 	dir := t.TempDir()
+	unfinished := strings.Repeat("unfinished thought ", 3000) // Large, but still live; pruning must preserve the literal prefix.
 	requests := []map[string]json.RawMessage{}
 	call := func(index int, id, name, args string) map[string]any {
 		v := map[string]any{"index": index, "function": map[string]string{"arguments": args}}
@@ -51,9 +52,9 @@ func TestOutputLimitContinuationsRetainPrefixAndExecuteOnce(t *testing.T) {
 		requests = append(requests, body)
 		switch len(requests) {
 		case 1:
-			writeContinuationChunk(w, map[string]any{"reasoning": "unfinished thought "}, "length", prefix([]int{11}, []string{"unfinished thought "}), 40, 3)
+			writeContinuationChunk(w, map[string]any{"reasoning": unfinished}, "length", prefix([]int{11}, []string{unfinished}), 40, 3)
 		case 2:
-			writeContinuationChunk(w, map[string]any{"reasoning": "now acting", "tool_calls": []any{call(0, "stable-one", "effect", `{"name":"fi`)}}, "length", prefix([]int{11, 12}, []string{"unfinished thought ", "now acting<tool>{\"name\":\"fi"}), 45, 4)
+			writeContinuationChunk(w, map[string]any{"reasoning": "now acting", "tool_calls": []any{call(0, "stable-one", "effect", `{"name":"fi`)}}, "length", prefix([]int{11, 12}, []string{unfinished, "now acting<tool>{\"name\":\"fi"}), 45, 4)
 		case 3:
 			writeContinuationChunk(w, map[string]any{"tool_calls": []any{call(0, "", "", `rst"}`), call(1, "stable-two", "effect", `{"name":"second"}`)}}, "tool_calls", nil, 50, 5)
 		case 4:
@@ -73,7 +74,7 @@ func TestOutputLimitContinuationsRetainPrefixAndExecuteOnce(t *testing.T) {
 		return tool.Result{Text: "settled " + name}, err
 	}})
 	sink := &nativeRecordingSink{}
-	r := &agent.Runner{Model: llm.New(srv.URL, "fixture").WithRuntime("mlx"), Registry: reg, Session: sink, SessionID: "owned", MaxSteps: 3}
+	r := &agent.Runner{Model: llm.New(srv.URL, "fixture").WithRuntime("mlx"), Registry: reg, Session: sink, SessionID: "owned", MaxSteps: 3, Prune: agent.Prune{OutputsAgeTokens: 50000}}
 	final, _, err := r.Run(t.Context(), "retain original objective")
 	if err != nil || r.Outcome.Status != outcome.Completed || final != "done" || !reflect.DeepEqual(effects, []string{"first", "second"}) || len(requests) != 4 {
 		t.Fatalf("continuation/effects final=%q err=%v outcome=%+v effects=%v requests=%d", final, err, r.Outcome, effects, len(requests))
@@ -96,7 +97,7 @@ func TestOutputLimitContinuationsRetainPrefixAndExecuteOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	n := len(messages)
-	if n < 3 || messages[n-3].Reasoning != "unfinished thought now acting" || len(messages[n-3].ToolCalls) != 2 || messages[n-2].ToolCallID != "stable-one" || messages[n-1].ToolCallID != "stable-two" {
+	if n < 3 || messages[n-3].Reasoning != unfinished+"now acting" || len(messages[n-3].ToolCalls) != 2 || messages[n-2].ToolCallID != "stable-one" || messages[n-1].ToolCallID != "stable-two" {
 		t.Fatalf("assembled thought/call/result association lost: %+v", messages)
 	}
 }

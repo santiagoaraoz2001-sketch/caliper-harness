@@ -104,11 +104,8 @@ func TestThinkingLoopHeldPartial(t *testing.T) {
 			parts := [][2]string{{"reasoning", thought[:13]}, {"reasoning", thought[13:]}}
 			start := time.Now()
 			reply, err := thinkingFixture(t, r, parts, true, func(k, s string) error { logs++; return nil })
-			wantCause := thinkingLoopStop
-			if tc.err == nil {
-				wantCause = context.DeadlineExceeded
-			}
-			if !errors.Is(err, wantCause) || tc.err == nil && time.Since(start) < 800*time.Millisecond || calls != 1 || logs < 1 || reply.Message.Reasoning != thought || reply.ThinkingOnly || len(reply.Message.ToolCalls) != 1 || reply.Message.ToolCalls[0].ID != "partial" || reply.Message.ToolCalls[0].Arguments != "{\"cmd\":\"" {
+			wantCause := context.DeadlineExceeded
+			if !errors.Is(err, wantCause) || errors.Is(err, thinkingLoopStop) || time.Since(start) < 800*time.Millisecond || calls != 1 || logs < 1 || reply.Message.Reasoning != thought || reply.ThinkingOnly || len(reply.Message.ToolCalls) != 1 || reply.Message.ToolCalls[0].ID != "partial" || reply.Message.ToolCalls[0].Arguments != "{\"cmd\":\"" {
 				t.Fatalf("reply=%+v err=%v calls=%d logs=%d elapsed=%s", reply, err, calls, logs, time.Since(start))
 			}
 		})
@@ -156,8 +153,8 @@ func TestThinkingLoopFailurePrecedenceAndDisable(t *testing.T) {
 	r = thinkingRunner(decision.New("http://unused.invalid:1", "configured-model", decision.DeviceCPU, time.Second).Judge)
 	r.ThinkingLoop.MaxInputBytes = 20
 	_, err = thinkingFixture(t, r, [][2]string{{"reasoning", strings.Repeat("abcdefgh", 16)}}, true, nil)
-	if !errors.Is(err, thinkingLoopStop) || !strings.Contains(err.Error(), "complete request bytes") {
-		t.Fatalf("overflow %v", err)
+	if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, thinkingLoopStop) {
+		t.Fatalf("advisory overflow stopped generation: %v", err)
 	}
 	r = thinkingRunner(nil)
 	r.ThinkingLoop.SampleBytes = 1

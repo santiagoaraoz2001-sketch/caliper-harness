@@ -23,7 +23,11 @@ func TestPATLegacyConfiguredCheckOmission(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	s := openAssignedStore(t, dir)
-	p, _ := plan.CreatePlan(s, "p", "g")
+	root, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _ := plan.CreatePlanContext(plan.WithProject(t.Context(), root), s, "p", "g")
 	a, _ := plan.CreateApproach(s, p.ID, "a")
 	x, _ := plan.CreateTask(s, a.ID, "t", "do work")
 	cfg := config.Defaults()
