@@ -81,6 +81,11 @@ try {
     Assert-Throws { Assert-CaliperInstallerSignature 'fixture' } 'valid Microsoft'
     $script:signature.SignerCertificate.Subject='CN=Microsoft Corporation, O=Microsoft Corporation, C=US'
     Assert-CaliperInstallerSignature 'fixture'
+    # An unloadable signature cmdlet (PowerShell 7 PSModulePath inherited by
+    # 5.1) must say verification was impossible, not that Microsoft failed it.
+    function Get-AuthenticodeSignature { throw [System.Management.Automation.CommandNotFoundException]::new('module could not be loaded') }
+    Assert-Throws { Assert-CaliperInstallerSignature 'fixture' } 'cannot be verified'
+    function Get-AuthenticodeSignature { return $script:signature }
     # Exercise actual acquisition order with isolated process/network doubles.
     ${function:Install-CaliperSystemRuntime} = $originalInstall
     $script:opened = 0
@@ -154,7 +159,7 @@ try {
             $script:normalizerArguments[2] -eq $decisionDir) 'normalizer arguments lost isolated mode or staged target'
     }
     $global:LASTEXITCODE = 0
-    Write-Output 'PASS: missing/invalid PE, minimum/newer/outdated runtime, silent installed path, verification errors, check-only, recheck, reboot/cancel/failure, Microsoft signature'
+    Write-Output 'PASS: missing/invalid PE, minimum/newer/outdated runtime, silent installed path, verification errors, check-only, recheck, reboot/cancel/failure, Microsoft signature, unloadable signature checker'
 } finally {
     $env:OS=$originalOS; $env:SystemRoot=$originalRoot
     Remove-Item -LiteralPath $fixture -Recurse -Force

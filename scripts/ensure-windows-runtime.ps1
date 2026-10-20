@@ -3,6 +3,13 @@
 #Requires -Version 5.1
 param([switch]$CheckOnly, [switch]$Json)
 $ErrorActionPreference = 'Stop'
+# A PowerShell 7 parent exports its own PSModulePath to children. Windows
+# PowerShell 5.1 then fails to autoload Core-edition modules such as
+# Microsoft.PowerShell.Security (Get-AuthenticodeSignature). Restore the
+# Windows PowerShell defaults for this process before any cmdlet autoloads.
+if ($PSEdition -eq 'Desktop') {
+    $env:PSModulePath = "$env:USERPROFILE\Documents\WindowsPowerShell\Modules;$env:ProgramFiles\WindowsPowerShell\Modules;$env:SystemRoot\system32\WindowsPowerShell\v1.0\Modules"
+}
 $CaliperVCMinimum = [version]'14.44.35211.0'
 $CaliperVCFiles = @('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')
 
@@ -38,7 +45,10 @@ function Get-CaliperRuntimeStatus {
 }
 
 function Assert-CaliperInstallerSignature([string]$Path) {
-    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    try { $signature = Get-AuthenticodeSignature -LiteralPath $Path }
+    catch [System.Management.Automation.CommandNotFoundException] {
+        throw 'Windows could not load the Authenticode signature checker (Microsoft.PowerShell.Security), so the Microsoft runtime download cannot be verified. Nothing was installed. Retry from a fresh Windows PowerShell or Command Prompt window.'
+    }
     if ($signature.Status -ne 'Valid' -or $null -eq $signature.SignerCertificate -or
         $signature.SignerCertificate.Subject -notmatch '(^|,\s*)CN=Microsoft Corporation(,|$)') {
         throw 'Microsoft runtime download did not have a valid Microsoft Authenticode signature. Nothing was installed.'

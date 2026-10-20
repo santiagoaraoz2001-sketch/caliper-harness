@@ -52,13 +52,25 @@ function legacyWindowsRuntime(root) {
     });
   } catch { return false; }
 }
+// Windows PowerShell 5.1 must never autoload PowerShell 7 modules: a parent
+// pwsh session exports its own PSModulePath to children, and 5.1 then fails
+// loading Core-edition modules such as Microsoft.PowerShell.Security
+// (Get-AuthenticodeSignature). Spawn powershell.exe with the Windows
+// PowerShell module defaults instead of the inherited module path.
+function windowsPowerShellEnv() {
+  const profile = process.env.USERPROFILE || os.homedir();
+  const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
+  const systemRoot = process.env.SystemRoot || 'C:\\Windows';
+  const PSModulePath = [profile + '\\Documents\\WindowsPowerShell\\Modules', programFiles + '\\WindowsPowerShell\\Modules', systemRoot + '\\system32\\WindowsPowerShell\\v1.0\\Modules'].join(';');
+  return { ...process.env, PSModulePath };
+}
 async function ensurePrerequisites(root) {
   if (process.platform !== 'win32') return;
   const helper = path.join(root, 'ensure-windows-runtime.ps1');
   if (!fs.existsSync(helper) && legacyWindowsRuntime(root)) return;
   if (!process.env.SystemRoot) throw new Error('SystemRoot unavailable; cannot check Windows runtime');
   await new Promise((resolve, reject) => {
-    const child = spawn(path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', helper], {stdio: 'inherit', windowsHide: false});
+    const child = spawn(path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', helper], {env: windowsPowerShellEnv(), stdio: 'inherit', windowsHide: false});
     child.on('error', reject);
     child.on('exit', code => code === 0 ? resolve() : reject(new Error(`Windows runtime prerequisite failed (${code}); previous selection preserved. Finish any requested restart before retrying.`)));
   });
@@ -84,7 +96,7 @@ async function registerCommand(root) {
     args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'install-windows.ps1'), '-TargetDirectory', root];
   }
   await new Promise((resolve, reject) => {
-    const child = spawn(command, args, {stdio: 'inherit', windowsHide: false});
+    const child = spawn(command, args, process.platform === 'win32' ? {env: windowsPowerShellEnv(), stdio: 'inherit', windowsHide: false} : {stdio: 'inherit', windowsHide: false});
     child.on('error', reject);
     child.on('exit', code => code === 0 ? resolve() : reject(new Error(`Caliper command registration failed (${code}); application retained at ${root}`)));
   });

@@ -177,6 +177,21 @@ test('registration failures are returned instead of reporting an available comma
     await assert.rejects(failed.registerCommand('/app'),/installer could not start/);
   }
 });
+test('Windows PowerShell spawns never inherit a PowerShell 7 PSModulePath', async t => {
+  const f=await fixture(t,'windows-amd64');
+  const polluted='C:\\Users\\Fixture\\Documents\\PowerShell\\Modules;C:\\Program Files\\PowerShell\\Modules;C:\\Program Files\\WindowsApps\\Microsoft.PowerShell_7.6.7.0_x64__8wekyb3d8bbwe\\Modules';
+  const expected='C:\\Users\\Fixture\\Documents\\WindowsPowerShell\\Modules;C:\\Program Files\\WindowsPowerShell\\Modules;C:\\Windows\\system32\\WindowsPowerShell\\v1.0\\Modules';
+  const env={PSModulePath:polluted, USERPROFILE:'C:\\Users\\Fixture', ProgramFiles:'C:\\Program Files', npm_config_global:'false'};
+  const calls=[], win=platformApp('win32', simulatedSpawn([0,0],calls), env);
+  await win.ensurePrerequisites(path.join(f.dir,'source','Caliper'));
+  await win.registerCommand(path.join(f.dir,'source','Caliper'));
+  assert.equal(calls.length,2);
+  for(const call of calls) {
+    assert.match(call.file,/powershell\.exe$/);
+    assert.equal(call.options.env.PSModulePath, expected, 'Windows PowerShell 5.1 must not autoload PowerShell 7 modules');
+    assert.equal(call.options.env.USERPROFILE,'C:\\Users\\Fixture', 'other environment must pass through unchanged');
+  }
+});
 test('plain npm registration uses real Unix installer and creates a working future-shell command', {skip:process.platform==='win32'}, async t => {
   const f=await fixture(t), root=path.join(f.dir,"Caliper app's folder");
   fs.renameSync(path.join(f.dir,'source','Caliper'),root);

@@ -2,6 +2,13 @@
 #Requires -Version 5.1
 param([string]$TargetDirectory = (Join-Path $env:LOCALAPPDATA 'Caliper'), [switch]$NoPath)
 $ErrorActionPreference = 'Stop'
+# A PowerShell 7 parent exports its own PSModulePath to children. Windows
+# PowerShell 5.1 then fails to autoload Core-edition modules such as
+# Microsoft.PowerShell.Security (Get-AuthenticodeSignature). Restore the
+# Windows PowerShell defaults for this process before any cmdlet autoloads.
+if ($PSEdition -eq 'Desktop') {
+    $env:PSModulePath = "$env:USERPROFILE\Documents\WindowsPowerShell\Modules;$env:ProgramFiles\WindowsPowerShell\Modules;$env:SystemRoot\system32\WindowsPowerShell\v1.0\Modules"
+}
 $source = [IO.Path]::GetFullPath($PSScriptRoot)
 $target = [IO.Path]::GetFullPath($TargetDirectory)
 if ($env:OS -ne 'Windows_NT') { throw 'Run this installer on Windows.' }
@@ -60,7 +67,7 @@ if ($source.TrimEnd('\') -ine $target.TrimEnd('\')) {
 # Keep the legacy binary/shim untouched. Relative paths also preserve spaces and
 # Unicode user names without embedding them into the CMD file's text encoding.
 New-Item -ItemType Directory -Path $commands -Force | Out-Null
-$shim = "@echo off`r`n$marker`r`nsetlocal EnableExtensions DisableDelayedExpansion`r`nset `"PATH=%~dp0$relativeApp\bin;%PATH%`"`r`n`"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`" -NoProfile -ExecutionPolicy Bypass -File `"%~dp0$relativeApp\ensure-windows-runtime.ps1`"`r`nif errorlevel 1 exit /b %errorlevel%`r`n`"%~dp0$relativeApp\$binary`" %*`r`nexit /b %errorlevel%`r`n"
+$shim = "@echo off`r`n$marker`r`nsetlocal EnableExtensions DisableDelayedExpansion`r`nset `"PSModulePath=%USERPROFILE%\Documents\WindowsPowerShell\Modules;%ProgramFiles%\WindowsPowerShell\Modules;%SystemRoot%\system32\WindowsPowerShell\v1.0\Modules`"`r`nset `"PATH=%~dp0$relativeApp\bin;%PATH%`"`r`n`"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`" -NoProfile -ExecutionPolicy Bypass -File `"%~dp0$relativeApp\ensure-windows-runtime.ps1`"`r`nif errorlevel 1 exit /b %errorlevel%`r`n`"%~dp0$relativeApp\$binary`" %*`r`nexit /b %errorlevel%`r`n"
 $temporaryLauncher = Join-Path $commands ('.caliper-install-' + [guid]::NewGuid().ToString('N'))
 [IO.File]::WriteAllText($temporaryLauncher, $shim, (New-Object System.Text.ASCIIEncoding))
 try {
