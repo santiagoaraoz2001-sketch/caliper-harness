@@ -274,7 +274,11 @@ def main():
         reopened.expect('/status\r', 'Generated tokens')
         checks['reopened_status'] = True
         checks['reopened_clean_exit'] = reopened.quit() == 0
-        checks['explicit_no_color_respected'] = not re.search(rb'\x1b\[[0-9;]*m', reopened.raw)
+        # ConPTY emits an initial SGR reset even when its child sets no style.
+        # Resets are harmless; every color/style-setting sequence still fails.
+        checks['explicit_no_color_respected'] = all(
+            sequence in (b'\x1b[m', b'\x1b[0m')
+            for sequence in re.findall(rb'\x1b\[[0-9;:]*m', reopened.raw))
         checks['project_marker_preserved'] = (work / 'keep.txt').read_text() == 'owner work\n'
         checks['only_explicit_endpoint_probed'] = bool(requests) and all(p == '/v1/models' for p in requests)
     except Exception as exc:
