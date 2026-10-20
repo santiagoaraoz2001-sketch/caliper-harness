@@ -79,6 +79,13 @@ Plain `npm install caliper-harness` also registers the command for your user acc
 Reopen your terminal if it cannot find `caliper`. Local npm installation creates
 `node_modules` and npm package files where you run it; `-g` avoids those project files.
 
+On Windows, launching also checks the Microsoft Visual C++ runtime (the x64
+redistributable, version 14.44.35211.0 or newer) and offers Microsoft's setup when
+it is missing or outdated. Recent npm versions ask for approval before running a
+package's install script; if npm reports that `caliper-harness` is not covered by
+`allowScripts`, run `npm install-scripts approve caliper-harness` and then
+`npm rebuild caliper-harness` in the same directory to finish installing.
+
 Caliper offers available updates at startup. Accept the offer or use `/update` to
 prepare the new version; close and reopen Caliper to use it. Active runs keep their
 current executable. `npm install -g caliper-harness@latest` also updates the command.
