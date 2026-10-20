@@ -5,7 +5,7 @@ on:
       version:
         description: Immutable release version
         required: true
-        default: '0.1.5'
+        default: '0.1.6'
       platform:
         description: Platform to build and validate
         type: choice
@@ -15,6 +15,8 @@ on:
           - all
           - windows-amd64
           - linux-amd64
+          - darwin-arm64
+          - linux-arm64
 permissions:
   contents: read
 jobs:
@@ -22,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(inputs.platform == 'windows-amd64' && '[{"runner":"windows-2022","platform":"windows-amd64"}]' || inputs.platform == 'linux-amd64' && '[{"runner":"ubuntu-24.04","platform":"linux-amd64"}]' || '[{"runner":"windows-2022","platform":"windows-amd64"},{"runner":"ubuntu-24.04","platform":"linux-amd64"}]') }}
+        include: ${{ fromJSON(inputs.platform == 'windows-amd64' && '[{"runner":"windows-2022","platform":"windows-amd64"}]' || inputs.platform == 'linux-amd64' && '[{"runner":"ubuntu-24.04","platform":"linux-amd64"}]' || inputs.platform == 'darwin-arm64' && '[{"runner":"macos-15","platform":"darwin-arm64"}]' || inputs.platform == 'linux-arm64' && '[{"runner":"ubuntu-24.04-arm","platform":"linux-arm64"}]' || '[{"runner":"windows-2022","platform":"windows-amd64"},{"runner":"ubuntu-24.04","platform":"linux-amd64"},{"runner":"macos-15","platform":"darwin-arm64"},{"runner":"ubuntu-24.04-arm","platform":"linux-arm64"}]') }}
     runs-on: ${{ matrix.runner }}
     env:
       RELEASE_VERSION: ${{ inputs.version }}
@@ -113,6 +115,22 @@ jobs:
           # packaging. Verified release transport remains; npm independently
           # reconstructs it. This avoids three simultaneous GPU runtime copies.
           rm -rf -- "$RUNNER_TEMP/Caliper"
+          npm ci --prefix scripts/npm --ignore-scripts
+          node scripts/test-npm-release.cjs "$asset" "$RUNNER_TEMP/npm-native-proof"
+      - name: Build macOS product and test native seams
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          df -h "$RUNNER_TEMP"
+          export GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local
+          GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go mod download
+          GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go test -count=1 ./internal/update ./internal/bundle ./internal/config ./internal/session ./internal/tools/bash ./internal/store
+          bash scripts/bundle-macos.sh "$RUNNER_TEMP/Caliper"
+          "$RUNNER_TEMP/Caliper/caliper-harness" version
+          python scripts/test-manage-status.py "$RUNNER_TEMP/Caliper" "$RUNNER_TEMP/manage-status-proof" --component-tests
+          python scripts/package-release.py "$RUNNER_TEMP/Caliper" --version "$RELEASE_VERSION" --out dist > "$RUNNER_TEMP/release.json"
+          asset=$(python -c 'import json,sys; p=json.load(open(sys.argv[1])); print(p["archive"] or p["parts_manifest"])' "$RUNNER_TEMP/release.json")
+          test -f "$asset"
           npm ci --prefix scripts/npm --ignore-scripts
           node scripts/test-npm-release.cjs "$asset" "$RUNNER_TEMP/npm-native-proof"
       - uses: actions/upload-artifact@v4
