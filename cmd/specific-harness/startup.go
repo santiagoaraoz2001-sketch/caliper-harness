@@ -145,7 +145,11 @@ func summarizeFailures(failures []bundle.Failure) string {
 // are broken the user is asked before anything is fetched.
 func (s *startupDisplay) verifyInstall(root string) bool {
 	s.begin("Install", "Verifying every installed file (SHA-256)")
-	_, failures, err := bundle.VerifyManifest(root)
+	_, failures, err := bundle.VerifyManifestProgress(root, func(done, total int) {
+		if s.animated && (done == total || done%100 == 0) {
+			s.detail(fmt.Sprintf("Verifying every installed file (SHA-256) · %d of %d", done, total))
+		}
+	})
 	if err != nil {
 		s.finish("error", err.Error())
 		return false

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -39,21 +40,33 @@ func (f Failure) String() string { return f.Path + " (" + f.Kind + ")" }
 // reports the ones that are missing or changed. A missing or malformed
 // inventory is an error: without it there is no chain to verify against.
 func VerifyManifest(root string) (checked int, failures []Failure, err error) {
+	return VerifyManifestProgress(root, nil)
+}
+
+// VerifyManifestProgress is VerifyManifest with progress reporting. Files
+// are hashed by a small worker pool: a complete bundle inventories tens of
+// thousands of mostly small files, and hashing them strictly one at a time
+// makes every launch wait on single-file latency. Failures keep manifest
+// order, and progress (when set) is called once per finished file with a
+// strictly increasing done count, never concurrently.
+func VerifyManifestProgress(root string, progress func(done, total int)) (checked int, failures []Failure, err error) {
 	manifest := filepath.Join(root, ManifestFile)
 	file, err := os.Open(manifest)
 	if err != nil {
 		return 0, nil, fmt.Errorf("install inventory missing: %s; replace the complete Caliper folder", manifest)
 	}
 	defer file.Close()
+	var entries []manifestEntry
 	reader := bufio.NewReader(file)
 	for {
 		line, readErr := reader.ReadString('\n')
 		line = strings.TrimRight(line, "\r\n")
 		if line != "" {
-			checked++
-			if err := verifyManifestLine(root, line, &failures); err != nil {
+			entry, err := parseManifestLine(line)
+			if err != nil {
 				return 0, nil, err
 			}
+			entries = append(entries, entry)
 		}
 		if readErr == io.EOF {
 			break
@@ -62,39 +75,109 @@ func VerifyManifest(root string) (checked int, failures []Failure, err error) {
 			return 0, nil, fmt.Errorf("cannot read install inventory %s: %w", manifest, readErr)
 		}
 	}
-	if checked == 0 {
+	if len(entries) == 0 {
 		return 0, nil, fmt.Errorf("install inventory is empty: %s; replace the complete Caliper folder", manifest)
 	}
-	return checked, failures, nil
+	base, err := resolvedBase(root)
+	if err != nil {
+		return 0, nil, err
+	}
+	outcomes := make([]manifestOutcome, len(entries))
+	jobs := make(chan int)
+	var wait sync.WaitGroup
+	var progressMu sync.Mutex
+	done := 0
+	for range min(runtime.NumCPU(), 8) {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			for index := range jobs {
+				failure, failed, err := entries[index].check(root, base)
+				outcomes[index] = manifestOutcome{failure, failed, err}
+				if progress != nil {
+					progressMu.Lock()
+					done++
+					progress(done, len(entries))
+					progressMu.Unlock()
+				}
+			}
+		}()
+	}
+	for index := range entries {
+		jobs <- index
+	}
+	close(jobs)
+	wait.Wait()
+	for _, outcome := range outcomes {
+		if outcome.err != nil {
+			return 0, nil, outcome.err
+		}
+		if outcome.failed {
+			failures = append(failures, outcome.failure)
+		}
+	}
+	return len(entries), failures, nil
 }
 
-func verifyManifestLine(root, line string, failures *[]Failure) error {
+type manifestEntry struct {
+	want, rel string
+}
+
+type manifestOutcome struct {
+	failure Failure
+	failed  bool
+	err     error
+}
+
+func parseManifestLine(line string) (manifestEntry, error) {
 	// Paths may contain spaces, so split on the fixed hash width, not fields.
 	if len(line) < 67 || line[64] != ' ' || line[65] != ' ' {
-		return fmt.Errorf("malformed install inventory line: %q", line)
+		return manifestEntry{}, fmt.Errorf("malformed install inventory line: %q", line)
 	}
 	want, listed := line[:64], line[66:]
 	if _, err := hex.DecodeString(want); err != nil {
-		return fmt.Errorf("malformed SHA-256 in install inventory line: %q", line)
+		return manifestEntry{}, fmt.Errorf("malformed SHA-256 in install inventory line: %q", line)
 	}
 	rel, err := manifestRel(listed)
 	if err != nil {
-		return err
+		return manifestEntry{}, err
 	}
-	name, err := containedPath(root, rel)
+	return manifestEntry{want: want, rel: rel}, nil
+}
+
+func (entry manifestEntry) check(root, base string) (Failure, bool, error) {
+	name, err := containedIn(root, base, entry.rel)
 	if err != nil {
-		return err
+		return Failure{}, false, err
 	}
 	sum, err := hashFile(name)
 	if os.IsNotExist(err) {
-		*failures = append(*failures, Failure{Path: rel, Kind: FailureMissing})
-		return nil
+		return Failure{Path: entry.rel, Kind: FailureMissing}, true, nil
 	}
+	if err != nil {
+		return Failure{}, false, err
+	}
+	if !strings.EqualFold(sum, entry.want) {
+		return Failure{Path: entry.rel, Kind: FailureChanged}, true, nil
+	}
+	return Failure{}, false, nil
+}
+
+func verifyManifestLine(root, line string, failures *[]Failure) error {
+	entry, err := parseManifestLine(line)
 	if err != nil {
 		return err
 	}
-	if !strings.EqualFold(sum, want) {
-		*failures = append(*failures, Failure{Path: rel, Kind: FailureChanged})
+	base, err := resolvedBase(root)
+	if err != nil {
+		return err
+	}
+	failure, failed, err := entry.check(root, base)
+	if err != nil {
+		return err
+	}
+	if failed {
+		*failures = append(*failures, failure)
 	}
 	return nil
 }
@@ -208,17 +291,25 @@ func repairableProfile(rel string) string {
 	return ""
 }
 
-// Resolve existing parents as well as the leaf: lexical checks alone do not
-// prevent a link inside the application from pointing at user files outside it.
-func containedPath(root, rel string) (string, error) {
+func resolvedBase(root string) (string, error) {
 	base, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return "", err
 	}
-	base, err = filepath.Abs(base)
+	return filepath.Abs(base)
+}
+
+func containedPath(root, rel string) (string, error) {
+	base, err := resolvedBase(root)
 	if err != nil {
 		return "", err
 	}
+	return containedIn(root, base, rel)
+}
+
+// Resolve existing parents as well as the leaf: lexical checks alone do not
+// prevent a link inside the application from pointing at user files outside it.
+func containedIn(root, base, rel string) (string, error) {
 	target := filepath.Join(base, filepath.FromSlash(rel))
 	probe := target
 	for {

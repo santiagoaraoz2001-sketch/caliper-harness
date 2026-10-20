@@ -81,6 +81,31 @@ func TestVerifyManifestCleanThenChangedAndMissing(t *testing.T) {
 	}
 }
 
+func TestVerifyManifestProgressReportsEveryFile(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{}
+	for i := range 50 {
+		files[fmt.Sprintf("runtime/decision/file-%02d.txt", i)] = fmt.Sprintf("contents %d", i)
+	}
+	writeInventory(t, root, files)
+	type report struct{ done, total int }
+	var reports []report
+	checked, failures, err := VerifyManifestProgress(root, func(done, total int) {
+		reports = append(reports, report{done, total})
+	})
+	if err != nil || len(failures) != 0 || checked != 50 {
+		t.Fatalf("progress verify: checked=%d failures=%v err=%v", checked, failures, err)
+	}
+	if len(reports) != 50 {
+		t.Fatalf("progress reports=%d want one per file: %v", len(reports), reports)
+	}
+	for i, r := range reports {
+		if r.total != 50 || r.done != i+1 {
+			t.Fatalf("progress reports must count 1..50 of 50 in order, got %v", reports)
+		}
+	}
+}
+
 func TestVerifyManifestWithoutInventoryIsError(t *testing.T) {
 	if _, _, err := VerifyManifest(t.TempDir()); err == nil || !strings.Contains(err.Error(), "install inventory missing") {
 		t.Fatalf("missing inventory accepted: %v", err)
