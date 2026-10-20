@@ -37,7 +37,18 @@ func NewInput(in io.ReadCloser) *Input {
 // NewFileInput owns cancellable reads for this invocation, without changing
 // stdin flags or closing the caller's file. Only its cancellation pipes close.
 func NewFileInput(in *os.File) (*Input, error) {
-	rd, err := cancelreader.NewReader(in)
+	info, err := in.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("cannot inspect input: %w", err)
+	}
+	var source io.Reader = in
+	null, nullErr := os.Stat(os.DevNull)
+	if info.Mode().IsRegular() || (nullErr == nil && os.SameFile(info, null)) {
+		// Files and the null device do not wait for terminal input, and Linux
+		// cannot poll them with epoll. Keep the existing reader fallback.
+		source = struct{ io.Reader }{in}
+	}
+	rd, err := cancelreader.NewReader(source)
 	if err != nil {
 		return nil, fmt.Errorf("cannot prepare cancellable input: %w", err)
 	}

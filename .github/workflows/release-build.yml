@@ -76,7 +76,7 @@ jobs:
           $previousEnv = @{}
           foreach ($key in $testEnv.Keys) { $previousEnv[$key] = [Environment]::GetEnvironmentVariable($key, 'Process'); [Environment]::SetEnvironmentVariable($key, $testEnv[$key], 'Process') }
           try {
-            go test -count=1 ./internal/update ./internal/bundle ./internal/config ./internal/session ./internal/tools/bash ./internal/store ./cmd/specific-harness ./internal/tui
+            go test -count=1 ./internal/update ./internal/bundle ./internal/config ./internal/session ./internal/tools/ask ./internal/tools/bash ./internal/store ./cmd/specific-harness ./internal/tui
             if ($LASTEXITCODE -ne 0) { throw 'native tests failed' }
           } finally {
             foreach ($key in $testEnv.Keys) { [Environment]::SetEnvironmentVariable($key, $previousEnv[$key], 'Process') }
@@ -114,7 +114,7 @@ jobs:
           export GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local
           GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go mod download
           mkdir -p "$RUNNER_TEMP/go-test-home"
-          HOME="$RUNNER_TEMP/go-test-home" USERPROFILE="$RUNNER_TEMP/go-test-home" APPDATA="$RUNNER_TEMP/go-test-home/AppData/Roaming" LOCALAPPDATA="$RUNNER_TEMP/go-test-home/AppData/Local" XDG_CONFIG_HOME="$RUNNER_TEMP/go-test-home/config" XDG_DATA_HOME="$RUNNER_TEMP/go-test-home/data" GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go test -count=1 ./internal/update ./internal/bundle ./internal/config ./internal/session ./internal/tools/bash ./internal/store ./cmd/specific-harness ./internal/tui
+          HOME="$RUNNER_TEMP/go-test-home" USERPROFILE="$RUNNER_TEMP/go-test-home" APPDATA="$RUNNER_TEMP/go-test-home/AppData/Roaming" LOCALAPPDATA="$RUNNER_TEMP/go-test-home/AppData/Local" XDG_CONFIG_HOME="$RUNNER_TEMP/go-test-home/config" XDG_DATA_HOME="$RUNNER_TEMP/go-test-home/data" GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go test -count=1 ./internal/update ./internal/bundle ./internal/config ./internal/session ./internal/tools/ask ./internal/tools/bash ./internal/store ./cmd/specific-harness ./internal/tui
           bash scripts/bundle-linux.sh "$RUNNER_TEMP/Caliper"
           LD_LIBRARY_PATH="$RUNNER_TEMP/Caliper/lib" "$RUNNER_TEMP/Caliper/caliper-harness" version
           python scripts/test-manage-status.py "$RUNNER_TEMP/Caliper" "$RUNNER_TEMP/manage-status-proof" --component-tests
@@ -135,7 +135,7 @@ jobs:
           export GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local
           GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go mod download
           mkdir -p "$RUNNER_TEMP/go-test-home"
-          HOME="$RUNNER_TEMP/go-test-home" USERPROFILE="$RUNNER_TEMP/go-test-home" APPDATA="$RUNNER_TEMP/go-test-home/AppData/Roaming" LOCALAPPDATA="$RUNNER_TEMP/go-test-home/AppData/Local" XDG_CONFIG_HOME="$RUNNER_TEMP/go-test-home/config" XDG_DATA_HOME="$RUNNER_TEMP/go-test-home/data" GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go test -count=1 ./internal/update ./internal/bundle ./internal/config ./internal/session ./internal/tools/bash ./internal/store ./cmd/specific-harness ./internal/tui
+          HOME="$RUNNER_TEMP/go-test-home" USERPROFILE="$RUNNER_TEMP/go-test-home" APPDATA="$RUNNER_TEMP/go-test-home/AppData/Roaming" LOCALAPPDATA="$RUNNER_TEMP/go-test-home/AppData/Local" XDG_CONFIG_HOME="$RUNNER_TEMP/go-test-home/config" XDG_DATA_HOME="$RUNNER_TEMP/go-test-home/data" GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go test -count=1 ./internal/update ./internal/bundle ./internal/config ./internal/session ./internal/tools/ask ./internal/tools/bash ./internal/store ./cmd/specific-harness ./internal/tui
           bash scripts/bundle-macos.sh "$RUNNER_TEMP/Caliper"
           "$RUNNER_TEMP/Caliper/caliper-harness" version
           python scripts/test-manage-status.py "$RUNNER_TEMP/Caliper" "$RUNNER_TEMP/manage-status-proof" --component-tests

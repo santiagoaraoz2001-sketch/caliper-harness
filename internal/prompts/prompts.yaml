@@ -491,9 +491,9 @@ texts:
     Leave this call unrepaired; the coding model must supply its intended tool or missing arguments.
   decision.loop.instructions: >2-
     Choose between three directions from human requirements and actual current receipts.
-    Continue productive work when it gains relevant information, answers or effects. Repair a
-    rejected call only while PendingRepair identifies an unresolved call problem; use CurrentToolSchema,
-    not an earlier planning example. Reconsider when legal attempts or explanations keep returning
+    Continue productive work when it gains relevant information, answers or effects. Repair only an
+    unresolved rejected call shown in PendingRepair or PreflightRefusal, using CurrentToolSchema.
+    Resolved refusals are history. Reconsider when legal attempts or explanations keep returning
     to the same unresolved point without new evidence: inspect the specific missing fact or conclude
     from established evidence, rather than repeat the argument. Follow Checkpoint role; reviewers
     inspect their frozen Task and give a verdict, never implement sibling work. Cadence and long

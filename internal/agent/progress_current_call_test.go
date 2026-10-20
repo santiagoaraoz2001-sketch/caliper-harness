@@ -64,16 +64,21 @@ func TestInterfaceProgressRefusedCallGroundingAndSilence(t *testing.T) {
 				// Named JSON fields also compile against old source for the RED
 				// control; absence fails behavior rather than compilation.
 				var packet struct {
-					Checkpoint                          ProgressCheckpoint
-					PreflightRefusal, CurrentToolSchema string
-					RecentReceipts                      []loopObservation
-					Assigned, CurrentClaim              bool
+					Checkpoint                                         ProgressCheckpoint
+					PreflightRefusal, CurrentToolSchema, PendingRepair string
+					RecentReceipts                                     []loopObservation
+					Assigned, CurrentClaim                             bool
 				}
 				if err := json.Unmarshal([]byte(q.Context), &packet); err != nil {
 					t.Fatal(err)
 				}
 				if len(packet.RecentReceipts) != 0 || !strings.Contains(packet.PreflightRefusal, `unsupported argument "more"`) || !strings.Contains(packet.CurrentToolSchema, "Call plan with {}") || !strings.Contains(packet.CurrentToolSchema, "\n{}\n") {
 					t.Fatalf("zero-receipt refusal lacks its actual current legal call: %s", q.Context)
+				}
+				// The native LFM failure carried its current refusal here while
+				// PendingRepair was empty. The judge must be allowed to use it.
+				if packet.PendingRepair != "" || !strings.Contains(q.Instructions, "PendingRepair or PreflightRefusal") {
+					t.Fatalf("judge instructions exclude the current refusal: %s", q.Instructions)
 				}
 				if strings.Contains(packet.Checkpoint.NextAction, "EXECUTE") || strings.Contains(packet.CurrentToolSchema, "more=true") || packet.Assigned || packet.CurrentClaim {
 					t.Fatalf("refusal was replaced by future execution/claim advice: %+v", packet)
