@@ -25,7 +25,7 @@ import (
 )
 
 const Repository = "santiagoaraoz2001-sketch/caliper-harness"
-const Version = "0.1.5"
+const Version = "0.1.6"
 
 type Release struct{ Version, ArchiveURL, ChecksumURL, PartsURL string }
 type Selection struct {
