@@ -37,8 +37,11 @@ independent of executable tool scope; tool help labels actual availability and
 shows a current schema only when available. These references are separate from
 `plan`'s current question-led authoring workflow and grant no execution authority.
 
-Keep every inference key and each nonempty string value; only the UI-only
-`setup.assisted` guide may be absent from an older catalog. Quote standalone yes/no/on/off
+Keep required keys and nonempty string values. Older customized catalogs may omit
+`setup.assisted`, `continuation.project_style` and `planning.answer.coverage`.
+Assisted setup reports its missing guide. Style injection and Approach coverage
+disclose when they use shipped wording for their missing key; supplied custom
+text is preserved, and an explicitly blank value is rejected. Quote standalone yes/no/on/off
 values (or use a literal block) to avoid YAML-version ambiguity. Named template fields such as `{{.TaskID}}`
 are supplied as actual data by Go; their allowed names are listed in comments.
 Reordering or repeating an existing field is supported. Interpolation supports
@@ -51,7 +54,7 @@ editing instructions does not change tool names/types, authority, approvals,
 readiness, claim, budgets, actual checks or independent-review rules.
 
 For an explicit alternate catalog, set `prompts.path` in the regular config YAML.
-A missing file, unknown/missing key or invalid template fails admission; there is
+A missing file, unknown key, missing required key or invalid template fails admission; there is
 no silent per-key fallback. When the default asset is absent, Go uses its disclosed
 embedded shipped catalog. An owned Python decision service requires the real
 shared asset and receives its admitted absolute path via `--prompts-file`. Python
