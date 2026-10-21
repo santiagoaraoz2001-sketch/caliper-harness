@@ -119,7 +119,7 @@ func (r *Runner) keepThinking(reply llm.Reply, log func(string, string) error) e
 	return nil
 }
 
-// keepPartial archives a refused native response without making it replayable.
+// keepPartial archives original fields; the caller separately retains safe context.
 func (r *Runner) keepPartial(reply llm.Reply, cause error, log func(string, string) error) (string, error) {
 	if r.Session == nil {
 		return "original partial fields not archived", fmt.Errorf("partial native response has no session archive; original not retained")
@@ -142,7 +142,7 @@ func (r *Runner) keepPartial(reply llm.Reply, cause error, log func(string, stri
 	if err != nil {
 		return "original partial archive incomplete", err
 	}
-	return fmt.Sprintf("original %d-byte native response archived in raw fragments; incomplete fields omitted from bounded resume", len(raw)), nil
+	return fmt.Sprintf("original %d-byte native response archived in raw fragments", len(raw)), nil
 }
 
 func nativeArchiveHeader(provenance any, label string, log func(string, string) error) error {

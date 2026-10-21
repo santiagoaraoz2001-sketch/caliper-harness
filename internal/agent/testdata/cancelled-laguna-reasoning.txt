@@ -1,0 +1,64 @@
+Now I understand the codebase. Let me analyze the two correctness cases:
+
+**Case 1: Movement must stay on cardinal unit vectors.**
+The current `setDirection` method:
+```js
+setDirection(dx, dy) {
+    if (Math.abs(dx) + Math.abs(dy) !== 1) return;
+    if (isOpposite([dx, dy], this.direction)) return;
+    this.nextDirection = [dx, dy];
+}
+```
+
+The check `Math.abs(dx) + Math.abs(dy) !== 1` handles:
+- (0.5, 0.5): abs(0.5) + abs(0.5) = 1.0 === 1 → this would PASS the check! That's the bug. It should be rejected because it's not a unit vector on a cardinal axis.
+- (0, 0): abs(0) + abs(0) = 0 !== 1 → rejected. Good.
+- (1, 1): abs(1) + abs(1) = 2 !== 1 → rejected. Good.
+- (2, 0): abs(2) + abs(0) = 2 !== 1 → rejected. Good.
+- NaN: abs(NaN) + abs(NaN) = NaN !== 1 → rejected. Good.
+- Infinity: abs(Infinity) + abs(0) = Infinity !== 1 → rejected. Good.
+
+Wait, but (0.5, 0.5) gives 0.5 + 0.5 = 1.0, so `1 !== 1` is false, so it passes. That's the bug! The check `Math.abs(dx) + Math.abs(dy) !== 1` is a Manhattan-distance check, which incorrectly accepts (0.5, 0.5) and (-0.5, 0.5), etc.
+
+So the requirement is: movement must stay on cardinal unit vectors. Valid inputs are (1,0), (-1,0), (0,1), (0,-1). Fractional inputs like (0.5, 0.5), non-finite values, and non-unit vectors must be ignored.
+
+The fix: check that exactly one of dx, dy is ±1 and the other is 0. Or check that dx and dy are each integers and the Manhattan length is 1 (which implies one is ±1 and other is 0). Actually, the cleanest check: each of dx and dy must be an integer (or at least one is ±1 and the other is 0).
+
+Let me think about what "cardinal unit vector" means: (1,0), (-1,0), (0,1), (0,-1). The check should be:
+- dx and dy are both finite
+- dx is either -1, 0, or 1 and dy is either -1, 0, or 1
+- Math.abs(dx) + Math.abs(dy) === 1 (Manhattan length 1)
+- AND they're integers
+
+Actually the simplest: `Math.abs(dx) === 1 && dy === 0 || Math.abs(dy) === 1 && dx === 0`. But we need to handle non-finite too.
+
+Let me think. The requirement says: "Fractional inputs such as (0.5, 0.5), non-finite values and non-unit vectors must be ignored without overwriting a previously queued valid direction."
+
+So:
+- (0.5, 0.5) → ignored
+- (0.5, 0) → ignored (fractional, non-unit on cardinal)
+- (NaN, 0) → ignored (non-finite)
+- (Infinity, 0) → ignored (non-finite)
+- (1, 1) → ignored (non-unit)
+- (2, 0) → ignored (non-unit)
+- (1, 0) → accepted
+- (-1, 0) → accepted (if not reversal)
+- (0, 1) → accepted
+- (0, -1) → accepted
+
+The current check `Math.abs(dx) + Math.abs(dy) !== 1`:
+- (0.5, 0.5): 0.5+0.5 = 1 → passes (BUG)
+- (0.5, 0): 0.5+0 = 0.5 → rejected (correct, but for the wrong reason)
+- (1, 0): 1+0 = 1 → passes (correct)
+
+So the bug is specifically that (0.5, 0.5) passes. The fix should ensure integer components.
+
+The cleanest fix that preserves the existing behavior for valid unit vectors and reversal protection:
+
+```js
+setDirection(dx, dy) {
+    // Must be a cardinal unit vector: exactly one axis is ±1, the other is 0.
+    if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
+    if ((Math.abs(dx) !== 1 || dy !== 0) && (Math.abs(dy) !== 1 || dx !== 0)) return;
+    if (isOpposite([dx, dy], this.direction)) return;
+    this.nextDirection =

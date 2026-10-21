@@ -146,15 +146,20 @@ func (r *Runner) confirmLoop(ctx context.Context, w *watcher, desc string, log f
 }
 
 type deliberationOmission struct {
-	Field, SHA256 string
-	Bytes         int
+	Field, SHA256  string
+	Bytes          int
+	OmittedBytes   int
+	Provenance     string `json:",omitempty"`
+	VerbatimSuffix string `json:",omitempty"`
 }
 
-// Only complete model messages are claims. Dense reasoning stays in the raw
-// session; the judge sees its provenance rather than duplicate internal drafts.
-func completedProgressReply(reply llm.Message) (llm.Message, []deliberationOmission) {
+// Dense reasoning stays intact in the raw session and worker continuation.
+// The judge receives one labelled suffix using the existing sample budget;
+// alternate reasoning fields retain exact omission provenance.
+func completedProgressReply(reply llm.Message, sampleBytes int) (llm.Message, []deliberationOmission) {
 	copy := reply.Clone()
 	var omitted []deliberationOmission
+	var latest string
 	for _, field := range []struct {
 		name string
 		text *string
@@ -162,8 +167,15 @@ func completedProgressReply(reply llm.Message) (llm.Message, []deliberationOmiss
 		if *field.text == "" {
 			continue
 		}
-		omitted = append(omitted, deliberationOmission{field.name, fmt.Sprintf("%x", sha256.Sum256([]byte(*field.text))), len(*field.text)})
+		latest = *field.text
+		omitted = append(omitted, deliberationOmission{Field: field.name, SHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(latest))), Bytes: len(latest), OmittedBytes: len(latest)})
 		*field.text = ""
+	}
+	if len(omitted) > 0 && sampleBytes > 0 {
+		e := &omitted[len(omitted)-1]
+		e.Provenance = "unverified completed model deliberation; verbatim suffix, not observed tool evidence"
+		e.VerbatimSuffix = deliberationSuffix(latest, sampleBytes)
+		e.OmittedBytes -= len(e.VerbatimSuffix)
 	}
 	return copy, omitted
 }
@@ -232,6 +244,7 @@ type progressPacket struct {
 	CurrentToolSchema                                                    string `json:",omitempty"`
 	Latest, LatestDiscovery                                              *loopObservation
 	Assigned, Settled                                                    bool
+	HistoricalSettlement                                                 *TaskSettlement   `json:",omitempty"`
 	UnfinishedResponse                                                   *unfinishedSample `json:",omitempty"`
 }
 
@@ -244,10 +257,17 @@ func (r *Runner) progressEvidence(ctx context.Context, w *watcher) (progressPack
 			return progressPacket{}, err
 		}
 	}
-	packet := progressPacket{PlanningActive: r.PlanningActive(), CurrentClaim: r.assignedClaim,
+	packet := progressPacket{PlanningActive: r.PlanningActive(),
 		AuthoredTaskInstructions: r.TaskSystem,
 		Coding:                   r.Continuation.Coding, Facts: facts, Checkpoint: r.currentProgress(facts), PendingRepair: r.enforcement.repair,
 		Latest: loopObserved(r.enforcement.current), LatestDiscovery: loopObserved(r.enforcement.discovery), Assigned: r.assignedClaim, Settled: r.settlement != nil}
+	if a := r.Continuation.Assignment; a != nil {
+		packet.CurrentClaim = r.ClaimedTaskScope(&session.WorkflowScope{Store: a.Store, Kind: "task", ID: a.TaskID})
+	}
+	if r.settlement != nil {
+		copy := *r.settlement
+		packet.HistoricalSettlement = &copy
+	}
 	if !r.PlanningActive() {
 		packet.Checkpoint.Phase, packet.Checkpoint.PATStep, packet.Checkpoint.NextAction = "EXECUTE", "not-selected", r.Prompts.Text("progress.ordinary")
 		if c := r.Continuation.Coding; c != nil {
@@ -333,7 +353,7 @@ func (r *Runner) progressEvidence(ctx context.Context, w *watcher) (progressPack
 				}
 			}
 		}
-		packet.OmittedDeliberation, packet.PreviousAdvice = w.recentDeliberation, w.advice
+		packet.OmittedDeliberation, packet.PreviousAdvice = append([]deliberationOmission(nil), w.recentDeliberation...), w.advice
 		packet.OmittedCompletedReplies, packet.OmittedReceipts, packet.OmittedDeliberationEntries = w.omittedReplies, w.omittedReceipts, w.omittedDeliberation
 		if w.source != nil {
 			packet.LatestSourceText = w.source.Result.Text
@@ -457,6 +477,20 @@ func (r *Runner) progressAdvice(ctx context.Context, w *watcher, packet progress
 // assistant reply. References retain call identity and a digest; original
 // observations, worker context and failure receipts are never rewritten.
 func (p *progressPacket) deduplicateEvidence() {
+	// The existing sample budget is shared by the packet, not each old reply.
+	kept := p.UnfinishedResponse != nil && p.UnfinishedResponse.Text != ""
+	for i := len(p.OmittedDeliberation) - 1; i >= 0; i-- {
+		e := &p.OmittedDeliberation[i]
+		if e.VerbatimSuffix == "" {
+			continue
+		}
+		if !kept {
+			kept = true
+			continue
+		}
+		e.VerbatimSuffix, e.OmittedBytes = "", e.Bytes
+		e.Provenance = "older unverified completed deliberation; full original bytes and digest retained"
+	}
 	seen := map[string]string{}
 	dedup := func(field, id string, raw []byte, remove, restore func()) {
 		if id == "" || len(raw) == 0 || string(raw) == "null" || !json.Valid(raw) {
@@ -583,6 +617,21 @@ func (p *progressPacket) omitSmaller(field, text string, remove, restore func())
 }
 
 func (p *progressPacket) reduceForCapacity() bool {
+	// Historical reviewer prose is optional; the current rejected task's
+	// failure feedback remains protected along with its owning outcome.
+	if s := p.HistoricalSettlement; s != nil && (s.Qualified || s.TaskID != p.Checkpoint.SelectedID) {
+		feedback := s.Feedback
+		if feedback != "" && p.omitSmaller("HistoricalSettlement.Feedback", feedback, func() { s.Feedback = "" }, func() { s.Feedback = feedback }) {
+			return true
+		}
+	}
+	for i := range p.OmittedDeliberation {
+		e := &p.OmittedDeliberation[i]
+		previous := *e
+		if e.VerbatimSuffix != "" && p.omitSmaller(fmt.Sprintf("OmittedDeliberation[%d].VerbatimSuffix (unverified model deliberation)", i), e.VerbatimSuffix, func() { e.VerbatimSuffix = ""; e.OmittedBytes = e.Bytes }, func() { *e = previous }) {
+			return true
+		}
+	}
 	for i := range p.RecentCompletedReplies {
 		message := &p.RecentCompletedReplies[i]
 		for j := range message.ToolCalls {
@@ -643,11 +692,15 @@ func (p *progressPacket) reduceForCapacity() bool {
 
 // completedDiscovery retains the cadence-sized window of complete replies before maintenance
 // can retire duplicates. It never consumes partial streamed reasoning.
-func (w *watcher) completedDiscovery(reply llm.Message, cadence int) {
+func (w *watcher) completedDiscovery(reply llm.Message, cadence int, sampleBytes ...int) {
 	if cadence <= 0 {
 		return
 	}
-	copy, omitted := completedProgressReply(reply)
+	budget := 0 // Legacy callers without configured sampling retain omission-only evidence.
+	if len(sampleBytes) > 0 {
+		budget = sampleBytes[0]
+	}
+	copy, omitted := completedProgressReply(reply, budget)
 	w.recentReplies = append(w.recentReplies, copy)
 	w.recentDeliberation = append(w.recentDeliberation, omitted...)
 	if len(w.recentDeliberation) > cadence {
@@ -743,9 +796,14 @@ func (r *Runner) sampleUnfinished(message llm.Message) (*unfinishedSample, error
 			field, text = auxiliary.field, auxiliary.text
 		}
 	}
-	start := max(0, len(text)-r.ThinkingLoop.SampleBytes)
+	suffix := deliberationSuffix(text, r.ThinkingLoop.SampleBytes)
+	return &unfinishedSample{"unverified partial model deliberation; no calls from this unfinished response executed; literal prefix unchanged", field, suffix, len(text), len(text) - len(suffix), len(message.ToolCalls)}, nil
+}
+
+func deliberationSuffix(text string, sampleBytes int) string {
+	start := max(0, len(text)-sampleBytes)
 	for start < len(text) && !utf8.RuneStart(text[start]) {
 		start++
 	}
-	return &unfinishedSample{"unverified partial model deliberation; no calls from this unfinished response executed; literal prefix unchanged", field, text[start:], len(text), start, len(message.ToolCalls)}, nil
+	return text[start:]
 }

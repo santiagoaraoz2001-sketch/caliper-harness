@@ -2,9 +2,11 @@ package launch
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"specific-harness/internal/agent"
@@ -120,12 +122,24 @@ func (a *Assigned) Facts(ctx context.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	frozen, current := assignedBrief(a.task), assignedBrief(t)
+	matched, basis := maps.Equal(frozen, current), ""
+	if a.settled && t.Qualified() && t.Attempts == a.identity.Attempt && t.SameBrief(a.task) {
+		raw, _ := json.Marshal(frozen)
+		basis = fmt.Sprintf("settled qualified attempt; authored brief omitted: %d bytes, sha256=%x", len(raw), sha256.Sum256(raw))
+		frozen, current, matched = nil, nil, false
+	} else if matched {
+		current = nil
+	}
 	return struct {
 		Identity                            *session.Assignment
 		TaskState, PlanState, ApproachState string
-		Frozen, Current                     map[string]string
+		Title, Target                       string
+		Frozen, Current                     map[string]string `json:",omitempty"`
+		CurrentMatchesFrozen                bool              `json:",omitempty"`
+		BriefBasis                          string            `json:",omitempty"`
 		Qualified                           bool
-	}{a.identity, t.State, p.State, parent.State, assignedBrief(a.task), assignedBrief(t), t.Qualified()}, ctx.Err()
+	}{a.identity, t.State, p.State, parent.State, t.Title, t.Target, frozen, current, matched, basis, t.Qualified()}, ctx.Err()
 }
 func (a *Assigned) Settle(ctx context.Context, status outcome.Outcome, text, request, evidence string, transcript []llm.Message, c *session.CodingState) (agent.TaskSettlement, error) {
 	if a.task == nil {

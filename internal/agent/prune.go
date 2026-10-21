@@ -52,8 +52,8 @@ type Prune struct {
 	SchemasKeep int
 }
 
-// prune replaces old consumed tool-output bodies and settled reasoning
-// with stubs. Calls, visible text, user history and schemas remain exact.
+// prune replaces only old consumed tool-output bodies with stubs. Reasoning,
+// calls, visible text, user history and schemas remain exact.
 // Age counts all later message context,
 // including reasoning and later schema messages, using admission's calibration.
 // Leading tool definitions contribute to occupancy, not to an output's age.
@@ -75,18 +75,6 @@ func (r *Runner) prune(c *session.Continuation) (int, string) {
 		if keep[i] || age <= r.Prune.OutputsAgeTokens {
 			continue
 		}
-		// Settled reasoning was consumed when produced; only its text still
-		// rents context. Stub it without touching the reply's calls or text.
-		for _, reasoning := range []*string{&e.Message.Reasoning, &e.Message.ReasoningContent, &e.Message.Thinking} {
-			if *reasoning == "" {
-				continue
-			}
-			stub := fmt.Sprintf("[pruned reasoning (%d bytes; age %d estimated context tokens); full reasoning in raw session history]", len(*reasoning), age)
-			if len(stub) < len(*reasoning) {
-				*reasoning = stub
-				n++
-			}
-		}
 		if e.Kind != "output" || e.Message.Role == "system" {
 			continue
 		}
@@ -103,7 +91,7 @@ func (r *Runner) prune(c *session.Continuation) (int, string) {
 		return c.Estimate(), ""
 	}
 	c.Invalidate()
-	return c.Estimate(), fmt.Sprintf("pruned %d tool output/reasoning body(ies) older than %d estimated context tokens; protected entries exempt; raw history retained", n, r.Prune.OutputsAgeTokens)
+	return c.Estimate(), fmt.Sprintf("pruned %d tool output body(ies) older than %d estimated context tokens; protected entries exempt; raw history retained", n, r.Prune.OutputsAgeTokens)
 }
 
 // Kept as a caller-compatible no-op: duplicate discovery exchanges, including

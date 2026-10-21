@@ -20,9 +20,8 @@ func TestCompactionOnlyAtWindowPercentage(t *testing.T) {
 	}
 }
 
-// Settled reasoning older than the prune horizon is stubbed; recent
-// reasoning, calls and visible text stay exact.
-func TestPruneStubsOldReasoningOnly(t *testing.T) {
+// Only old tool-output bodies are pruned; reasoning, calls and visible text stay exact.
+func TestPrunePreservesOldReasoningWhilePruningToolOutput(t *testing.T) {
 	r := &Runner{Prune: Prune{OutputsAgeTokens: 100}}
 	old := session.Entry{Kind: "reply", Message: llm.Message{
 		Role: "assistant", Content: "kept text", Reasoning: strings.Repeat("think ", 400),
@@ -35,13 +34,16 @@ func TestPruneStubsOldReasoningOnly(t *testing.T) {
 	if note == "" {
 		t.Fatal("expected a prune report")
 	}
-	if !strings.HasPrefix(c.Entries[0].Message.Reasoning, "[pruned reasoning") {
-		t.Fatalf("old reasoning not stubbed: %q", c.Entries[0].Message.Reasoning[:40])
+	if c.Entries[0].Message.Reasoning != old.Message.Reasoning {
+		t.Fatal("old reasoning changed")
+	}
+	if !strings.HasPrefix(c.Entries[1].Message.Content, "[pruned tool output") || c.Entries[1].Message.ToolCallID != "a" {
+		t.Fatal("old tool output did not prune with its call correlation intact")
 	}
 	if c.Entries[0].Message.Content != "kept text" || len(c.Entries[0].Message.ToolCalls) != 1 {
 		t.Fatal("visible text or calls were modified")
 	}
-	if !strings.HasPrefix(c.Entries[2].Message.Reasoning, "fresh ") {
+	if c.Entries[2].Message.Reasoning != recent.Message.Reasoning {
 		t.Fatal("recent reasoning must stay verbatim")
 	}
 }

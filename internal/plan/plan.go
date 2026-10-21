@@ -61,7 +61,7 @@ type Plan struct {
 	CreatedAt   time.Time
 }
 
-// Approach is one plan article's orchestration node.
+// Approach is an orchestration node with explicit authored Plan scope.
 type Approach struct {
 	NeedsReady bool
 	ID         string
@@ -450,7 +450,23 @@ func transitionPlan(s stateStore, id, to string) (*Plan, error) {
 	if err := checkMove("plan", id, planNext, p.State, to); err != nil {
 		return nil, err
 	}
-	if p.State == PlanActive && to == PlanComplete || p.State == PlanComplete && to == PlanRetired {
+	if p.State == PlanActive && to == PlanComplete {
+		coverage, err := PlanCoverage(s, id)
+		if err != nil {
+			return nil, err
+		}
+		if len(coverage.Approaches) == 0 {
+			return nil, fmt.Errorf("plan %q has no approaches — cannot qualify completion", id)
+		}
+		if len(coverage.Unresolved) > 0 {
+			return nil, fmt.Errorf("plan %q has open or unverified approach %q", id, coverage.Unresolved[0].ID)
+		}
+		if len(coverage.Uncovered) > 0 {
+			return nil, fmt.Errorf("plan %q has uncovered article %d: %s", id, coverage.Uncovered[0].Index+1, coverage.Uncovered[0].Text)
+		}
+	} else if p.State == PlanComplete && to == PlanRetired {
+		// Archiving preserves the existing historical qualification rule; it
+		// does not manufacture new coverage or rewrite old associations.
 		if err := requireApproachesComplete(s, id); err != nil {
 			return nil, err
 		}

@@ -25,13 +25,18 @@ type connectionForm struct {
 	Mode, OriginalName, OriginalURL, OriginalModel, OriginalPath string
 	Advanced                                                     bool
 	Err, Receipt                                                 string
+	Catalog                                                      []string
+	ProbeSeq                                                     uint64
 }
 
 var connectionLabels = []string{"Name", "Preset (←/→ to choose)", "Server URL", "Model ID (leave blank for checkpoint)", "Checkpoint folder or first GGUF shard (optional)", "Launch argv as JSON array (optional, advanced)", "Launch directory (optional)", "Local launcher (blank: external; preset; or executable path)"}
 
 type connectionTestMsg struct {
-	Form    *connectionForm
-	Receipt string
+	Form        *connectionForm
+	Receipt     string
+	Catalog     []string
+	URL, Preset string
+	Seq         uint64
 }
 
 func (m *Model) openConnectionForm() {
@@ -258,11 +263,30 @@ func (m Model) connectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			f.Values[2].SetValue(next)
 		}
 		f.Values[1].SetValue(presets[idx])
-		if (presets[idx] == "mlx" || presets[idx] == "ollama") && (f.Values[7].Value() == "" || f.Values[7].Value() == "preset") {
-			f.Values[7].SetValue("preset")
-		} else if f.Values[7].Value() == "preset" && presets[idx] != "laya" && presets[idx] != "system_one" {
+		if f.Values[7].Value() == "preset" && presets[idx] != "mlx" && presets[idx] != "ollama" && presets[idx] != "laya" && presets[idx] != "system_one" {
 			f.Values[7].SetValue("")
 		}
+		f.Catalog, f.Receipt = nil, ""
+		f.ProbeSeq++
+		return m, nil, true
+	}
+	if f.Field == 3 && len(f.Catalog) > 0 && (msg.Type == tea.KeyLeft || msg.Type == tea.KeyRight) {
+		index := -1
+		for i, name := range f.Catalog {
+			if name == f.Values[3].Value() {
+				index = i
+				break
+			}
+		}
+		if msg.Type == tea.KeyLeft {
+			if index < 0 {
+				index = 0
+			}
+			index = (index + len(f.Catalog) - 1) % len(f.Catalog)
+		} else {
+			index = (index + 1) % len(f.Catalog)
+		}
+		f.Values[3].SetValue(f.Catalog[index])
 		return m, nil, true
 	}
 	if msg.Type == tea.KeyTab {
@@ -293,7 +317,13 @@ func (m Model) connectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			base.Serve = m.Setup.Serve
 			base.Decision = m.Setup.Judge
 		}
-		c, err := f.candidate(base)
+		validation := *f
+		if msg.Type == tea.KeyCtrlT {
+			// Catalog lookup needs an endpoint, not a model identity already known.
+			validation.Mode, validation.OriginalModel = "edit", ""
+			validation.OriginalName = strings.TrimSpace(f.Values[0].Value())
+		}
+		c, err := validation.candidate(base)
 		if err != nil {
 			f.Err = err.Error()
 			return m, nil, true
@@ -308,27 +338,43 @@ func (m Model) connectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			endpoint := serve.Endpoint{Kind: serve.KindOpenAI, URL: strings.TrimSpace(f.Values[2].Value()), Model: strings.TrimSpace(f.Values[3].Value())}
 			if runtime == "ollama" {
 				endpoint.Kind = serve.KindOllama
+			} else if runtime == "rulith" {
+				endpoint.Kind = serve.KindRulith
 			}
 			if native {
 				endpoint.Kind = serve.KindSidecar
 			}
 			timeout := time.Duration(c.Serve.ProbeTimeoutSeconds) * time.Second
 			f.Receipt = "Checking server catalog…"
+			f.Catalog = nil
+			f.ProbeSeq++
+			seq := f.ProbeSeq
+			serverOnly := f.Mode == "server" || f.Mode == "edit" && f.OriginalModel == ""
 			return m, func() tea.Msg {
 				h := serve.Probe(&http.Client{Timeout: timeout}, endpoint)
 				receipt := "Connection failed: " + h.Err
+				var catalog []string
 				if h.Up {
-					receipt = "Server responds; selected model not in catalog"
-					for _, model := range h.Available {
-						if model == endpoint.Model {
-							receipt = "Model found in server catalog · inference and judgment quality unchecked"
+					for _, name := range append(append([]string(nil), h.Loaded...), h.Available...) {
+						if name != "" {
+							catalog = appendUnique(catalog, name)
 						}
 					}
+					receipt = fmt.Sprintf("Server responds · %d models · Model ID ←/→ selects · inference unchecked", len(catalog))
+					if len(catalog) == 0 {
+						receipt = "Server responds · no model advertised · enter an ID or checkpoint manually"
+					}
+					if serverOnly && len(catalog) > 0 {
+						receipt = fmt.Sprintf("Server responds · %d models · save, then select a model in Manage", len(catalog))
+					}
 					if native {
-						receipt = "Native decision health responds · judgment not tested"
+						receipt += " · judgment not tested"
+					}
+					if h.InventoryErr != "" {
+						receipt += " · catalog incomplete: " + h.InventoryErr
 					}
 				}
-				return connectionTestMsg{f, receipt}
+				return connectionTestMsg{Form: f, Receipt: receipt, Catalog: catalog, URL: endpoint.URL, Preset: runtime, Seq: seq}
 			}, true
 		}
 		if f.Mode != "" {
@@ -447,8 +493,12 @@ func (m Model) connectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	var cmd tea.Cmd
 	before := f.Values[f.Field].Value()
 	f.Values[f.Field], cmd = f.Values[f.Field].Update(msg)
-	if f.Field == 2 && f.Values[2].Value() != before {
-		f.URLPinned = true
+	if (f.Field == 1 || f.Field == 2) && f.Values[f.Field].Value() != before {
+		if f.Field == 2 {
+			f.URLPinned = true
+		}
+		f.Catalog, f.Receipt = nil, ""
+		f.ProbeSeq++
 	}
 	f.Err = ""
 	return m, cmd, true
@@ -497,7 +547,7 @@ func (m Model) renderConnection(w, h int) string {
 	if f.Mode != "" {
 		title = "Models & Servers · " + f.Mode
 	}
-	return panel(title, rows, []string{"Tab fields · ←/→ preset · F2 Advanced · Ctrl+T Test · Ctrl+S Save · Esc"}, w, h)
+	return panel(title, rows, []string{"Tab fields · ←/→ preset/model · F2 Advanced · Ctrl+T Test · Ctrl+S Save · Esc"}, w, h)
 }
 
 func (f *connectionForm) visibleFields() []int {
@@ -506,11 +556,14 @@ func (f *connectionForm) visibleFields() []int {
 	case f.Mode == "model" || f.OriginalModel != "":
 		fields = []int{3, 4}
 	case f.Mode == "server" || f.Mode == "edit":
-		fields = []int{0, 1, 2, 7}
+		fields = []int{0, 1, 2}
 	default:
-		fields = []int{0, 1, 2, 3, 4, 7}
+		fields = []int{0, 1, 2, 3, 4}
 	}
 	if f.Advanced {
+		if f.Mode != "model" && f.OriginalModel == "" {
+			fields = append(fields, 7)
+		}
 		fields = append(fields, 5, 6)
 	}
 	return fields

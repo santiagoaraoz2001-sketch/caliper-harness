@@ -88,3 +88,21 @@ func TestGuidedBriefUnknownOrFreeformStaysLiteral(t *testing.T) {
 		}
 	}
 }
+
+func TestGuidedMultiArticleBriefPreservesEveryAuthoredValue(t *testing.T) {
+	raw := `{"coverage":[{"article_index":0,"article":"First requirement"},{"article_index":1,"article":"Second requirement"}],"strategy":"One shared implementation"}`
+	label, rows := guidedBrief(raw, true)
+	if label != "Articles 1, 2" || !reflect.DeepEqual(rows, []string{"Article 1: First requirement", "Article 2: Second requirement", "strategy:", "One shared implementation"}) {
+		t.Fatalf("lost coverage: %s %v", label, rows)
+	}
+	for _, unknown := range []string{
+		`{"coverage":[{"article_index":0,"article":"one","future":"keep me"}],"strategy":"fix"}`,
+		`{"coverage":[{"article_index":null,"article":"one"}],"strategy":"fix"}`,
+		`{"coverage":[],"strategy":"fix"}`,
+		`{"coverage":[{"article_index":0,"article":"one"}],"strategy":"fix","future":"keep me"}`,
+	} {
+		if _, rows := guidedBrief(unknown, true); rows != nil {
+			t.Fatalf("unknown metadata hidden: %s", unknown)
+		}
+	}
+}

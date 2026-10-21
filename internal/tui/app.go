@@ -808,8 +808,8 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, cmd tea.Cmd) {
 		}
 		return m, nil
 	case connectionTestMsg:
-		if m.Setup.Add == msg.Form {
-			m.Setup.Add.Receipt = msg.Receipt
+		if f := m.Setup.Add; f == msg.Form && f.ProbeSeq == msg.Seq && strings.TrimSpace(f.Values[2].Value()) == msg.URL && strings.ToLower(strings.TrimSpace(f.Values[1].Value())) == msg.Preset {
+			f.Receipt, f.Catalog = msg.Receipt, msg.Catalog
 		}
 		return m, nil
 	case serveProbedMsg:

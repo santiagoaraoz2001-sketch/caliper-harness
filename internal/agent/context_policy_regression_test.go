@@ -109,6 +109,10 @@ func TestOutputPruningAgeExcludesLeadingInstructionsAndToolDefinitions(t *testin
 
 func TestOutputPruningRunPublishesStubPreservesRawOriginal(t *testing.T) {
 	c := agePolicyFixture(50001)
+	c.Entries[2].Message.Reasoning = strings.Repeat("reasoning original ", 200)
+	c.Entries[2].Message.ReasoningContent = strings.Repeat("reasoning_content original ", 200)
+	c.Entries[2].Message.Thinking = strings.Repeat("thinking original ", 200)
+	original := c.Entries[2].Message
 	c.ModelKey = "fixture"
 	source, err := c.Snapshot().Encode()
 	if err != nil {
@@ -128,7 +132,7 @@ func TestOutputPruningRunPublishesStubPreservesRawOriginal(t *testing.T) {
 		stub, reasoning := false, false
 		for _, msg := range body.Messages {
 			stub = stub || msg.ToolCallID == "old-read" && strings.HasPrefix(msg.Content, "[pruned tool output")
-			reasoning = reasoning || msg.Reasoning == "reasoning original" && msg.ReasoningContent == "reasoning_content original" && msg.Thinking == "thinking original"
+			reasoning = reasoning || msg.Reasoning == original.Reasoning && msg.ReasoningContent == original.ReasoningContent && msg.Thinking == original.Thinking
 		}
 		if !stub || !reasoning {
 			t.Error("next actual HTTP request lost output stub or original reasoning")
@@ -162,7 +166,7 @@ func TestOutputPruningRunPublishesStubPreservesRawOriginal(t *testing.T) {
 			stubFound = strings.HasPrefix(entry.Message.Content, "[pruned tool output")
 		}
 		for _, call := range entry.Message.ToolCalls {
-			callFound = callFound || call.ID == "old-read" && call.Arguments == `{"path":"main.go"}` && entry.Message.Reasoning == "reasoning original" && entry.Message.ReasoningContent == "reasoning_content original" && entry.Message.Thinking == "thinking original"
+			callFound = callFound || call.ID == "old-read" && call.Arguments == `{"path":"main.go"}` && entry.Message.Reasoning == original.Reasoning && entry.Message.ReasoningContent == original.ReasoningContent && entry.Message.Thinking == original.Thinking
 		}
 	}
 	if !stubFound || !callFound {

@@ -32,7 +32,7 @@ func reasoningAliasFixture(field string, age int) session.Continuation {
 	}}
 }
 
-func TestPruneReasoningAliasesUseSameAgeAndPreserveCalls(t *testing.T) {
+func TestPruneReasoningAliasesPreservedAtEveryAge(t *testing.T) {
 	for _, field := range []string{"reasoning", "reasoning_content", "thinking", "all"} {
 		for _, age := range []int{49999, 50000, 50001} {
 			t.Run(fmt.Sprintf("%s/%d", field, age), func(t *testing.T) {
@@ -45,12 +45,10 @@ func TestPruneReasoningAliasesUseSameAgeAndPreserveCalls(t *testing.T) {
 					"reasoning_content": {before.ReasoningContent, got.ReasoningContent},
 					"thinking":          {before.Thinking, got.Thinking},
 				} {
-					wantPruned := age > 50000 && pair[0] != ""
-					if (pair[0] != pair[1]) != wantPruned || wantPruned && !strings.HasPrefix(pair[1], "[pruned reasoning") {
-						t.Fatalf("%s parity: changed=%t want=%t report=%q", name, pair[0] != pair[1], wantPruned, report)
+					if pair[0] != pair[1] {
+						t.Fatalf("%s was pruned at age %d: report=%q", name, age, report)
 					}
 				}
-				got.Reasoning, got.ReasoningContent, got.Thinking = before.Reasoning, before.ReasoningContent, before.Thinking
 				if !reflect.DeepEqual(got, before) || !reflect.DeepEqual(c.Entries[0], original.Entries[0]) || !reflect.DeepEqual(c.Entries[2:], original.Entries[2:]) {
 					t.Fatal("pruning changed visible text, calls, result correlation or recent history")
 				}
@@ -85,7 +83,7 @@ func TestPruneReasoningAliasesRespectProtectedAndCurrentThought(t *testing.T) {
 	}
 }
 
-func TestPruneReasoningAliasesWaitForExistingBatchBoundary(t *testing.T) {
+func TestPruneReasoningAliasesPreservedAtExistingBatchBoundary(t *testing.T) {
 	r := agePolicyRunner(t)
 	c := reasoningAliasFixture("all", 49999)
 	var batch pruneBatch
@@ -96,13 +94,8 @@ func TestPruneReasoningAliasesWaitForExistingBatchBoundary(t *testing.T) {
 		t.Fatal("reasoning aliases rewrote cached context between boundaries")
 	}
 	c.SchemaKey = "next existing tool phase"
-	if _, report := batch.apply(r, &c); report == "" {
-		t.Fatal("existing phase boundary did not prune aged reasoning")
-	}
-	m := c.Entries[1].Message
-	for _, field := range []string{m.Reasoning, m.ReasoningContent, m.Thinking} {
-		if !strings.HasPrefix(field, "[pruned reasoning") {
-			t.Fatal("batch applied differently to an auxiliary field")
-		}
+	before = c.Clone()
+	if _, report := batch.apply(r, &c); report != "" || !reflect.DeepEqual(c, before) {
+		t.Fatalf("existing phase boundary changed reasoning: %q", report)
 	}
 }

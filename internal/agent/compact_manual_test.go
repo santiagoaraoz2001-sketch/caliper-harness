@@ -16,6 +16,9 @@ func TestManualCompactionApprovalPreservesSourceAndNoJudge(t *testing.T) {
 			t.Fatal("disabled judge called")
 			return decision.Verdict{}, nil
 		}, Ask: func(_ context.Context, p string) bool {
+			if !strings.Contains(p, "SUMMARY SOURCE AND PROTECTED ANCHORS") || strings.Contains(p, "COMPLETE SOURCE CONTEXT") {
+				t.Fatalf("projected summary material mislabelled as complete context: %s", p)
+			}
 			if !strings.Contains(p, "precise summary") || !strings.Contains(p, "complete source") {
 				t.Fatalf("missing review evidence: %s", p)
 			}

@@ -65,7 +65,7 @@ func readFailedNativeArchive(t *testing.T, events []session.Event, want llm.Repl
 	var raw strings.Builder
 	header := false
 	for _, e := range events {
-		if e.Kind == "native_reply" || e.Kind == "done" || e.Kind == "tool" || e.Kind == "native_result" {
+		if e.Kind == "done" || e.Kind == "tool" || e.Kind == "native_result" {
 			t.Error("partial became completed/executable", e.Kind)
 		}
 		if e.Kind != "reasoning" {
@@ -101,18 +101,32 @@ func readFailedNativeArchive(t *testing.T, events []session.Event, want llm.Repl
 	if err != nil || c.Validate() != nil || !strings.Contains(notice, "restored bounded continuation") {
 		t.Fatalf("invalid restore: %q %v", notice, err)
 	}
-	encoded, err := c.Encode()
-	if err != nil || len(encoded) > 8000+len(transportErr.Error()) {
-		t.Errorf("unbounded failure continuation: %d %v", len(encoded), err)
-	}
+	var retained *llm.Message
 	for _, e := range c.Entries {
-		if len(e.Message.ToolCalls) > 0 || e.Message.Reasoning != "" || e.Message.ReasoningContent != "" || e.Message.Thinking != "" || e.Message.Role == "assistant" {
-			t.Error("incomplete native fields entered resume", e.Kind)
+		if len(e.Message.ToolCalls) > 0 {
+			t.Error("incomplete native call entered resume as executable", e.Kind)
+		}
+		if e.Message.Role == "assistant" {
+			if retained != nil {
+				t.Fatal("partial reply duplicated in resume")
+			}
+			m := e.Message
+			retained = &m
 		}
 	}
+	if retained == nil || retained.Reasoning != want.Message.Reasoning || retained.ReasoningContent != want.Message.ReasoningContent || retained.Thinking != want.Message.Thinking || !strings.HasPrefix(retained.Content, want.Message.Content) {
+		t.Fatal("original partial thought/text missing or changed in resume")
+	}
+	if len(want.Message.ToolCalls) > 0 {
+		drafts, _ := json.Marshal(want.Message.ToolCalls)
+		if !strings.Contains(retained.Content, "none executed") || !strings.Contains(retained.Content, string(drafts)) {
+			t.Fatal("unfinished calls were not retained as labelled nonexecuted drafts")
+		}
+	}
+
 }
 
-func TestPartialNativeCapturedMLX48ArchivedAndBounded(t *testing.T) {
+func TestPartialNativeCapturedMLX48ArchivedAndResumable(t *testing.T) {
 	z, err := gzip.NewReader(bytes.NewReader(partialMLX48))
 	if err != nil {
 		t.Fatal(err)
@@ -175,7 +189,7 @@ func TestPartialNativeCallNeverExecutesAndRetainsUnknownUsage(t *testing.T) {
 }
 
 func TestPartialNativeArchiveWriteFailureIsLoud(t *testing.T) {
-	for _, failure := range []string{"reasoning", "fragment", "partial", "continuation", "no-sink"} {
+	for _, failure := range []string{"reasoning", "fragment", "native_reply", "note", "continuation", "no-sink"} {
 		t.Run(failure, func(t *testing.T) {
 			marker := filepath.Join(t.TempDir(), "must-not-exist")
 			var sink agent.SessionLog = thinkingLog{dir: t.TempDir(), fail: failure}

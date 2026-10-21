@@ -5,6 +5,7 @@ package run
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -385,7 +386,7 @@ func registerOwning(reg *tool.Registry, cfg config.Config, ld launch.Deps, judge
 			if e != nil {
 				return nil, e
 			}
-			fields := `{id title goal state approaches{id title state needsReady tasks{id title prompt state current target sketch acceptance tests verify checkCommand acceptanceCommand}}}`
+			fields := `{id title goal state approaches{id title state qualified needsReady tasks{id title prompt state qualified current target sketch acceptance tests verify checkCommand acceptanceCommand}}}`
 			raw, e := captured.ExecBounded(ctx, `query { draft:plans(state:"draft") `+fields+` active:plans(state:"active") `+fields+` }`, "", nil, cfg.Tools.GraphQL)
 			if e != nil {
 				return nil, e
@@ -511,17 +512,12 @@ func registerOwning(reg *tool.Registry, cfg config.Config, ld launch.Deps, judge
 					preparation = cfg.PromptCatalog.Text("preparation.fresh_typed")
 				}
 			}
-			if r.Continuation.Assignment != nil {
-				preparation = cfg.PromptCatalog.Format("preparation.inspect_assignment", r.Continuation.Assignment.TaskID)
-				checkpoint.SelectedID, checkpoint.PATStep = r.Continuation.Assignment.TaskID, "inspect-assignment"
-				a := r.Continuation.Assignment
-				if r.ClaimedTaskScope(&session.WorkflowScope{Store: a.Store, Kind: "task", ID: a.TaskID}) {
-					checkpoint.Phase, checkpoint.PATStep = "EXECUTE", "claimed"
-					preparation = cfg.PromptCatalog.Text("progress.execute")
-					if c := r.Continuation.Coding; c != nil && c.Passed() {
-						checkpoint.Phase, checkpoint.PATStep = "VALIDATE", "current-check-observed"
-						preparation = cfg.PromptCatalog.Text("progress.validate")
-					}
+			if a := r.Continuation.Assignment; a != nil && r.ClaimedTaskScope(&session.WorkflowScope{Store: a.Store, Kind: "task", ID: a.TaskID}) {
+				checkpoint.Phase, checkpoint.PATStep, checkpoint.SelectedID = "EXECUTE", "claimed", a.TaskID
+				preparation = cfg.PromptCatalog.Text("progress.execute")
+				if c := r.Continuation.Coding; c != nil && c.Passed() {
+					checkpoint.Phase, checkpoint.PATStep = "VALIDATE", "current-check-observed"
+					preparation = cfg.PromptCatalog.Text("progress.validate")
 				}
 			}
 			a := r.Continuation.Assignment
@@ -532,8 +528,10 @@ func registerOwning(reg *tool.Registry, cfg config.Config, ld launch.Deps, judge
 				}
 			}
 			selection := memory.KnowledgeSelection{FilePath: sourcePath, SessionRef: r.SessionID}
-			if r.Continuation.Assignment != nil {
-				selection.TaskID = r.Continuation.Assignment.TaskID
+			if a != nil && r.ClaimedTaskScope(&session.WorkflowScope{Store: a.Store, Kind: "task", ID: a.TaskID}) {
+				selection.TaskID = a.TaskID
+			} else if scope := r.PlanningScope(); scope != nil && scope.Store == s.Identity() && scope.Kind == "task" {
+				selection.TaskID = scope.ID
 			}
 			entries, e := memory.SelectedKnowledge(ctx, s, ld.Workspace, selection, cfg.Tools.GraphQL.MaxRows-rows, cfg.Tools.GraphQL.MaxResultBytes-len(raw))
 			if e != nil {
@@ -543,7 +541,11 @@ func registerOwning(reg *tool.Registry, cfg config.Config, ld launch.Deps, judge
 			for _, v := range entries {
 				knowledge = append(knowledge, map[string]string{"key": v.Key, "body": v.Body, "task": v.TaskID, "path": v.FilePath})
 			}
-			return agent.BookkeepingFacts{Assignment: assigned, Unfinished: envelope.Data, Knowledge: knowledge, Disclosure: "same-project owner state; task briefs/knowledge are authored claims; observations retained separately", Preparation: preparation, Checkpoint: checkpoint}, nil
+			projection, e := progressInventory(envelope.Data)
+			if e != nil {
+				return nil, e
+			}
+			return agent.BookkeepingFacts{Assignment: assigned, Unfinished: projection, Knowledge: knowledge, Disclosure: "same-project owner state; task briefs/knowledge are authored claims; observations retained separately", Preparation: preparation, Checkpoint: checkpoint}, nil
 		}
 	}
 	def, err := graphTool.New(api, cfg.Tools.GraphQL, ld.Workspace, r.SessionID, s.Identity(), cfg.PromptCatalog)
@@ -773,4 +775,45 @@ func configuredJudge(cfg config.Config) func(context.Context, decision.Request) 
 	}
 	c := decision.New(cfg.Decision.Server, cfg.Decision.Model, cfg.Decision.Device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(decision.SelectionFor(cfg.Decision)).WithPrompts(cfg.PromptCatalog).WithInputLimit(cfg.Decision.MaxInputTokens).WithParams(ModelParams(cfg.Params))
 	return c.Judge
+}
+
+// Only the advisory view omits execution prose from actually qualified done tasks.
+// Keep every goal, coverage/strategy, unknown field and current/unqualified brief.
+func progressInventory(raw json.RawMessage) (json.RawMessage, error) {
+	var groups map[string][]map[string]any
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.UseNumber()
+	if err := decoder.Decode(&groups); err != nil {
+		return nil, err
+	}
+	for _, plans := range groups {
+		for _, p := range plans {
+			approaches, _ := p["approaches"].([]any)
+			for _, item := range approaches {
+				a, _ := item.(map[string]any)
+				tasks, _ := a["tasks"].([]any)
+				for _, item := range tasks {
+					t, _ := item.(map[string]any)
+					if t["state"] != plan.TaskDone || t["qualified"] != true {
+						continue
+					}
+					removed := map[string]any{}
+					for _, key := range []string{"prompt", "current", "sketch", "acceptance", "tests", "verify", "checkCommand", "acceptanceCommand"} {
+						if value, present := t[key]; present {
+							removed[key] = value
+							delete(t, key)
+						}
+					}
+					if len(removed) > 0 {
+						body, err := json.Marshal(removed)
+						if err != nil {
+							return nil, err
+						}
+						t["settledBriefOmission"] = fmt.Sprintf("qualified done task execution prose: %d bytes, sha256=%x", len(body), sha256.Sum256(body))
+					}
+				}
+			}
+		}
+	}
+	return json.Marshal(groups)
 }

@@ -396,14 +396,37 @@ func guidedBrief(raw string, approach bool) (label string, rows []string) {
 		return value, true
 	}
 	if approach {
-		article, aok := stringField("article")
-		strategy, sok := stringField("strategy")
-		var index int
-		if len(fields) != 3 || !aok || !sok || string(fields["article_index"]) == "null" || json.Unmarshal(fields["article_index"], &index) != nil || index < 0 {
+		strategy, ok := stringField("strategy")
+		if !ok {
 			return "", nil
 		}
-		label = fmt.Sprintf("Article %d: %s", index+1, article)
-		return label, []string{label, "strategy:", strategy}
+		if _, multi := fields["coverage"]; multi {
+			var refs []map[string]json.RawMessage
+			if len(fields) != 2 || json.Unmarshal(fields["coverage"], &refs) != nil || len(refs) == 0 {
+				return "", nil
+			}
+			for _, ref := range refs {
+				if len(ref) != 2 {
+					return "", nil
+				}
+			}
+		} else if len(fields) != 3 {
+			return "", nil
+		}
+		refs, _, err := plan.ApproachCoverage(raw)
+		if err != nil || len(refs) == 0 {
+			return "", nil
+		}
+		numbers := []string{}
+		for _, ref := range refs {
+			numbers = append(numbers, fmt.Sprint(ref.Index+1))
+			rows = append(rows, fmt.Sprintf("Article %d: %s", ref.Index+1, ref.Text))
+		}
+		label = rows[0]
+		if len(refs) > 1 {
+			label = "Articles " + strings.Join(numbers, ", ")
+		}
+		return label, append(rows, "strategy:", strategy)
 	}
 	outcome, ook := stringField("outcome")
 	rules, rok := stringField("rules")

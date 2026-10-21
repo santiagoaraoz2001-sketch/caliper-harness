@@ -15,6 +15,7 @@ import (
 	"specific-harness/internal/decision"
 	"specific-harness/internal/llm"
 	"specific-harness/internal/outcome"
+	"specific-harness/internal/session"
 	"specific-harness/internal/tool"
 )
 
@@ -71,12 +72,22 @@ func TestThinkingLoopRunnerArchiveAndSummary(t *testing.T) {
 				}
 			}
 			raw := ""
+			var retained *session.Entry
 			for i, kind := range sink.kinds {
 				if kind == "reasoning" && strings.HasPrefix(sink.texts[i], "offset=") {
 					_, fragment, _ := strings.Cut(sink.texts[i], "\n")
 					raw += fragment
 				}
-				if kind == "tool" || kind == "native_result" || kind == "native_reply" || kind == "done" || kind == "compact" {
+				if kind == "native_reply" {
+					if mode == "summary" || retained != nil {
+						t.Fatalf("unexpected retained response in %s", mode)
+					}
+					retained = &session.Entry{}
+					if err := json.Unmarshal([]byte(sink.texts[i]), retained); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if kind == "tool" || kind == "native_result" || kind == "done" || kind == "compact" {
 					t.Fatalf("partial generation became completed/effectful: %s", kind)
 				}
 			}
@@ -95,6 +106,16 @@ func TestThinkingLoopRunnerArchiveAndSummary(t *testing.T) {
 			callsRetained := len(archived.Message.ToolCalls) == 1 && archived.Message.ToolCalls[0].ID == "partial" && archived.Message.ToolCalls[0].Arguments == "{\"msg\":\""
 			if mode == "summary" {
 				callsRetained = len(archived.Message.ToolCalls) == 0
+			}
+			if mode != "summary" {
+				drafts, err := json.Marshal(archived.Message.ToolCalls)
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantContent := "\nUnverified unfinished native call drafts (none executed):\n" + string(drafts)
+				if retained == nil || retained.Message.Role != "assistant" || retained.Message.Reasoning != thought || len(retained.Message.ToolCalls) != 0 || retained.Message.Content != wantContent {
+					t.Fatalf("cancelled thought/draft was lost or made executable: %+v", retained)
+				}
 			}
 			if judged != 1 || len(calls) != 0 || archived.Message.Reasoning != thought || !callsRetained {
 				t.Fatalf("guard/partial archive missing: judged%d effects%d raw%q", judged, len(calls), raw)

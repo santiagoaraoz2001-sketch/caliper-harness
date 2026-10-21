@@ -95,7 +95,9 @@ func (r *Runner) currentProgress(facts any) ProgressCheckpoint {
 			p.NextAction = r.Prompts.Text("progress.validate")
 		}
 	}
-	if s := r.settlement; s != nil {
+	// A retained settlement describes its task, not a later selected draft.
+	// PlanningScope already distinguishes explicit focus from owning handoff.
+	if s, scope := r.settlement, r.PlanningScope(); s != nil && scope != nil && scope.Kind == "task" && scope.ID == s.TaskID {
 		p.Phase, p.PATStep, p.SelectedID = "REWORK", "settled-"+s.State, s.TaskID
 		p.NextAction = r.Prompts.Text("progress.rework")
 		if s.Qualified {

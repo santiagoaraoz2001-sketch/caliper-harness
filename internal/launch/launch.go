@@ -638,49 +638,121 @@ func verifyPass(ctx context.Context, d Deps, results []Result, indices []int, wi
 	return errors.Join(errs...)
 }
 
-// reviewToken reads a leading verdict, including Markdown emphasis or a heading.
-// It never searches quoted examples or later prose for a success marker.
+// reviewToken reads explicit verdict blocks, never substrings in evidence.
+// Later conclusions need a descriptive verdict section or final paragraph;
+// unknown labels/sections are not interpreted as reviewer authority.
 func reviewToken(out string) string {
-	first := ""
-	for _, line := range strings.Split(out, "\n") {
-		if strings.TrimSpace(line) != "" {
-			first = line
-			break
+	lines := strings.Split(out, "\n")
+	lastParagraph := 0
+	for i, line := range lines {
+		if strings.TrimSpace(line) != "" && (i == 0 || strings.TrimSpace(lines[i-1]) == "") {
+			lastParagraph = i
 		}
 	}
-	fields := strings.Fields(first)
-	if len(fields) == 0 {
-		return ""
-	}
-	indent := first[:len(first)-len(strings.TrimLeft(first, " \t"))]
-	if len(indent) >= 4 || strings.Contains(indent, "\t") {
-		return "" // An indented code example is not a verdict.
-	}
-	if strings.Trim(fields[0], "#") == "" {
-		if len(fields[0]) > 6 {
-			return "" // Not a Markdown heading.
-		}
-		if len(fields) == 3 && strings.Trim(fields[2], "#") == "" {
-			fields = fields[:2] // Optional closing heading markers.
-		}
-		if len(fields) != 2 {
-			return "" // A heading must contain one unambiguous verdict.
-		}
-		return reviewWord(fields[1])
-	}
-	// Reject a list of verdict choices at the start, without searching the
-	// supporting prose (which can legitimately discuss another verdict).
-	for _, word := range fields[1:] {
-		switch strings.ToLower(word) {
-		case "/", "|", "or", "and", ",":
+	verdict, previousLine := "", ""
+	first, introduced, comment := true, false, false
+	var fence byte
+	fenceWidth, section := 0, 0
+	for i, line := range lines {
+		text := strings.TrimSpace(line)
+		if fence == 0 && (comment || strings.Contains(text, "<!--")) {
+			comment = !strings.Contains(text, "-->")
 			continue
 		}
-		if reviewWord(word) != "" {
+		if text == "" {
+			if previousLine != "" {
+				word, _, _ := reviewLineToken(previousLine, false)
+				introduced = word == "" && strings.Contains(previousLine, ":")
+				previousLine = ""
+			}
+			continue
+		}
+		leading := first
+		first, previousLine = false, text
+		indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+		if len(indent) >= 4 || strings.Contains(indent, "\t") || strings.HasPrefix(text, ">") {
+			continue
+		}
+		if mark := text[0]; mark == '`' || mark == '~' {
+			width := len(text) - len(strings.TrimLeft(text, string(mark)))
+			if width >= 3 {
+				if fence == 0 {
+					fence, fenceWidth = mark, width
+				} else if fence == mark && width >= fenceWidth && strings.TrimSpace(text[width:]) == "" {
+					fence = 0
+				}
+				continue
+			}
+		}
+		if fence != 0 {
+			continue
+		}
+		fields := strings.Fields(text)
+		level := 0
+		if strings.Trim(fields[0], "#") == "" && len(fields[0]) <= 6 {
+			level = len(fields[0])
+		}
+		independentHeading := level > 0 && (section == 0 || level <= section)
+		if !leading && !independentHeading && (section != 0 || introduced) {
+			continue
+		}
+		word, ambiguous, described := reviewLineToken(line, !leading)
+		if ambiguous || word != "" && verdict != "" && word != verdict {
 			return ""
+		}
+		if word != "" && (leading || described && (independentHeading || i == lastParagraph)) {
+			verdict, section, introduced = word, 0, false
+		} else if level > 0 && (section == 0 || level < section) {
+			section = level // Nested examples/evidence cannot establish a conclusion.
+		}
+	}
+	return verdict
+}
+
+func reviewLineToken(line string, conclusion bool) (string, bool, bool) {
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
+		return "", false, false
+	}
+	if strings.Trim(fields[0], "#") == "" {
+		if len(fields[0]) > 6 || len(fields) < 2 {
+			return "", false, false
+		}
+		fields = fields[1:]
+		if len(fields) > 1 && strings.Trim(fields[len(fields)-1], "#") == "" {
+			fields = fields[:len(fields)-1]
+		}
+		conclusion = true
+	}
+	word := reviewWord(fields[0])
+	if word == "" {
+		return "", false, false
+	}
+	// Reject adjacent choices without scanning supporting prose, which may
+	// legitimately describe what would be required for a different verdict.
+	for _, next := range fields[1:] {
+		switch strings.ToLower(next) {
+		case "/", "|", "or", "and", ",", "—", "–", "-":
+			continue
+		}
+		if reviewWord(next) != "" {
+			return "", true, false
 		}
 		break
 	}
-	return reviewWord(fields[0])
+	_, explanation, colon := strings.Cut(fields[0], ":")
+	described := colon && (strings.Trim(explanation, "*_") != "" || len(fields) > 1)
+	if len(fields) > 1 && !colon {
+		switch fields[1] {
+		case "—", "–", "-", ":":
+			described = len(fields) > 2
+		default:
+			if conclusion {
+				return "", false, false
+			}
+		}
+	}
+	return word, false, described
 }
 
 func reviewWord(word string) string {

@@ -35,12 +35,18 @@ func TestPersistedAssignmentCheckpointRemainsPrepareAfterRunReset(t *testing.T) 
 	seen := false
 	bindDecisionFixture(t, &cfg, func(q decision.Request) int {
 		var input struct {
-			Checkpoint struct{ Phase, PATStep, SelectedID string }
+			Checkpoint   struct{ Phase, PATStep, SelectedID string }
+			CurrentClaim bool
 		}
 		if json.Unmarshal([]byte(q.Context), &input) == nil && input.Checkpoint.SelectedID == task.ID {
 			seen = true
-			if input.Checkpoint.Phase != "PREPARE" || input.Checkpoint.PATStep != "inspect-assignment" {
-				t.Errorf("historical assignment became a current claim: %+v", input.Checkpoint)
+			stored, err := plan.GetTask(s, task.ID)
+			if err != nil {
+				t.Error(err)
+				return 0
+			}
+			if input.Checkpoint.Phase != "PREPARE" || input.CurrentClaim || input.Checkpoint.PATStep != "task-"+stored.State {
+				t.Errorf("historical state became current authority or lost owning state: checkpoint=%+v currentClaim=%t storedState=%s", input.Checkpoint, input.CurrentClaim, stored.State)
 			}
 		}
 		return 0

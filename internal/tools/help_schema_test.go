@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	"specific-harness/internal/session"
 	"specific-harness/internal/store"
 	"specific-harness/internal/tool"
+	"specific-harness/internal/tools/bash"
 	graphTool "specific-harness/internal/tools/graph"
 )
 
@@ -86,6 +88,77 @@ func TestHelpSchemaIndexAndFocusedTemplate(t *testing.T) {
 	overview, err := h.Execute(context.Background(), tool.Args{})
 	if err != nil || !strings.Contains(overview.Text, "# Harness operating guide") || !strings.Contains(overview.Text, "schema.graphql") || strings.Contains(overview.Text, "## help.read") || strings.Contains(overview.Text, "## help.graphql") {
 		t.Fatalf("default injected full tool guides: %s %v", overview.Text, err)
+	}
+}
+
+func TestBashHelpMatchesBoundWorkspaceAndArguments(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "workspace marker.txt"), []byte("captured workspace"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	pc, cfg := prompts.Builtin(), config.Defaults()
+	d := bash.NewAt(cfg.Tools.Bash, root, pc)
+	for _, text := range []string{d.Purpose, pc.Text("help.bash")} {
+		for _, want := range []string{"cmd", "timeout", "workspace", "cwd"} {
+			if !strings.Contains(text, want) {
+				t.Errorf("Bash reference omits %s: %s", want, text)
+			}
+		}
+	}
+	if len(d.Params) != 2 || d.Params[0].Name != "cmd" || d.Params[1].Name != "timeout" {
+		t.Fatalf("Bash argument contract changed: %+v", d.Params)
+	}
+	if _, repair := tool.ValidateJSON(d, `{"cmd":"pwd","cwd":"/"}`); repair == "" {
+		t.Fatal("reference claims cwd is unsupported but actual validator accepted it")
+	}
+	args, repair := tool.ValidateJSON(d, `{"cmd":"cat 'workspace marker.txt'"}`)
+	if repair != "" {
+		t.Fatal(repair)
+	}
+	res, err := d.Execute(context.Background(), args)
+	if err != nil || res.Failed || res.Text != "captured workspace" {
+		t.Fatalf("relative path did not resolve in the advertised workspace: %+v %v", res, err)
+	}
+}
+
+func TestHelpGraphQLIndexShowsOperationAndRequiredArguments(t *testing.T) {
+	reg, cfg := catalogTools(t, prompts.Builtin())
+	h := helpDefinition(cfg, reg, prompts.Builtin())
+	res, err := h.Execute(context.Background(), tool.Args{"topic": "schema.graphql"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range api.ModelFields() {
+		t.Run(name, func(t *testing.T) {
+			root, field := api.ModelOperation(name)
+			var line string
+			for _, candidate := range strings.Split(res.Text, "\n") {
+				if strings.HasPrefix(candidate, "- "+name+" — ") {
+					line = candidate
+					break
+				}
+			}
+			prefix := "- " + name + " — " + strings.ToLower(root.Name) + " " + name
+			if !strings.HasPrefix(line, prefix) {
+				t.Fatalf("index does not distinguish the operation: %q, want prefix %q", line, prefix)
+			}
+			signature, _, _ := strings.Cut(strings.TrimPrefix(line, prefix), " — ")
+			for _, arg := range field.Arguments {
+				want := arg.Type.NonNull && arg.DefaultValue == nil
+				got := strings.Contains(signature, arg.Name+": "+arg.Type.String())
+				if got != want {
+					t.Errorf("argument %s present=%t required=%t in %q", arg.Name, got, want, signature)
+				}
+			}
+		})
+	}
+	for _, want := range []string{
+		"- noticed — mutation noticed(approachId: ID!",
+		"- notices — query notices(approachId: ID!)",
+	} {
+		if !strings.Contains(res.Text, want) {
+			t.Errorf("observation write/read distinction missing: %s", want)
+		}
 	}
 }
 

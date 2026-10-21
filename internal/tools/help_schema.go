@@ -93,10 +93,17 @@ func helpGraphQLSchema(suffix string, d tool.Definition, pc *prompts.Catalog) (s
 	if suffix == "" {
 		text := pc.Text("help.schema.graphql.index")
 		for _, name := range names {
-			_, f := api.ModelOperation(name)
-			details := ""
+			root, f := api.ModelOperation(name)
+			required := *f
+			required.Arguments = nil
+			for _, arg := range f.Arguments {
+				if arg.Type.NonNull && arg.DefaultValue == nil {
+					required.Arguments = append(required.Arguments, arg)
+				}
+			}
+			details := " — " + strings.ToLower(root.Name) + " " + graphSignature(&required)
 			if strings.TrimSpace(f.Description) != "" {
-				details = " — " + strings.TrimSpace(f.Description)
+				details += " — " + strings.TrimSpace(f.Description)
 			}
 			text += pc.Format("help.schema.graphql.index_entry", name, details)
 		}

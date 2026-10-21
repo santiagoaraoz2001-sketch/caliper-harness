@@ -40,7 +40,7 @@ func TestReviewBoldCapturedVerdicts(t *testing.T) {
 	}
 }
 
-func TestReviewMarkdownLeadingVerdictOnly(t *testing.T) {
+func TestReviewMarkdownExplicitVerdictOnly(t *testing.T) {
 	for _, tc := range []struct {
 		text  string
 		token string

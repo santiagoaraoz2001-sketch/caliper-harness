@@ -1001,7 +1001,7 @@ func (m *Model) onTitle(msg titleMsg) {
 func (m *Model) stopChat() {
 	if !m.Chat.Running {
 		if m.compactBusy(true) {
-			m.alert("info", "stopping compaction — waiting for settlement")
+			m.alert("info", "compaction stop requested")
 			return
 		}
 		if m.Wf.Busy != "" && m.Wf.cancel != nil {
@@ -1009,7 +1009,7 @@ func (m *Model) stopChat() {
 				m.declineDialog()
 			}
 			m.Wf.cancel()
-			m.alert("info", "stopping workflow — waiting for owned work to settle")
+			m.alert("info", "workflow stop requested")
 			return
 		}
 		m.alert("info", "no run in flight")
@@ -1022,7 +1022,7 @@ func (m *Model) stopChat() {
 	if m.Chat.Dialog != nil {
 		m.declineDialog()
 	}
-	m.alert("info", "stopping — waiting for owned work to settle")
+	m.alert("info", "stop requested")
 }
 
 // drainBtw carries unheard notes to the next run.

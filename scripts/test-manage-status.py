@@ -154,7 +154,7 @@ def main():
         def do_GET(self):
             requests.append(self.path)
             ok = self.path == '/v1/models'
-            raw = json.dumps({'data': [{'id': 'fixture-coder'}]} if ok else {'error': 'unknown fixture route'}).encode()
+            raw = json.dumps({'data': [{'id': 'fixture-coder'}, {'id': 'catalog-selected-model'}]} if ok else {'error': 'unknown fixture route'}).encode()
             self.send_response(200 if ok else 404)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
@@ -244,17 +244,21 @@ def main():
         term.expect('\r', 'Generated tokens')
         term.expect('/manage\r', 'Add model')
         term.send('+')
-        term.field('manually-added-model')
+        term.expect('\x14', 'Server responds', '2 models', 'Model ID')
+        checks['blank_model_catalog_lookup'] = True
+        term.send('\x1b[C')
+        term.expect('\x1b[C', 'catalog-selected-model')
+        checks['catalog_arrow_selection'] = True
         term.send('\x13', 1)
-        checks['model_saved'] = 'manually-added-model' in cfg.read_text() and 'models:' in cfg.read_text()
-        term.send('/models manually-added-model\r', 1)
+        checks['model_saved'] = 'catalog-selected-model' in cfg.read_text() and 'models:' in cfg.read_text()
+        term.send('/models catalog-selected-model\r', 1)
         term.send('u', 1)
-        checks['coding_selection_saved'] = 'name: manually-added-model' in cfg.read_text()
+        checks['coding_selection_saved'] = 'name: catalog-selected-model' in cfg.read_text()
         setup = term.send('/setup\r')
         for _ in range(4):
             setup += term.send('\r')
         checks['setup_accepts_own_coding_selection'] = 'Configuration changed outside Setup' not in plain(setup)
-        term.send('/models manually-added-model\r', 1)
+        term.send('/models catalog-selected-model\r', 1)
         term.expect('t', 'Server responds')
         checks['test_connection'] = True
         term.expect('/status\r', 'Generated tokens')
@@ -269,7 +273,7 @@ def main():
         reopened = Terminal([str(binary), 'tui', '--config', str(cfg)], work, dict(env, NO_COLOR='1'))
         terminals.append(reopened)
         reopened.expect('', 'Enter send', timeout=90)
-        reopened.expect('/manage\r', 'Catalog renamed', 'manually-added-model')
+        reopened.expect('/manage\r', 'Catalog renamed', 'catalog-selected-model')
         checks['connections_survive_reopen'] = True
         reopened.expect('/status\r', 'Generated tokens')
         checks['reopened_status'] = True

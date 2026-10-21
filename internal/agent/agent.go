@@ -1010,8 +1010,17 @@ steps:
 			if _, isNative := r.Model.(ToolModel); isNative {
 				var note string
 				note, archiveErr = r.keepPartial(native, err, func(kind, text string) error { log(kind, text); return sessErr })
+				if archiveErr == nil {
+					archiveErr = r.retainUnfinished(native, func(kind, text string) error { log(kind, text); return sessErr })
+					if archiveErr == nil {
+						note += "; received thought/text retained for resume; incomplete calls remain unexecuted drafts"
+					}
+				}
 				partial = "partial reply (not complete; not executed):\n" + note
-				log("partial", partial)
+				log("note", partial) // Host diagnostic; native_reply owns the retained model fields.
+				if archiveErr == nil && native.OutputLimit && ctx.Err() == nil {
+					measurePrompt(u) // Latest measured input remains valid after retaining its generated draft.
+				}
 				if reply != "" {
 					partial = "partial reply (not complete; not executed):\n" + reply + "\n" + note
 				}
@@ -1069,7 +1078,7 @@ steps:
 		}
 		if len(native.Message.ToolCalls) > 0 {
 			if watch != nil {
-				watch.completedDiscovery(native.Message, r.LoopStall)
+				watch.completedDiscovery(native.Message, r.LoopStall, r.ThinkingLoop.SampleBytes)
 			}
 			trip, refused := "", ""
 			observe := func(sig string, productive bool, refusal string) string {
@@ -1136,7 +1145,7 @@ steps:
 			if _, ok := r.Model.(ToolModel); ok {
 				message = native.Message
 			}
-			watch.completedDiscovery(message, r.LoopStall)
+			watch.completedDiscovery(message, r.LoopStall, r.ThinkingLoop.SampleBytes)
 		}
 		call, found, repair := tool.Extract(reply, r.Prompts)
 		if structured(r.Model) && found {

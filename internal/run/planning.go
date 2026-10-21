@@ -5,12 +5,15 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"specific-harness/internal/graph"
 	"specific-harness/internal/launch"
 	"specific-harness/internal/outcome"
 	"specific-harness/internal/plan"
+	"specific-harness/internal/prompts"
 	"specific-harness/internal/session"
 	"specific-harness/internal/tool"
 )
@@ -22,11 +25,6 @@ type planningGoal struct {
 	Rules    string   `json:"rules"`
 	Articles []string `json:"articles"`
 	Proof    string   `json:"proof"`
-}
-type planningStrategy struct {
-	ArticleIndex int    `json:"article_index"`
-	Article      string `json:"article"`
-	Strategy     string `json:"strategy"`
 }
 type planningStep struct {
 	Objective  string `json:"objective"`
@@ -49,6 +47,7 @@ type planningState struct {
 	Approaches   []*plan.Approach
 	Article      string
 	ArticleIndex int
+	Articles     []string
 }
 
 // planningDefinition is rebuilt for each request. Its closure captures only the
@@ -92,7 +91,29 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 		}
 	case "approach":
 		add("strategy")
-		def.Purpose += "\n" + st.Plan.Goal + "\n" + st.Article
+		coverageCatalog := pc
+		if !pc.Has("planning.answer.coverage") {
+			coverageCatalog = prompts.Builtin()
+			def.Purpose += "\nCustom prompt catalog predates multi-article coverage; using shipped coverage guidance."
+		}
+		def.Params = append(def.Params, tool.Param{Name: "coverage", Type: tool.TypeString, Desc: coverageCatalog.Text("planning.answer.coverage")})
+		goalText := st.Plan.Goal
+		if len(st.Articles) > 0 {
+			// Show article text once, with the same numbers used by the answer.
+			var fields map[string]json.RawMessage
+			if json.Unmarshal([]byte(goalText), &fields) == nil {
+				delete(fields, "articles")
+				raw, _ := json.Marshal(fields)
+				goalText = string(raw)
+			}
+		}
+		def.Purpose += "\n" + goalText
+		for i, article := range st.Articles {
+			def.Purpose += fmt.Sprintf("\nArticle %d: %s", i+1, article)
+		}
+		if len(st.Articles) > 0 {
+			def.Purpose += fmt.Sprintf("\nSuggested coverage if omitted: article %d", st.ArticleIndex+1)
+		}
 	case "task":
 		add("title")
 		add("objective")
@@ -155,7 +176,6 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 			add(n)
 			def.Params[len(def.Params)-1].Required = false
 		}
-		def.Purpose += "\nApproach objective/strategy: " + st.Approach.Title
 		if st.Approach.State == plan.ApproachComplete {
 			def.Params[0].Enum = []string{"NEXT_ARTICLE"}
 		}
@@ -182,6 +202,7 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 	if st.Plan != nil {
 		facts := map[string]any{"plan": st.Plan.ID, "plan_state": st.Plan.State}
 		if st.Approach != nil {
+			def.Purpose += "\nApproach scope/strategy: " + st.Approach.Title
 			qualified := 0
 			for _, task := range st.Tasks {
 				if task.Qualified() {
@@ -374,7 +395,14 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 			vars = map[string]any{"title": get("title"), "goal": string(goal)}
 			nextKind = "plan"
 		case "approach":
-			title, _ := json.Marshal(planningStrategy{st.ArticleIndex, st.Article, get("strategy")})
+			refs, e := planningCoverage(st, args)
+			if e != nil {
+				return def, nil, e
+			}
+			title, _ := json.Marshal(plan.ApproachBrief{Coverage: refs, Strategy: get("strategy")})
+			if len(refs) == 0 {
+				title = []byte(get("strategy"))
+			}
 			vars = map[string]any{"id": st.Plan.ID, "title": string(title)}
 			query = `mutation($id:ID!,$title:String!){`
 			if st.Plan.State == plan.PlanDraft {
@@ -605,7 +633,7 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 	// The wire contract stays fixed; the receipt and owning validator retain the
 	// exact current question, required fields and legal actions.
 	advertised := tool.Definition{Name: "plan", Prompts: pc, Desc: pc.Text("tools.plan.description"), Purpose: pc.Text("planning.interface")}
-	for _, name := range []string{"title", "outcome", "rules", "articles", "proof", "strategy", "objective", "approach", "task", "current", "target", "acceptance", "tests", "acceptance_command", "check_command", "execution", "validation", "verify", "invoke", "field", "value", "feedback"} {
+	for _, name := range []string{"title", "outcome", "rules", "articles", "proof", "strategy", "coverage", "objective", "approach", "task", "current", "target", "acceptance", "tests", "acceptance_command", "check_command", "execution", "validation", "verify", "invoke", "field", "value", "feedback"} {
 		advertised.Params = append(advertised.Params, tool.Param{Name: name, Type: tool.TypeString})
 	}
 	advertised.Params = append(advertised.Params, tool.Param{Name: "more", Type: tool.TypeBool})
@@ -685,59 +713,25 @@ func planningRead(d launch.Deps, scope *session.WorkflowScope) (planningState, e
 		if e != nil {
 			return st, e
 		}
-		st.Approaches, e = plan.PlanApproaches(d.Store, n.ID)
-		if e != nil {
-			return st, e
-		}
 		if st.Plan.State == plan.PlanComplete || st.Plan.State == plan.PlanRetired {
 			st.Phase = "settled"
 			return st, nil
 		}
-		st.Phase = "approach"
-		var goal planningGoal
-		if json.Unmarshal([]byte(st.Plan.Goal), &goal) == nil && len(goal.Articles) > 0 {
-			for articleIndex, article := range goal.Articles {
-				found := false
-				unresolved := []*plan.Approach{}
-				for _, a := range st.Approaches {
-					var strategy planningStrategy
-					if json.Unmarshal([]byte(a.Title), &strategy) == nil && strategy.Article == article && strategy.ArticleIndex == articleIndex {
-						found = true
-						qualified, err := plan.ApproachQualified(d.Store, a.ID)
-						if err != nil {
-							return st, err
-						}
-						if !qualified {
-							unresolved = append(unresolved, a)
-						}
-					}
-				}
-				if len(unresolved) > 0 {
-					st.Phase, st.Approaches = "select_approach", unresolved
-					return st, nil
-				}
-				if !found {
-					st.Article = article
-					st.ArticleIndex = articleIndex
-					return st, nil
-				}
-			}
+		coverage, err := plan.PlanCoverage(d.Store, n.ID)
+		if err != nil {
+			return st, err
+		}
+		st.Approaches, st.Articles = coverage.Approaches, coverage.Articles
+		switch {
+		case len(coverage.Unresolved) > 0:
+			st.Phase, st.Approaches = "select_approach", coverage.Unresolved
+		case len(coverage.Uncovered) > 0:
+			st.Phase = "approach"
+			st.ArticleIndex, st.Article = coverage.Uncovered[0].Index, coverage.Uncovered[0].Text
+		case coverage.Qualified():
 			st.Phase = "plan_complete"
-		} else if len(st.Approaches) > 0 {
-			st.Phase = "plan_complete"
-			unresolved := []*plan.Approach{}
-			for _, a := range st.Approaches {
-				qualified, err := plan.ApproachQualified(d.Store, a.ID)
-				if err != nil {
-					return st, err
-				}
-				if !qualified {
-					unresolved = append(unresolved, a)
-				}
-			}
-			if len(unresolved) > 0 {
-				st.Phase, st.Approaches = "select_approach", unresolved
-			}
+		default:
+			st.Phase = "approach"
 		}
 	case "approach":
 		st.Approach, e = plan.GetApproach(d.Store, n.ID)
@@ -893,38 +887,55 @@ func planningCompletion(d launch.Deps, scope *session.WorkflowScope) (*outcome.R
 		return report, e
 	}
 	report.Ref = p.ID
-	approaches, e := plan.PlanApproaches(d.Store, p.ID)
+	coverage, e := plan.PlanCoverage(d.Store, p.ID)
 	if e != nil {
 		return report, e
 	}
-	if p.State != plan.PlanComplete || len(approaches) == 0 {
+	if p.State != plan.PlanComplete || !coverage.Qualified() {
 		return report, nil
-	}
-	for _, a := range approaches {
-		qualified, e := plan.ApproachQualified(d.Store, a.ID)
-		if e != nil {
-			return report, e
-		}
-		if !qualified {
-			return report, nil
-		}
-	}
-	var goal planningGoal
-	if json.Unmarshal([]byte(p.Goal), &goal) == nil {
-		for articleIndex, article := range goal.Articles {
-			found := false
-			for _, a := range approaches {
-				var strategy planningStrategy
-				if json.Unmarshal([]byte(a.Title), &strategy) == nil && strategy.Article == article && strategy.ArticleIndex == articleIndex {
-					found = true
-				}
-			}
-			if !found {
-				return report, nil
-			}
-		}
 	}
 	report.Qualified = true
 	report.Outcome = outcome.Outcome{Status: outcome.Completed, Reason: "owning plan complete with qualified approaches; consult actual check/review receipts"}
 	return report, nil
+}
+
+// Model-authored article numbers bind to the current question's exact scope.
+// The existing guard rechecks that complete owner snapshot before any write.
+func planningCoverage(st planningState, args tool.Args) ([]plan.ArticleRef, error) {
+	raw, explicit := args["coverage"]
+	selected := []int{st.ArticleIndex}
+	if explicit {
+		text, ok := raw.(string)
+		if !ok || strings.TrimSpace(text) == "" {
+			return nil, fmt.Errorf("coverage needs displayed article numbers, for example 1, 2; omit it for the suggested article")
+		}
+		selected = nil
+		for _, token := range strings.FieldsFunc(text, func(r rune) bool { return r == ',' || unicode.IsSpace(r) }) {
+			n, err := strconv.Atoi(token)
+			if err != nil || n < 1 || n > len(st.Articles) {
+				return nil, fmt.Errorf("coverage %q is not a displayed article number (1–%d)", token, len(st.Articles))
+			}
+			selected = append(selected, n-1)
+		}
+		if len(selected) == 0 {
+			return nil, fmt.Errorf("coverage needs at least one displayed article number")
+		}
+	}
+	if len(st.Articles) == 0 {
+		if explicit {
+			return nil, fmt.Errorf("this freeform Plan has no numbered articles; omit coverage")
+		}
+		return nil, nil
+	}
+	chosen := map[int]bool{}
+	for _, i := range selected {
+		chosen[i] = true
+	}
+	refs := []plan.ArticleRef{}
+	for i, article := range st.Articles {
+		if chosen[i] {
+			refs = append(refs, plan.ArticleRef{Index: i, Text: article})
+		}
+	}
+	return refs, nil
 }

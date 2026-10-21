@@ -33,6 +33,7 @@ func TestIntentionalStreamCancellationKeepsPartialWithoutServerRetry(t *testing.
 	}))
 	defer func() { cancel(); srv.Close() }()
 	m := New(testCfg(), "cancellation")
+	m.Width, m.Height = 120, 36
 	m.Chat.Running, m.Chat.Seq, m.Chat.cancel = true, 3, cancel
 	m.Cfg.Tabs.TitleEvery = 0
 	messages := make(chan tea.Msg, 100)
@@ -56,7 +57,12 @@ func TestIntentionalStreamCancellationKeepsPartialWithoutServerRetry(t *testing.
 			t.Fatal("partial never reached UI")
 		}
 	}
+	m.alert("warn", "older unrelated warning")
 	m.stopChat()
+	if state, _ := m.activityState(); state != "Stopping" {
+		t.Fatalf("actual unsettled cancellation lost status: %q", state)
+	}
+	m.alert("err", "newer independent error")
 	var settled runDoneMsg
 	select {
 	case settled = <-done:
@@ -68,6 +74,12 @@ func TestIntentionalStreamCancellationKeepsPartialWithoutServerRetry(t *testing.
 		m = next.(Model)
 	}
 	m.onRunDone(settled)
+	if len(m.Alerts) != 3 || m.Alerts[0].Text != "older unrelated warning" || m.Alerts[1].Text != "stop requested" || m.Alerts[2].Text != "newer independent error" {
+		t.Fatalf("settled stop notice is misleading or another alert was lost: %+v", m.Alerts)
+	}
+	if strings.Contains(m.View(), "waiting for owned work to settle") || m.modelWorkActive() {
+		t.Fatal("settled view still claims cancellation is waiting")
+	}
 	if !errors.Is(settled.runErr, context.Canceled) || settled.outcome.Status != outcome.Cancelled || !settled.unknown || m.Chat.Running || requests.Load() != 1 || effects.Load() != 0 {
 		t.Fatalf("cancel contract: %+v requests=%d effects=%d", settled, requests.Load(), effects.Load())
 	}

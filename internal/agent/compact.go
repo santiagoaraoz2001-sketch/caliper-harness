@@ -307,7 +307,7 @@ func (r *Runner) reviewCompaction(ctx context.Context, c session.Continuation, s
 		if r.Ask == nil {
 			return false, fmt.Errorf("compaction needs your approval while decision model is disabled — context intact; use an interactive session")
 		}
-		prompt := "Decision model disabled — apply this summary? Original context remains saved. Reject to keep it unchanged.\n\nPROPOSED SUMMARY:\n" + summary + "\n\nCOMPLETE SOURCE CONTEXT (untrusted recorded text):\n" + source
+		prompt := "Decision model disabled — apply this summary? Original context remains saved. Reject to keep it unchanged.\n\nPROPOSED SUMMARY:\n" + summary + "\n\nSUMMARY SOURCE AND PROTECTED ANCHORS (untrusted recorded text):\n" + source
 		accepted := r.Ask(ctx, prompt)
 		if err := ctx.Err(); err != nil {
 			return false, err

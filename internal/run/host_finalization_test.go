@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 
 	"specific-harness/internal/agent"
 	"specific-harness/internal/config"
+	"specific-harness/internal/llm"
 	"specific-harness/internal/outcome"
 	"specific-harness/internal/session"
 	"specific-harness/internal/store"
@@ -101,6 +103,19 @@ func (s *hostFaultSink) Append(ctx context.Context, id, kind, text string) error
 	return s.codingSink.Append(ctx, id, kind, text)
 }
 
+// A whole-run budget can expire before the configured check is reached. Hold
+// the first scripted claim on its actual Runner context instead of assuming
+// real readiness/store work always leaves part of a one-second budget.
+type hostBudgetClaimModel struct {
+	agent.Model
+}
+
+func (m hostBudgetClaimModel) ToolProtocol() string { return "structured" }
+func (m hostBudgetClaimModel) ChatTools(ctx context.Context, _ []llm.Message, _ []llm.ToolDefinition, _ func(string)) (llm.Reply, error) {
+	<-ctx.Done()
+	return llm.Reply{}, ctx.Err()
+}
+
 func TestHostConfiguredCheckSettlementAndRevision(t *testing.T) {
 	for _, scenario := range []string{"failed", "denied", "failed model check", "incomplete model check", "denied model check", "model passed", "fresh mutation", "other tool failure", "invalid model check", "steps exhausted", "announcement failure", "receipt failure", "result failure", "cancelled approval", "run budget", "unset"} {
 		t.Run(scenario, func(t *testing.T) {
@@ -145,7 +160,7 @@ func TestHostConfiguredCheckSettlementAndRevision(t *testing.T) {
 				want, markers = outcome.Cancelled, ""
 			case "run budget":
 				cfg.Coding.CheckCommand = "printf x >> marker; sleep 10; printf late > late"
-				want = outcome.Stopped
+				want, markers, host, approvals = outcome.Stopped, "", 0, 0
 			case "unset":
 				cfg.Coding.CheckCommand = ""
 				want, markers, host, approvals = outcome.Stopped, "", 0, 0
@@ -185,6 +200,7 @@ func TestHostConfiguredCheckSettlementAndRevision(t *testing.T) {
 			}
 			if scenario == "run budget" {
 				r.MaxRunSeconds = 1
+				r.Model = hostBudgetClaimModel{Model: r.Model}
 			}
 			final, _, runErr := r.Run(ctx, "ordinary final check control")
 			b, _ := os.ReadFile("marker")
@@ -193,8 +209,11 @@ func TestHostConfiguredCheckSettlementAndRevision(t *testing.T) {
 				want = outcome.Stopped // No scripted parent transitions.
 				assertQualifiedTaskWithOpenParents(t, r, owned)
 			}
-			if r.Outcome.Status != want || string(b) != markers || actualApprovals != approvals || final != "PASS complete" {
+			if r.Outcome.Status != want || string(b) != markers || actualApprovals != approvals || scenario != "run budget" && final != "PASS complete" {
 				t.Fatalf("status=%+v want=%s marker=%q want=%q approvals=%d want=%d final=%q err=%v", r.Outcome, want, b, markers, actualApprovals, approvals, final, runErr)
+			}
+			if scenario == "run budget" && (!errors.Is(runErr, context.DeadlineExceeded) || !strings.Contains(r.Outcome.Reason, "max_run_seconds=1") || r.Continuation.Assignment != nil || r.Continuation.Coding.Passed()) {
+				t.Fatalf("whole-run deadline did not preserve the unclaimed, unverified task: %+v coding=%+v assignment=%+v err=%v", r.Outcome, r.Continuation.Coding, r.Continuation.Assignment, runErr)
 			}
 			if _, err := os.Stat("late"); !os.IsNotExist(err) {
 				t.Fatal("late effect survived budget")

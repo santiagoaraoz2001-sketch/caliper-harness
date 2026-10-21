@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -14,13 +16,11 @@ func TestNativeRemainingDeadlineAndReset(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	// Keep native interruption granularity well below the distinction being
-	// tested: ~2s total with a remaining budget, ~3.5s if the second statement
-	// reuses the original 2s admission timeout. The former 300/200ms timeline
-	// left only 150ms for native settlement and flaked under concurrent suites.
+	// Inspect the native timeout itself: UpdateContext also waits for native
+	// auto-rollback and checkpoint settlement, so its total wall time cannot
+	// distinguish a remaining budget from a reused admission timeout.
 	const budget = 2 * time.Second
 	const consumed = 1500 * time.Millisecond
-	const latestRemaining = budget + consumed/2
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 	start := time.Now()
@@ -30,13 +30,22 @@ func TestNativeRemainingDeadlineAndReset(t *testing.T) {
 		}
 		// Consume most of the transaction budget before a second actual native call.
 		time.Sleep(consumed)
-		_, err := tx.Query(`UNWIND range(1, 100000) AS a UNWIND range(1, 100000) AS b RETURN sum(a+b) AS n`, nil)
+		rows, err := tx.Query(`CALL current_setting('timeout') RETURN *`, nil)
+		if err != nil || len(rows) != 1 {
+			return fmt.Errorf("native timeout setting: %v %v", rows, err)
+		}
+		timeoutMS, parseErr := strconv.ParseInt(fmt.Sprint(rows[0]["timeout"]), 10, 64)
+		if parseErr != nil || timeoutMS <= 0 || timeoutMS > (budget-consumed).Milliseconds() {
+			return fmt.Errorf("statement reused admission timeout: native setting=%v", rows)
+		}
+		t.Logf("native remaining timeout=%dms", timeoutMS)
+		_, err = tx.Query(`UNWIND range(1, 100000) AS a UNWIND range(1, 100000) AS b RETURN sum(a+b) AS n`, nil)
 		return err
 	})
 	elapsed := time.Since(start)
 	t.Logf("writer elapsed=%s error=%v", elapsed, err)
-	if !errors.Is(err, context.DeadlineExceeded) || elapsed > latestRemaining {
-		t.Fatalf("statement reused admission timeout: %s %v", elapsed, err)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("native statement deadline: %s %v", elapsed, err)
 	}
 	rows, err := s.Query(`MATCH(p:Plan) WHERE p.id='deadline' RETURN p.id AS id`, nil)
 	if err != nil || len(rows) != 0 {

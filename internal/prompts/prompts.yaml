@@ -1213,6 +1213,8 @@ texts:
 
     When bash is advertised, use it for commands without a dedicated tool. Use read/find_file/find_dir/grep
     for inspection, edit/write for source changes, and check for declared verification.
+    Arguments are cmd and optional timeout; there is no cwd argument. Commands start in the current
+    task workspace, so relative paths already refer there. Quote paths containing spaces.
     Timeout/output caps are configured. Nonzero exit is a failure receipt, not a product success.
     Shell inspection preserves a prior declared-check pass when project contents are observed unchanged. Changed or unobserved contents make it stale. Do not treat raw
     shell output as verified task qualification.
@@ -1697,9 +1699,10 @@ texts:
   # Original use sites: internal/tools/bash/bash.go:27 (NewAt).
   # Fields: none. Supplied by the owning Go caller.
   tools.bash.purpose: >2-
-    Runs one shell command and returns combined stdout/stderr. Use read/find_file/find_dir/grep
+    Runs cmd in the current task workspace; optional timeout sets seconds. There is no cwd argument.
+    Relative paths already refer to that workspace; quote paths containing spaces. Use read/find_file/find_dir/grep
     for inspection, edit/write for changes, and check for declared verification. Use this tool for
-    other commands only when advertised. Long output is truncated with a marker.
+    other commands only when advertised. Returns combined stdout/stderr; truncated output is marked.
   # Model-facing desc prose for the current CheckDefinition registry constructor; executable
   # schema/authority remain Go-owned.
   # Original use sites: internal/agent/coding.go:110 (CheckDefinition).
@@ -2719,7 +2722,7 @@ texts:
   tools.discovery.workspace_scope: >-
     Paths must resolve inside the captured workspace. For another project, use explicit
     read_outside or find_outside with an absolute outside path.
-  tools.outside.parameters.path: "explicit absolute file or directory outside the workspace; final symlinks refused"
+  tools.outside.parameters.path: "absolute outside path (file/directory for read_outside; directory for find_outside); final symlinks refused"
   tools.read_outside.description: "read bounded outside file lines or directory children"
   tools.read_outside.purpose: >-
     Read an explicit absolute path outside the workspace using the same line/entry and byte caps
@@ -2827,7 +2830,7 @@ texts:
     Report missing pre-change evidence honestly.
     For a new deliverable, implement the target with meaningful behavioral assertions.
     Run the exact configured project check, or propose one grounded in inspected files when unset.
-    Later effects invalidate a pass. Keep the passing deliverable; a genuinely needed later causal
+    Later source changes or modifying workflow effects invalidate a pass. Keep the passing deliverable; a genuinely needed later causal
     control uses an isolated copy followed by a final current check. Preserve user constraints,
     failures and unknowns; report only actual changes and results.
 
@@ -2844,11 +2847,11 @@ texts:
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
   help.plan: |2-
     ## help.plan
-    While drafting, answer the current question and arguments shown above, then use its next receipt.
-    The host binds IDs. Draft answers save metadata; the advertised start action claims execution; STATUS only reports state.
-    While executing a claimed task, use coding tools; a normal final answer with no tool call requests independent review. Inspect source as needed,
-    finish all Task briefs for the current Approach, then request readiness and claim. A real Task claim
-    binds its frozen brief, actual paired checks and independent review. For work already implemented,
+    While drafting, inspect source as needed, answer the current question and arguments shown above, then use its next receipt.
+    The host binds IDs. An Approach can declare coverage of several related Plan articles; omission covers the suggested article.
+    Draft answers save metadata: finish all Task briefs for the current Approach, then request readiness and claim.
+    A real Task claim binds its frozen brief, actual paired checks and independent review; STATUS only reports state.
+    While executing a claimed task, use coding tools; a normal final answer with no tool call requests independent review. For work already implemented,
     use known observations/receipts to draft; after claim, address remaining work and run fresh checks. Preserve failures and stopped
     state. Full planning, orchestration, validation, remediation and handoff use cases:
     help(topic="reference.pat") or help(topic="reference.workers").
@@ -2860,17 +2863,17 @@ texts:
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
   planning.goal: |2-
     DRAFT PLAN: State outcome, preserved rules, delivery scopes and proof. articles: one deliverable
-    per line. One Approach serves one article; its Tasks divide that deliverable. If the user asks for
-    one Approach and two fixes, use one combined article, then two Tasks under its Approach. Separate
-    articles need separate Approaches. Inspection, regression, repair and checks are Task steps.
+    per line. An Approach can declare coverage of several related articles; its Tasks divide that scope.
+    Honor the user's grouping. Inspection, regression, repair and checks are Task steps.
     Save draft intentions only and reuse an existing plan's actual focus.
 
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
   planning.approach: |2-
-    DRAFT APPROACH: State how to deliver the whole displayed Plan article and how its Tasks divide
-    that scope. Other articles get their own Approaches. Tasks include implementation/assertions/verification; split independently
-    verifiable outcomes, resolve prerequisites before dependent work. This may activate a Draft parent
-    and saves an approach; no coding starts. Owning goal/article:
+    DRAFT APPROACH: State how the strategy and granular Tasks deliver every selected Plan article.
+    Optional coverage lists displayed 1-based article numbers, e.g. "1, 2"; omit it to cover only the suggested article.
+    Tasks include implementation/assertions/verification; split independently verifiable outcomes and resolve
+    prerequisites before dependent work. This saves preparation and may activate a Draft parent; no coding starts.
+    Owning goal and articles:
 
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
   planning.task: |2-
@@ -3023,6 +3026,12 @@ texts:
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
   planning.answer.strategy: "How will this deliverable be implemented and verified through the requested behavior tasks?"
 
+  # Optional existing Approach question field. Missing-only fallback supports older customized catalogs.
+  # Fields: none. The owning planner validates indices and binds current article text.
+  planning.answer.coverage: >-
+    Which displayed Plan articles will this Approach cover? Optional 1-based numbers, e.g. 1, 2.
+    Omit to cover the suggested article only.
+
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
   planning.answer.objective: "What behavior does this task deliver, or what necessary step advances its stated objective?"
 
@@ -3075,7 +3084,7 @@ texts:
 
   # Guided existing-approach selection; owner validates the actual ID. Fields: none.
   planning.select_approach: >-
-    This article already has work. Use advertised NEXT for a sole Approach; otherwise select its actual approach to inspect/continue it. Do not create
+    This Plan already has unresolved work. Use advertised NEXT for a sole Approach; otherwise select its actual approach to inspect/continue it. Do not create
     another lineage. Existing complete state is not validation without actual check/review receipts.
   # Guided selection parameter. Fields: none.
   planning.answer.approach: "Which actual approach do you intend to inspect/continue?"
@@ -3120,7 +3129,7 @@ texts:
     missing fact or conclude from established evidence; do not request more of the same deliberation.
     Repair only an unresolved rejected call shown in PendingRepair or PreflightRefusal, using
     CurrentToolSchema. Resolved refusals are history. A reviewer assesses only its frozen Task,
-    inspects missing evidence and gives a verdict; it does not implement sibling work. A worker
+    inspects missing evidence and gives a verdict; it does not implement sibling work. A claimed PAT worker
     with current passed checks gives a final answer for independent review. PAT drafting saves
     metadata; execution follows the Approach briefs, readiness and claim. Authored intentions and
     advice are not effects. Continue sends no message; advice cannot stop or discard reasoning,
@@ -3212,9 +3221,10 @@ texts:
 
   help.reference.pat: |2
     ## Reference: PAT lifecycle
-    A Plan records outcome/rules/deliverables/proof; an article is a delivery scope with its own Approach.
-    Tasks own behavior/assertions/implementation/checks/review; honor requested grouping.
-    Related Tasks may share an article/Approach. Outside selected PAT, ordinary coding needs no PAT.
+    A Plan records outcome/rules/deliverables/proof; articles are delivery scopes. An Approach can declare
+    coverage of several related articles by displayed 1-based numbers; omission covers the suggested article.
+    Its strategy and granular Tasks must address all selected articles. Tasks own behavior/assertions/implementation/checks/review;
+    honor requested grouping. Outside selected PAT, ordinary coding needs no PAT.
     Main/orchestrator: call plan(), answer the newest schema, then wait; the host binds IDs.
     Earlier checkpoint advice is historical. Draft objective → observations/target → proof, then subtask
     objective → execution → validation → more. more=true asks another subtask objective;

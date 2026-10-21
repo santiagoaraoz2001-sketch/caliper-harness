@@ -51,3 +51,13 @@ func TestNativeRepairKeepsValidatedArrayProtocol(t *testing.T) {
 		t.Fatal("native repair changed the text compatibility protocol")
 	}
 }
+
+func TestDiscoveryReviewCueRequiresClaimedPAT(t *testing.T) {
+	text := strings.Join(strings.Fields(Builtin().Text("decision.discovery.instructions")), " ")
+	if !strings.Contains(text, "A claimed PAT worker with current passed checks gives a final answer for independent review") {
+		t.Fatal("shared progress advice implies ordinary coding needs PAT review", text)
+	}
+	if !strings.Contains(Builtin().Text("system.coding.direct"), "no PAT is required") {
+		t.Fatal("ordinary coding contract changed")
+	}
+}
