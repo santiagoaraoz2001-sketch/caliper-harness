@@ -43,7 +43,7 @@ Install a compatible Bash on PATH (for example Git for Windows Bash). Shell tool
 
 ## Prepare your model (Ollama)
 
-On Windows the worker model is served by Ollama ([releases](https://github.com/ollama/ollama/releases)). Install Ollama, then fetch a small coding model, for example:
+One supported Windows worker route is Ollama ([releases](https://github.com/ollama/ollama/releases)). To use it, install Ollama, then fetch a small coding model, for example:
 
 ```powershell
 ollama pull qwen2.5-coder:7b
