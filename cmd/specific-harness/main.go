@@ -33,6 +33,7 @@ import (
 	"specific-harness/internal/tools/ask"
 	"specific-harness/internal/tools/files"
 	"specific-harness/internal/tui"
+	"specific-harness/internal/update"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
