@@ -37,7 +37,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-const version = "0.2.1"
+const version = update.Version
 
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "install-activate" {
