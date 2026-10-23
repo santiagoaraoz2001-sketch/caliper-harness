@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -32,7 +34,7 @@ func TestInventoryRefusesExternalSymlink(t *testing.T) {
 	os.WriteFile(filepath.Join(outside, "data"), []byte("bytes"), 0600)
 	os.RemoveAll(filepath.Join(root, "runtime"))
 	if err := os.Symlink(outside, filepath.Join(root, "runtime")); err != nil {
-		if runtime.GOOS == "windows" && os.IsPermission(err) {
+		if runtime.GOOS == "windows" && (os.IsPermission(err) || errors.Is(err, syscall.Errno(1314))) {
 			t.Skip("Windows symlink creation requires Developer Mode or privilege")
 		}
 		t.Fatal(err)
@@ -212,7 +214,7 @@ func TestManagedInterpreterCannotEscapeBundle(t *testing.T) {
 	interpreter := Python(root, requiredProfiles()[0])
 	os.Remove(interpreter)
 	if err := os.Symlink(outside, interpreter); err != nil {
-		if runtime.GOOS == "windows" && os.IsPermission(err) {
+		if runtime.GOOS == "windows" && (os.IsPermission(err) || errors.Is(err, syscall.Errno(1314))) {
 			t.Skip("Windows symlink creation requires Developer Mode or privilege")
 		}
 		t.Fatal(err)

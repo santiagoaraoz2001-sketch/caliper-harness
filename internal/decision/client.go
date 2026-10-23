@@ -130,6 +130,9 @@ func (c *Client) Judge(ctx context.Context, r Request) (Verdict, error) {
 		seen[o] = true
 	}
 	if c.expected != nil && !NativeRuntime(c.expected.Runtime) {
+		if c.expected.Runtime == "ollama" && c.expected.Protocol == "system_one" {
+			return c.judgeOllamaSystemOne(ctx, r)
+		}
 		return c.judgeChat(ctx, r)
 	}
 	var deadlineUnixMS int64

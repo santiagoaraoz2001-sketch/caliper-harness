@@ -88,6 +88,7 @@ func newDiffState(cfg config.Config) DiffState {
 	st.Root = root
 	wcfg := watch.DefaultConfig()
 	wcfg.MaxBytes, wcfg.StartupMaxBytes, wcfg.StartupMaxFiles = cfg.Watch.MaxFileBytes, cfg.Watch.StartupMaxBytes, cfg.Watch.StartupMaxFiles
+	wcfg.StartupMaxEntries = cfg.Watch.StartupMaxEntries
 	if ms := cfg.Watch.DebounceMs; ms > 0 {
 		wcfg.Debounce = time.Duration(ms) * time.Millisecond
 	}
@@ -115,7 +116,7 @@ func newDiffState(cfg config.Config) DiffState {
 			wcfg.Ignore = append(wcfg.Ignore, rel)
 		}
 	}
-	w, err := watch.New(root, wcfg)
+	w, err := watch.NewAsync(root, wcfg)
 	if err != nil {
 		st.WatchErr = err.Error()
 		return st
@@ -402,6 +403,12 @@ func (m *Model) diffCoverage(w int) []string {
 	}
 	s := m.Diff.Watcher.Stats()
 	rows := Wrap(fmt.Sprintf("Startup %d files/%d bytes · partial %d · omitted %d · skipped %d · dropped %d · watch errors %d", s.Files, s.Bytes, s.Partial, s.Omitted, s.Skipped, s.Dropped, s.Errors), w)
+	if s.Initializing {
+		rows = append(Wrap("Scanning workspace in background · change coverage is incomplete", w), rows...)
+	}
+	if s.Limited {
+		rows = append(rows, Wrap("Workspace scan limit reached · unvisited subdirectories are not watched; open a narrower project directory or increase watch.startup_max_entries", w)...)
+	}
 	if s.Error != "" {
 		rows = append(rows, Wrap("error: "+strings.ReplaceAll(s.Error, "\n", " "), w)...)
 	}

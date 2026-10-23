@@ -40,6 +40,7 @@ func settingFields() []SettingField {
 		{"decision", "disabled", "decision model disabled (readiness/risky ask you)", "bool"},
 		{"decision", "server", "decision server URL", "text"},
 		{"decision", "runtime", "decision runtime", "runtime"},
+		{"decision", "protocol", "decision protocol (empty or system_one for Ollama D1)", "text"},
 		{"decision", "path", "decision assets path (optional)", "text"},
 		{"decision", "revision", "decision revision (optional)", "text"},
 		{"decision", "trust_remote_code", "trust decision remote code", "bool"},
@@ -113,6 +114,8 @@ func (m *Model) settingValue(f SettingField) string {
 		return c.Decision.Server
 	case "decision/runtime":
 		return c.Decision.Runtime
+	case "decision/protocol":
+		return c.Decision.Protocol
 	case "decision/path":
 		return c.Decision.Path
 	case "decision/revision":
@@ -242,6 +245,11 @@ func (m *Model) applyField(f SettingField, val string) {
 		next.Decision.Server = strings.TrimSpace(val)
 	case "decision/runtime":
 		next.Decision.Runtime = val
+		if val != "ollama" {
+			next.Decision.Protocol = ""
+		}
+	case "decision/protocol":
+		next.Decision.Protocol = val
 	case "decision/path":
 		next.Decision.Path = strings.TrimSpace(val)
 	case "decision/revision":

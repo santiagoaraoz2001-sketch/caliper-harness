@@ -437,6 +437,7 @@ type WorkflowsConfig struct {
 }
 
 type DecisionConfig struct {
+	Protocol        string `yaml:"protocol,omitempty"` // system_one selects Ollama's typed decision endpoint; empty keeps the runtime default
 	Disabled        bool   `yaml:"disabled,omitempty"` // retain selection while disabling decision inference and automatic service startup
 	Runtime         string `yaml:"runtime"`            // laya or native system_one, never inferred from the checkpoint name
 	Path            string `yaml:"path,omitempty"`     // optional downloaded local assets bound to Model
@@ -514,7 +515,7 @@ func Defaults() Config {
 		Subagents: SubagentsConfig{Mode: SubagentsConcurrent, MaxSubagents: 0, ContextWindow: 0, MaxResultChars: 2000},
 		Workflows: WorkflowsConfig{MaxRetries: 2, RetryDelaySeconds: 0, VerifyFollowup: true},
 		Decision:  DecisionConfig{Runtime: "laya", Server: "http://127.0.0.1:8090", Model: "typed-decisions", Device: "auto", TimeoutSeconds: 30, MaxInputTokens: 15999, RiskThreshold: 0.7, CoherenceMaxChars: 0, JudgmentContextChars: 500, ConfidenceBuckets: []float64{0.5, 0.7, 0.9}},
-		Watch:     WatchConfig{Enabled: true, MaxFileBytes: 131072, StartupMaxBytes: 8388608, StartupMaxFiles: 512, DebounceMs: 200, MaxEvents: 100, DiffLines: 6, FileLines: 200, AttrWindowS: 30},
+		Watch:     WatchConfig{Enabled: true, MaxFileBytes: 131072, StartupMaxBytes: 8388608, StartupMaxFiles: 512, StartupMaxEntries: 4096, DebounceMs: 200, MaxEvents: 100, DiffLines: 6, FileLines: 200, AttrWindowS: 30},
 		Tabs:      TabsConfig{TitleEvery: 5, TitleTimeoutSeconds: 20},
 	}
 }
@@ -522,16 +523,17 @@ func Defaults() Config {
 // WatchConfig tunes the diff-view file watcher. Ignore prefixes add
 // to the built-ins (.git, data); harness state paths join them too.
 type WatchConfig struct {
-	MaxFileBytes    int      `yaml:"max_file_bytes"`
-	StartupMaxBytes int      `yaml:"startup_max_bytes"`
-	StartupMaxFiles int      `yaml:"startup_max_files"`
-	Enabled         bool     `yaml:"enabled"`
-	DebounceMs      int      `yaml:"debounce_ms"`
-	MaxEvents       int      `yaml:"max_events"`
-	DiffLines       int      `yaml:"diff_lines"`
-	FileLines       int      `yaml:"file_lines"`
-	AttrWindowS     int      `yaml:"attribute_window_s"`
-	Ignore          []string `yaml:"ignore,omitempty"`
+	MaxFileBytes      int      `yaml:"max_file_bytes"`
+	StartupMaxBytes   int      `yaml:"startup_max_bytes"`
+	StartupMaxFiles   int      `yaml:"startup_max_files"`
+	StartupMaxEntries int      `yaml:"startup_max_entries"` // bounds discovery, including directories and ignored entries
+	Enabled           bool     `yaml:"enabled"`
+	DebounceMs        int      `yaml:"debounce_ms"`
+	MaxEvents         int      `yaml:"max_events"`
+	DiffLines         int      `yaml:"diff_lines"`
+	FileLines         int      `yaml:"file_lines"`
+	AttrWindowS       int      `yaml:"attribute_window_s"`
+	Ignore            []string `yaml:"ignore,omitempty"`
 }
 
 // MarshalYAML keeps omitted defaults portable for Save and config output.
@@ -653,7 +655,7 @@ func (c Config) Validate() error {
 		}
 	}
 
-	for name, v := range map[string]int{"watch.max_file_bytes": c.Watch.MaxFileBytes, "watch.startup_max_bytes": c.Watch.StartupMaxBytes, "watch.startup_max_files": c.Watch.StartupMaxFiles} {
+	for name, v := range map[string]int{"watch.max_file_bytes": c.Watch.MaxFileBytes, "watch.startup_max_bytes": c.Watch.StartupMaxBytes, "watch.startup_max_files": c.Watch.StartupMaxFiles, "watch.startup_max_entries": c.Watch.StartupMaxEntries} {
 		if v <= 0 {
 			return fmt.Errorf("%s must be positive, got %d", name, v)
 		}
@@ -857,6 +859,12 @@ func (c Config) Validate() error {
 	}
 	if c.Decision.Runtime != "" && c.Decision.Runtime != "laya" && c.Decision.Runtime != "system_one" && c.Decision.Runtime != "openai" && c.Decision.Runtime != "mlx" && c.Decision.Runtime != "ollama" && c.Decision.Runtime != "rulith" {
 		return fmt.Errorf("decision.runtime must be laya, system_one, openai, mlx, ollama, or rulith, got %q", c.Decision.Runtime)
+	}
+	if c.Decision.Protocol != "" && (c.Decision.Protocol != "system_one" || c.Decision.Runtime != "ollama") {
+		return fmt.Errorf("decision.protocol must be empty, or system_one with decision.runtime: ollama")
+	}
+	if c.Decision.Protocol == "system_one" && (c.Decision.Device != "auto" || c.Decision.Path != "" || c.Decision.Revision != "" || c.Decision.TrustRemoteCode) {
+		return fmt.Errorf("Ollama owns decision assets and device; use device: auto without path, revision, or trust_remote_code")
 	}
 	if u, err := url.ParseRequestURI(c.Decision.Server); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return fmt.Errorf("decision.server must be an http(s) URL")

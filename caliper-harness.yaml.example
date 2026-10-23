@@ -114,6 +114,9 @@ workflows:
   verify_followup: true    # queue a review run per done task after completion
 
 decision:
+  # For Ollama D1: runtime: ollama, protocol: system_one, model: d1:3b,
+  # server: http://127.0.0.1:11434, device: auto (no path/revision/trust).
+  protocol: ""
   disabled: false         # true: human readiness/Risky approvals; no automatic judge advice
   runtime: laya            # laya/system_one native decision sidecar only
   trust_remote_code: false # explicit opt-in for checkpoint code
@@ -133,6 +136,7 @@ watch:
   max_file_bytes: 131072    # bytes per content capture, before allocation
   startup_max_bytes: 8388608 # total initial captured bytes (8 MiB)
   startup_max_files: 512    # eligible initial attempts, including empty/read failures
+  startup_max_entries: 4096 # background discovery limit (files and directories); incomplete coverage is disclosed
   enabled: true             # diff-view file watcher (cwd, recursive)
   debounce_ms: 200          # coalesce bursts per path
   max_events: 100           # ring size; oldest drop first

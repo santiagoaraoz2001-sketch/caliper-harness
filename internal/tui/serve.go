@@ -704,7 +704,7 @@ func (m *Model) serveUseJudge() {
 		}
 		m.Settings.DecisionDraft = &next.Decision
 		m.Settings.DecisionSeq++
-		m.Settings.DecisionNotice = "Chat judge staged; decision-trained models recommended; confidence is self-reported · a applies · Settings s saves"
+		m.Settings.DecisionNotice = externalDecisionNotice(next.Decision) + " · a applies · Settings s saves"
 		m.alert("info", m.Settings.DecisionNotice)
 		return
 	}
@@ -1103,7 +1103,7 @@ func (m *Model) commitExternalDecision() {
 		return
 	}
 	if !decision.NativeRuntime(m.Cfg.Decision.Runtime) {
-		m.Settings.DecisionNotice = "Chat judge selected for next request; server controls residency; confidence is self-reported"
+		m.Settings.DecisionNotice = externalDecisionNotice(m.Cfg.Decision)
 	} else {
 		for _, r := range m.Serve.Rows {
 			h := r.Health.Decision
@@ -1155,7 +1155,7 @@ func (m *Model) applyDecisionSelection() tea.Cmd {
 		m.Cfg.Decision = *m.Settings.DecisionDraft
 		m.Settings.DecisionDraft = nil
 		m.syncDerived()
-		m.Settings.DecisionNotice = "Chat judge selected; load/unload through its model row · confidence is self-reported · inference unchecked"
+		m.Settings.DecisionNotice = externalDecisionNotice(m.Cfg.Decision)
 		m.alert("info", m.Settings.DecisionNotice)
 		return nil
 	}
@@ -1439,7 +1439,7 @@ func (m Model) serveContent(w int) ([]string, int) {
 	selected := 0
 	lines = append(lines, Title.Render("Models & Servers"))
 	if !decision.NativeRuntime(m.Cfg.Decision.Runtime) {
-		for _, line := range Wrap("Judge: "+m.Cfg.Decision.Model+" · "+m.Cfg.Decision.Runtime+" · self-reported confidence; native input-token cap unconfirmed; server context admission", inner) {
+		for _, line := range Wrap("Judge: "+m.Cfg.Decision.Model+" · "+externalDecisionNotice(m.Cfg.Decision), inner) {
 			lines = append(lines, Guidance.Render(line))
 		}
 	}
@@ -1641,4 +1641,11 @@ func (m Model) renderServe(w, vh int) string {
 	}
 	body = append(body, hints...)
 	return Box(fmt.Sprintf("Models & Servers · %d-%d/%d", start+1, end, len(lines)), strings.Join(body, "\n"), w)
+}
+
+func externalDecisionNotice(cfg config.DecisionConfig) string {
+	if cfg.Runtime == "ollama" && cfg.Protocol == "system_one" {
+		return "Ollama System One judge selected; native option probabilities; server controls residency and context admission · inference unchecked"
+	}
+	return "Chat judge selected; server controls residency and context admission; confidence is self-reported · inference unchecked"
 }

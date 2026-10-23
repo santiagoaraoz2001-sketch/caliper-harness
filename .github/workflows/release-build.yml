@@ -5,7 +5,7 @@ on:
       version:
         description: Immutable release version
         required: true
-        default: '0.2.0'
+        default: '0.2.1'
       platform:
         description: Platform to build and validate
         type: choice
@@ -17,8 +17,13 @@ on:
           - linux-amd64
           - darwin-arm64
           - linux-arm64
+      upload_to_draft:
+        description: Upload validated assets to an existing draft targeting this exact commit
+        type: boolean
+        required: false
+        default: false
 permissions:
-  contents: read
+  contents: write
 jobs:
   native:
     strategy:
@@ -76,7 +81,7 @@ jobs:
           $previousEnv = @{}
           foreach ($key in $testEnv.Keys) { $previousEnv[$key] = [Environment]::GetEnvironmentVariable($key, 'Process'); [Environment]::SetEnvironmentVariable($key, $testEnv[$key], 'Process') }
           try {
-            go test -count=1 ./internal/update ./internal/bundle ./internal/config ./internal/session ./internal/tools/ask ./internal/tools/bash ./internal/store ./cmd/specific-harness ./internal/tui
+            go test -count=1 ./internal/watch ./internal/decision ./internal/update ./internal/bundle ./internal/config ./internal/session ./internal/tools/ask ./internal/tools/bash ./internal/store ./cmd/specific-harness ./internal/tui
             if ($LASTEXITCODE -ne 0) { throw 'native tests failed' }
             go test -count=1 -timeout 240s -run 'Test(RecallLocators|RecallMetadata|QueryProjectRecallLocators|ExistingPath|AmbiguousCopiedPath|CopiedPath|StreamActivity|ProjectStyleSnapshot|OldCatalogProjectStyleFallback|ProgressWireHasOneCurrentCheckpoint|GuidedCoverage|PlanCoverage|ProgressOwner|ReviewCapturedConclusion|ReviewConclusion|CancelledCapturedLagunaReasoningRetainsResumeWithoutRetry|PartialFailureRetainsAliasesAndArgumentDraftWithoutRetry|OutputLimitContinuationsRetainPrefixAndExecuteOnce|SupervisionNativeContinuationPreservesPrefixAndSilence|SupervisionBookkeepingRunnerDoesNotPublishSilentVerdict|OutputLimitPromptMeasurementWithoutContinuationPrefix|ThinkingLoopRunnerArchiveAndSummary)' ./internal/memory ./internal/tools/search ./internal/tools/files ./internal/llm ./internal/run ./internal/agent ./internal/plan ./internal/launch
             if ($LASTEXITCODE -ne 0) { throw 'native notebook/style/path/activity/PAT/review tests failed' }
@@ -116,7 +121,7 @@ jobs:
           export GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local
           GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go mod download
           mkdir -p "$RUNNER_TEMP/go-test-home"
-          HOME="$RUNNER_TEMP/go-test-home" USERPROFILE="$RUNNER_TEMP/go-test-home" APPDATA="$RUNNER_TEMP/go-test-home/AppData/Roaming" LOCALAPPDATA="$RUNNER_TEMP/go-test-home/AppData/Local" XDG_CONFIG_HOME="$RUNNER_TEMP/go-test-home/config" XDG_DATA_HOME="$RUNNER_TEMP/go-test-home/data" GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go test -count=1 ./internal/update ./internal/bundle ./internal/config ./internal/session ./internal/tools/ask ./internal/tools/bash ./internal/store ./cmd/specific-harness ./internal/tui
+          HOME="$RUNNER_TEMP/go-test-home" USERPROFILE="$RUNNER_TEMP/go-test-home" APPDATA="$RUNNER_TEMP/go-test-home/AppData/Roaming" LOCALAPPDATA="$RUNNER_TEMP/go-test-home/AppData/Local" XDG_CONFIG_HOME="$RUNNER_TEMP/go-test-home/config" XDG_DATA_HOME="$RUNNER_TEMP/go-test-home/data" GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go test -count=1 ./internal/watch ./internal/decision ./internal/update ./internal/bundle ./internal/config ./internal/session ./internal/tools/ask ./internal/tools/bash ./internal/store ./cmd/specific-harness ./internal/tui
           HOME="$RUNNER_TEMP/go-test-home" USERPROFILE="$RUNNER_TEMP/go-test-home" APPDATA="$RUNNER_TEMP/go-test-home/AppData/Roaming" LOCALAPPDATA="$RUNNER_TEMP/go-test-home/AppData/Local" XDG_CONFIG_HOME="$RUNNER_TEMP/go-test-home/config" XDG_DATA_HOME="$RUNNER_TEMP/go-test-home/data" GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go test -count=1 -timeout 240s -run 'Test(RecallLocators|RecallMetadata|QueryProjectRecallLocators|ExistingPath|AmbiguousCopiedPath|CopiedPath|StreamActivity|ProjectStyleSnapshot|OldCatalogProjectStyleFallback|ProgressWireHasOneCurrentCheckpoint|GuidedCoverage|PlanCoverage|ProgressOwner|ReviewCapturedConclusion|ReviewConclusion|CancelledCapturedLagunaReasoningRetainsResumeWithoutRetry|PartialFailureRetainsAliasesAndArgumentDraftWithoutRetry|OutputLimitContinuationsRetainPrefixAndExecuteOnce|SupervisionNativeContinuationPreservesPrefixAndSilence|SupervisionBookkeepingRunnerDoesNotPublishSilentVerdict|OutputLimitPromptMeasurementWithoutContinuationPrefix|ThinkingLoopRunnerArchiveAndSummary)' ./internal/memory ./internal/tools/search ./internal/tools/files ./internal/llm ./internal/run ./internal/agent ./internal/plan ./internal/launch
           bash scripts/bundle-linux.sh "$RUNNER_TEMP/Caliper"
           LD_LIBRARY_PATH="$RUNNER_TEMP/Caliper/lib" "$RUNNER_TEMP/Caliper/caliper-harness" version
@@ -138,7 +143,7 @@ jobs:
           export GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local
           GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go mod download
           mkdir -p "$RUNNER_TEMP/go-test-home"
-          HOME="$RUNNER_TEMP/go-test-home" USERPROFILE="$RUNNER_TEMP/go-test-home" APPDATA="$RUNNER_TEMP/go-test-home/AppData/Roaming" LOCALAPPDATA="$RUNNER_TEMP/go-test-home/AppData/Local" XDG_CONFIG_HOME="$RUNNER_TEMP/go-test-home/config" XDG_DATA_HOME="$RUNNER_TEMP/go-test-home/data" GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go test -count=1 ./internal/update ./internal/bundle ./internal/config ./internal/session ./internal/tools/ask ./internal/tools/bash ./internal/store ./cmd/specific-harness ./internal/tui
+          HOME="$RUNNER_TEMP/go-test-home" USERPROFILE="$RUNNER_TEMP/go-test-home" APPDATA="$RUNNER_TEMP/go-test-home/AppData/Roaming" LOCALAPPDATA="$RUNNER_TEMP/go-test-home/AppData/Local" XDG_CONFIG_HOME="$RUNNER_TEMP/go-test-home/config" XDG_DATA_HOME="$RUNNER_TEMP/go-test-home/data" GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go test -count=1 ./internal/watch ./internal/decision ./internal/update ./internal/bundle ./internal/config ./internal/session ./internal/tools/ask ./internal/tools/bash ./internal/store ./cmd/specific-harness ./internal/tui
           HOME="$RUNNER_TEMP/go-test-home" USERPROFILE="$RUNNER_TEMP/go-test-home" APPDATA="$RUNNER_TEMP/go-test-home/AppData/Roaming" LOCALAPPDATA="$RUNNER_TEMP/go-test-home/AppData/Local" XDG_CONFIG_HOME="$RUNNER_TEMP/go-test-home/config" XDG_DATA_HOME="$RUNNER_TEMP/go-test-home/data" GOPATH=/tmp/go-path GOCACHE=/tmp/go-build-cache GOTOOLCHAIN=local go test -count=1 -timeout 240s -run 'Test(RecallLocators|RecallMetadata|QueryProjectRecallLocators|ExistingPath|AmbiguousCopiedPath|CopiedPath|StreamActivity|ProjectStyleSnapshot|OldCatalogProjectStyleFallback|ProgressWireHasOneCurrentCheckpoint|GuidedCoverage|PlanCoverage|ProgressOwner|ReviewCapturedConclusion|ReviewConclusion|CancelledCapturedLagunaReasoningRetainsResumeWithoutRetry|PartialFailureRetainsAliasesAndArgumentDraftWithoutRetry|OutputLimitContinuationsRetainPrefixAndExecuteOnce|SupervisionNativeContinuationPreservesPrefixAndSilence|SupervisionBookkeepingRunnerDoesNotPublishSilentVerdict|OutputLimitPromptMeasurementWithoutContinuationPrefix|ThinkingLoopRunnerArchiveAndSummary)' ./internal/memory ./internal/tools/search ./internal/tools/files ./internal/llm ./internal/run ./internal/agent ./internal/plan ./internal/launch
           bash scripts/bundle-macos.sh "$RUNNER_TEMP/Caliper"
           "$RUNNER_TEMP/Caliper/caliper-harness" version
@@ -153,6 +158,24 @@ jobs:
           name: caliper-${{ inputs.version }}-${{ matrix.platform }}
           path: dist/*
           if-no-files-found: error
+      - name: Stage validated assets in the requested draft
+        if: inputs.upload_to_draft
+        shell: python
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          import json, os, pathlib, re, subprocess
+          version = os.environ['RELEASE_VERSION']
+          if not re.fullmatch(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)', version):
+              raise SystemExit('Expected a stable release version')
+          tag = 'v' + version
+          release = json.loads(subprocess.check_output(['gh', 'release', 'view', tag, '--json', 'isDraft,targetCommitish']))
+          if not release['isDraft'] or release['targetCommitish'] != os.environ['GITHUB_SHA']:
+              raise SystemExit('Draft must target the exact build commit')
+          assets = sorted(str(p) for p in pathlib.Path('dist').iterdir() if p.is_file())
+          if not assets:
+              raise SystemExit('No validated release assets')
+          subprocess.run(['gh', 'release', 'upload', tag, *assets], check=True)
       - name: Upload native UI evidence
         if: always()
         uses: actions/upload-artifact@v4

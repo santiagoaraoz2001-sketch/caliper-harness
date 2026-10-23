@@ -14,6 +14,7 @@ import (
 
 // Selection names downloaded assets and an explicit native typed-choice runtime.
 type Selection struct {
+	Protocol        string  `json:"protocol,omitempty"`
 	Model           string  `json:"model"`
 	Runtime         string  `json:"runtime"`
 	Device          string  `json:"device"`
@@ -23,7 +24,7 @@ type Selection struct {
 }
 
 func SelectionFor(c config.DecisionConfig) Selection {
-	s := Selection{Model: c.Model, Runtime: c.Runtime, Device: c.Device, TrustRemoteCode: c.TrustRemoteCode}
+	s := Selection{Model: c.Model, Runtime: c.Runtime, Device: c.Device, TrustRemoteCode: c.TrustRemoteCode, Protocol: c.Protocol}
 	if s.Runtime == "" {
 		s.Runtime = "laya"
 	}
@@ -39,7 +40,7 @@ func SelectionFor(c config.DecisionConfig) Selection {
 }
 func sameString(a, b *string) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }
 func (s Selection) sameAssets(a Selection) bool {
-	return s.Model == a.Model && s.Runtime == a.Runtime && sameString(s.Path, a.Path) && sameString(s.Revision, a.Revision) && s.TrustRemoteCode == a.TrustRemoteCode
+	return s.Model == a.Model && s.Runtime == a.Runtime && s.Protocol == a.Protocol && sameString(s.Path, a.Path) && sameString(s.Revision, a.Revision) && s.TrustRemoteCode == a.TrustRemoteCode
 }
 
 // Identity distinguishes the admitted selection from resolved assets and device.

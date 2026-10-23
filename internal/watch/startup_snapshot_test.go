@@ -1,11 +1,14 @@
 package watch
 
 import (
+	"errors"
 	"github.com/fsnotify/fsnotify"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -176,7 +179,10 @@ func TestStartupRegularAdmissionAndKernelError(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
-		t.Fatal(err)
+		if runtime.GOOS != "windows" || !errors.Is(err, syscall.Errno(1314)) {
+			t.Fatal(err)
+		}
+		t.Log("Windows account cannot create symlinks; still exercising directory admission and kernel overflow")
 	}
 	w := start(t, root, testCfg())
 	if s := w.Stats(); s.Attempts != 1 || s.Files != 1 {

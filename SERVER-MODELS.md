@@ -31,3 +31,30 @@ Edit or Remove changes the saved connection, not the checkpoint files. Reusable 
 ## Status
 
 `/status` reports current conversation activity, reported generated tokens, recorded coding requests, tool calls, model identities and the latest observed connection state. Request throughput includes prefill and transport, and excludes time spent executing tools. Counts cover retained recorded coding runs; judge requests, title generation and manual compaction are excluded. Missing usage stays unknown or partial; resumed history without measurements is labelled accordingly. Use `/manage` for configuration and lifecycle actions.
+
+
+## Ollama D1 decision model
+
+Ollama D1 uses its native `/v1/systemone` choice endpoint. Select it explicitly;
+the empty protocol preserves existing chat judges. Pull `d1:3b` with Ollama,
+then configure the decision connection independently of the coding model:
+
+```yaml
+decision:
+  disabled: false
+  runtime: ollama
+  protocol: system_one
+  server: http://127.0.0.1:11434
+  model: d1:3b
+  device: auto
+  timeout_seconds: 180
+```
+
+Remove native-sidecar `path`, `revision`, and `trust_remote_code` overrides.
+Ollama owns loading and device placement. Caliper validates the selected model,
+choice, and normalized option probabilities; confidence is the chosen option's
+probability, not Ollama's concentration score. The complete request is capped
+at 64 KiB and any smaller caller byte budget. Token/context admission belongs
+to Ollama; `decision.max_input_tokens` is not enforced by this endpoint.
+Catalog availability does not prove successful inference or GPU residency.
+Rulith can continue serving the coding model on its separate endpoint.

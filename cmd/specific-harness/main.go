@@ -37,7 +37,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-const version = "0.2.0"
+const version = "0.2.1"
 
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "install-activate" {
@@ -271,6 +271,11 @@ func runTUI(args cliArgs) {
 	cleanup := m
 	if state, ok := final.(tui.Model); ok {
 		cleanup = state
+	}
+	if cleanup.Diff.Watcher != nil {
+		if err := cleanup.Diff.Watcher.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: close workspace watcher: %v\n", err)
+		}
 	}
 	if err := cleanup.CloseOwnedServing(); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
