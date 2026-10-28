@@ -102,7 +102,7 @@ func TestValidateGapsAskOneTargetedQuestion(t *testing.T) {
 					t.Errorf("repair %q missing %q", repair, w)
 				}
 			}
-			if !strings.Contains(repair, "Call bash with these argument fields directly") {
+			if !strings.Contains(repair, "Arguments for bash (direct fields, not nested in name/arguments)") {
 				t.Errorf("repair must show the current native call: %q", repair)
 			}
 		})

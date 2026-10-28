@@ -175,7 +175,19 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 	case "task_drafted":
 		invoke("NEXT")
 	case "ready":
-		invoke("EXECUTE")
+		if st.Plan.State != plan.PlanActive {
+			readyCatalog := pc
+			if !pc.Has("planning.ready_inactive") {
+				readyCatalog = prompts.Builtin()
+			}
+			def.Purpose = readyCatalog.Text("planning.ready_inactive")
+			if readyCatalog != pc {
+				def.Purpose += "\nCustom prompt catalog predates inactive-parent guidance; using shipped guidance for this state."
+			}
+			invoke("STATUS")
+		} else {
+			invoke("EXECUTE")
+		}
 	case "validated":
 		invoke("NEXT_ARTICLE", "TASK")
 		for _, n := range []string{"title", "objective"} {
@@ -334,7 +346,7 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 			}
 			return navigation(focus("task", get("task")))
 		}
-		if st.Phase == "settled" || st.Phase == "stopped" && get("invoke") == "STATUS" || st.Phase == "running" {
+		if st.Phase == "settled" || (st.Phase == "stopped" || st.Phase == "ready") && get("invoke") == "STATUS" || st.Phase == "running" {
 			return navigation(focus(st.Scope.Kind, st.Scope.ID))
 		}
 		if st.Phase == "ready" {

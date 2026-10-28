@@ -58,7 +58,7 @@ func TestEmittedPlanningRoleMatchesActualAssignmentRoutes(t *testing.T) {
 					if names["task_start"] != (mode == "advanced") || names["ready_task"] != (mode == "advanced") || names["write"] || names["edit"] || names["bash"] || names["check"] || !names["read"] || !names["find_file"] || !names["graphql"] {
 						t.Errorf("actual selected tool route changed: %s %v", mode, names)
 					}
-					if mode == "guided" && (!names["plan"] || !strings.Contains(system, "Answer the latest host-published plan question") || !strings.Contains(system, "Draft all Task briefs for this Approach") || strings.Contains(system, `plan(invoke="EXECUTE")`)) {
+					if mode == "guided" && (!names["plan"] || !strings.Contains(system, "For remaining authorized work, answer the latest host-published plan question") || !strings.Contains(system, "Draft all Task briefs for this Approach") || strings.Contains(system, `plan(invoke="EXECUTE")`)) {
 						t.Errorf("guided planning lost current-question focus or Approach drafting before claim: %v %s", names, system)
 					}
 				}

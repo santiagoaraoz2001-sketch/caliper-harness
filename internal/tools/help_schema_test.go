@@ -41,8 +41,8 @@ func nativeHelpTemplate(t *testing.T, text string) struct {
 		t.Fatal(err)
 	}
 	for _, line := range strings.Split(text, "\n") {
-		if strings.HasPrefix(line, "Call ") && strings.Contains(line, " with these argument fields directly") {
-			call.Name = strings.Fields(line)[1]
+		if strings.HasPrefix(line, "Arguments for ") && strings.Contains(line, " (direct fields, not nested in name/arguments)") {
+			call.Name = strings.Fields(line)[2]
 			break
 		}
 	}

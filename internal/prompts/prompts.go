@@ -153,7 +153,7 @@ func decode(raw []byte, source string, expected *Catalog) (*Catalog, error) {
 			if _, ok := d.Texts[key]; !ok {
 				// These later additions preserve older customized catalogs.
 				// Their owners explicitly disclose a missing guide or fallback.
-				if key == "setup.assisted" || key == "continuation.project_style" || key == "planning.answer.coverage" {
+				if key == "setup.assisted" || key == "continuation.project_style" || key == "planning.answer.coverage" || key == "planning.ready_inactive" {
 					continue
 				}
 				return nil, fmt.Errorf("prompt catalog %s missing key %s", source, key)
