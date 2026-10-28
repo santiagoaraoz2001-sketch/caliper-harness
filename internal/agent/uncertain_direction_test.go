@@ -16,7 +16,7 @@ import (
 // Recorded verdict confidences replayed at the actual Runner boundary; no inference.
 func TestDiscoveryUncertainDirectionRecordedVerdicts(t *testing.T) {
 	confidences := []float64{.404, .499, .5, .5892429224515646, .589449226521897, .674686344896878, .7508494126999069}
-	for _, option := range []string{discoveryActOption, discoveryContinueOption} {
+	for _, option := range []string{discoveryActOption, discoveryReconsiderOption, discoveryContinueOption} {
 		for _, confidence := range confidences {
 			t.Run(fmt.Sprintf("%s/%.15f", option, confidence), func(t *testing.T) {
 				m := &discoveryModel{}
@@ -35,7 +35,10 @@ func TestDiscoveryUncertainDirectionRecordedVerdicts(t *testing.T) {
 				}
 				key, resolution := "continuation.discovery.continue", "continued-work"
 				if option == discoveryActOption {
-					key, resolution = "continuation.discovery.act", "repair-rejected-call"
+					key, resolution = "continuation.discovery.act", "unsupported-repair"
+				}
+				if option == discoveryReconsiderOption {
+					key, resolution = "continuation.discovery.reconsider", "reconsider-approach"
 				}
 				if confidence < .5 {
 					resolution = "failed-confidence"
@@ -58,7 +61,7 @@ func TestDiscoveryUncertainDirectionRecordedVerdicts(t *testing.T) {
 						t.Fatal("advice executed a tool or claimed authority", sink.texts[i])
 					}
 				}
-				wantNudge := option == discoveryActOption && confidence >= .5
+				wantNudge := option == discoveryReconsiderOption && confidence >= .5
 				if judgments != 1 || (guidance != "") != wantNudge || wantNudge && !strings.Contains(guidance, direction) {
 					t.Fatalf("chosen direction ignored advisory floor/Continue silence: %q", guidance)
 				}

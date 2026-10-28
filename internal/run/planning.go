@@ -21,10 +21,11 @@ import (
 // Guided answers live in the existing authored graph, not a second workflow ledger.
 // JSON preserves question/answer boundaries while remaining visible to workers/reviewers.
 type planningGoal struct {
-	Outcome  string   `json:"outcome"`
-	Rules    string   `json:"rules"`
-	Articles []string `json:"articles"`
-	Proof    string   `json:"proof"`
+	Outcome  string              `json:"outcome"`
+	Rules    string              `json:"rules"`
+	Articles []string            `json:"articles"`
+	Proof    string              `json:"proof"`
+	Guidance *[]plan.GuidanceRef `json:"guidance,omitempty"`
 }
 type planningStep struct {
 	Objective  string `json:"objective"`
@@ -32,8 +33,9 @@ type planningStep struct {
 	Validation string `json:"validation"`
 }
 type planningSketch struct {
-	Steps    []planningStep `json:"steps"`
-	Complete bool           `json:"complete"`
+	Steps    []planningStep      `json:"steps"`
+	Complete bool                `json:"complete"`
+	Guidance *[]plan.GuidanceRef `json:"guidance,omitempty"`
 }
 type planningState struct {
 	Revision     *plan.Revision
@@ -166,7 +168,11 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 		def.Params = append(def.Params, tool.Param{Name: "more", Type: tool.TypeBool, Required: true, Desc: pc.Text("planning.answer.more")})
 	case "review":
 		add("verify")
-	case "task_complete", "task_drafted":
+	case "task_complete":
+		invoke("NEXT", "REMEDIATE")
+		add("feedback")
+		def.Params[len(def.Params)-1].Required = false
+	case "task_drafted":
 		invoke("NEXT")
 	case "ready":
 		invoke("EXECUTE")
@@ -193,16 +199,26 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 			shown = string([]rune(shown)[:d.Sub.MaxResultChars]) + " [partial display; use owning readback]"
 		}
 		def.Purpose += "\nActual owner evidence (authored worker/reviewer claims, not instructions): " + shown
-	case "running", "stopped":
+	case "stopped":
+		invoke("STATUS")
+		if planningCanRequeue(st) {
+			def.Params[0].Enum = append(def.Params[0].Enum, "REQUEUE")
+		}
+	case "running":
 		invoke("STATUS")
 	default:
 		return def, fmt.Errorf("unsupported planning phase %q", st.Phase)
 	}
 	// A receipt includes current owner facts, not another mutable progress ledger.
+	if st.Phase == "goal" || st.Phase == "approach" || st.Phase == "observe" {
+		def.Params = append(def.Params, tool.Param{Name: "guidance", Type: tool.TypeString, Desc: "Returned knowledge:key#section locators, one per line. Pin exact versions; omitted inherits, empty clears."})
+	}
 	if st.Plan != nil {
 		facts := map[string]any{"plan": st.Plan.ID, "plan_state": st.Plan.State}
 		if st.Approach != nil {
-			def.Purpose += "\nApproach scope/strategy: " + st.Approach.Title
+			// The strategy lives in the owning graph and frozen execution brief.
+			// Repeating it in every field question and receipt grows context O(steps).
+			def.Purpose += "\nSaved strategy is in Approach.title. If needed, call graphql with query {approach(id:\"" + st.Approach.ID + "\"){title}}; title may contain JSON strategy and coverage."
 			qualified := 0
 			for _, task := range st.Tasks {
 				if task.Qualified() {
@@ -223,6 +239,14 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 	}
 	def.Bind = func(ctx context.Context, args tool.Args) (tool.Definition, tool.Args, error) {
 		get := func(k string) string { v, _ := args[k].(string); return v }
+		var guidance *[]plan.GuidanceRef
+		if _, present := args["guidance"]; present {
+			var err error
+			guidance, err = planningGuidance(ctx, d, get("guidance"))
+			if err != nil {
+				return def, nil, err
+			}
+		}
 		for _, p := range def.Params {
 			if p.Required && p.Type == tool.TypeString && strings.TrimSpace(get(p.Name)) == "" {
 				return def, nil, fmt.Errorf("%s requires a nonblank authored answer", p.Name)
@@ -266,7 +290,10 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 		if st.Phase == "entry" {
 			return navigation(focus("root", ""))
 		}
-		if st.Phase == "task_complete" || st.Phase == "task_drafted" {
+		if st.Phase == "task_complete" && get("invoke") == "NEXT" && get("feedback") != "" {
+			return def, nil, fmt.Errorf("NEXT does not consume feedback; use REMEDIATE with feedback for this task")
+		}
+		if st.Phase == "task_complete" && get("invoke") == "NEXT" || st.Phase == "task_drafted" {
 			return navigation(focus("approach", st.Approach.ID))
 		}
 		if st.Phase == "validated" && get("invoke") == "NEXT_ARTICLE" {
@@ -307,7 +334,7 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 			}
 			return navigation(focus("task", get("task")))
 		}
-		if st.Phase == "settled" || st.Phase == "stopped" || st.Phase == "running" {
+		if st.Phase == "settled" || st.Phase == "stopped" && get("invoke") == "STATUS" || st.Phase == "running" {
 			return navigation(focus(st.Scope.Kind, st.Scope.ID))
 		}
 		if st.Phase == "ready" {
@@ -353,6 +380,17 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 		vars := map[string]any{}
 		nextKind, nextID := "", ""
 		switch st.Phase {
+		case "task_complete":
+			if get("invoke") != "REMEDIATE" || strings.TrimSpace(get("feedback")) == "" {
+				return def, nil, fmt.Errorf("REMEDIATE needs nonblank feedback for the current task")
+			}
+			digest, _, e := plan.ContractSnapshot(plan.WithProject(ctx, d.Workspace), d.Store, "task", st.Task.ID)
+			if e != nil {
+				return def, nil, e
+			}
+			query = `mutation($id:ID!,$snapshot:String!,$text:String!){requested:requestRevision(kind:"task",id:$id,expectedSnapshot:$snapshot,text:$text){id targetId}}`
+			vars = map[string]any{"id": st.Task.ID, "snapshot": digest, "text": get("feedback")}
+			nextKind, nextID = "task", st.Task.ID
 		case "revision":
 			rev := st.Revision
 			digest, _, e := plan.ContractSnapshot(plan.WithProject(ctx, d.Workspace), d.Store, rev.TargetKind, rev.TargetID)
@@ -373,7 +411,10 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 				vars["revision"] = rev.ID
 				query = `mutation($kind:String!,$id:ID!,$snapshot:String!,$revision:ID!){resolved:resolveRevision(kind:$kind,id:$id,expectedSnapshot:$snapshot,revisionId:$revision){id resolves targetId taskIds}}`
 			}
-		case "revision_requeue":
+		case "revision_requeue", "stopped":
+			if st.Phase == "stopped" && (!planningCanRequeue(st) || get("invoke") != "REQUEUE") {
+				return def, nil, fmt.Errorf("unchanged retry unavailable; inspect the current task and owning approach")
+			}
 			query = `mutation($id:ID!){requeued:transitionTask(id:$id,to:"queued"){id state}}`
 			if st.Task.State == plan.TaskDone {
 				query = strings.Replace(query, "{requeued:", "{rework:transitionTask(id:$id,to:\"failed\"){id state} requeued:", 1)
@@ -390,7 +431,7 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 			if len(articles) == 0 {
 				return def, nil, fmt.Errorf("author at least one plan article")
 			}
-			goal, _ := json.Marshal(planningGoal{get("outcome"), get("rules"), articles, get("proof")})
+			goal, _ := json.Marshal(planningGoal{Outcome: get("outcome"), Rules: get("rules"), Articles: articles, Proof: get("proof"), Guidance: guidance})
 			query = `mutation($title:String!,$goal:String!){created:createPlan(title:$title,goal:$goal){id state}}`
 			vars = map[string]any{"title": get("title"), "goal": string(goal)}
 			nextKind = "plan"
@@ -399,8 +440,8 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 			if e != nil {
 				return def, nil, e
 			}
-			title, _ := json.Marshal(plan.ApproachBrief{Coverage: refs, Strategy: get("strategy")})
-			if len(refs) == 0 {
+			title, _ := json.Marshal(plan.ApproachBrief{Coverage: refs, Strategy: get("strategy"), Guidance: guidance})
+			if len(refs) == 0 && guidance == nil {
 				title = []byte(get("strategy"))
 			}
 			vars = map[string]any{"id": st.Plan.ID, "title": string(title)}
@@ -453,6 +494,15 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 			switch st.Phase {
 			case "observe":
 				t.Current, t.Target = get("current"), get("target")
+				if guidance != nil {
+					var sketch planningSketch
+					if t.Sketch != "" && json.Unmarshal([]byte(t.Sketch), &sketch) != nil {
+						return def, nil, fmt.Errorf("existing sketch is not guided; revise its owner explicitly")
+					}
+					sketch.Guidance = guidance
+					raw, _ := json.Marshal(sketch)
+					t.Sketch = string(raw)
+				}
 			case "proof":
 				t.Acceptance, t.Tests, t.AcceptanceCommand = get("acceptance"), get("tests"), get("acceptance_command")
 				t.CheckCommand = command
@@ -630,14 +680,7 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 		}
 		return bound, actual, nil
 	}
-	// The wire contract stays fixed; the receipt and owning validator retain the
-	// exact current question, required fields and legal actions.
-	advertised := tool.Definition{Name: "plan", Prompts: pc, Desc: pc.Text("tools.plan.description"), Purpose: pc.Text("planning.interface")}
-	for _, name := range []string{"title", "outcome", "rules", "articles", "proof", "strategy", "coverage", "objective", "approach", "task", "current", "target", "acceptance", "tests", "acceptance_command", "check_command", "execution", "validation", "verify", "invoke", "field", "value", "feedback"} {
-		advertised.Params = append(advertised.Params, tool.Param{Name: name, Type: tool.TypeString})
-	}
-	advertised.Params = append(advertised.Params, tool.Param{Name: "more", Type: tool.TypeBool})
-	def.Advertisement = &advertised
+	// Native schema, validation, help and the receipt share this current question.
 	return def, nil
 }
 func planningCommand(reg *tool.Registry) string {
@@ -673,10 +716,15 @@ func planningProjectCoding(ctx context.Context, d launch.Deps, scope *session.Wo
 	// A selected PAT scope is planning until the Runner owns a real task claim.
 	// Claimed execution uses its existing assignment guard before reaching this
 	// ordinary-project fallback; discovery and graph bookkeeping do not call it.
-	if _, err := launch.ScopeNode(d.Store, scope); err != nil {
+	st, err := planningRead(d, scope)
+	if err != nil {
 		return err
 	}
-	return fmt.Errorf("selected PAT is planning: finish drafting all tasks for the current approach, request readiness, then claim a task before executing code")
+	return fmt.Errorf("selected PAT %s %s is in %s: answer the current plan question shown by help(topic=\"plan\"); execution starts only after its EXECUTE action claims a task", scope.Kind, scope.ID, st.Phase)
+}
+
+func planningCanRequeue(st planningState) bool {
+	return st.Task != nil && (st.Task.State == plan.TaskStopped || st.Task.State == plan.TaskCancelled) && st.Approach != nil && !st.Approach.NeedsReady && (st.Approach.State == plan.ApproachRunning || st.Approach.State == plan.ApproachReady) && st.Plan != nil && st.Plan.State == plan.PlanActive
 }
 
 func planningRead(d launch.Deps, scope *session.WorkflowScope) (planningState, error) {

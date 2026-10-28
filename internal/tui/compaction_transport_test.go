@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -21,6 +23,7 @@ import (
 func transportCompactModel(t *testing.T, endpoint string) Model {
 	t.Helper()
 	cfg := testCfg()
+	cfg.Context.Keep = .01 // Summary tests deliberately exceed the retained verbatim budget.
 	dir := t.TempDir()
 	cfg.Store.Path, cfg.Sessions.Path = dir+"/kuzu", dir+"/sessions"
 	cfg.Decision.Model, cfg.Decision.Runtime, cfg.Decision.Device = "component", "laya", "cpu"
@@ -133,8 +136,13 @@ func TestManualCompactionPublicCommandCapacityTargetPublishAndContinuedRun(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertCompactionLifecycle(t, events, "applied")
 	compacts, snapshots, sourceFound := 0, 0, false
+	measured := 0
 	for _, event := range events {
+		if event.Kind == "model_request" {
+			measured++
+		}
 		if event.Kind == "compact" {
 			compacts++
 		}
@@ -145,6 +153,9 @@ func TestManualCompactionPublicCommandCapacityTargetPublishAndContinuedRun(t *te
 	}
 	if compacts != 1 || snapshots != 2 || !sourceFound || m.Chat.Compacting || m.Chat.Context.Compactions != 1 {
 		t.Fatalf("durable/raw/origin mismatch: compacts=%d snapshots=%d source=%t", compacts, snapshots, sourceFound)
+	}
+	if measured != 1 || m.Chat.Runtime.Attempts != 1 {
+		t.Fatalf("manual summary measurement duplicated/missing: persisted=%d runtime=%d", measured, m.Chat.Runtime.Attempts)
 	}
 	restored, _, err := session.Restore(events, m.St.CtxWindow)
 	if err != nil || !reflect.DeepEqual(restored.Entries, m.Chat.Context.Entries) {
@@ -208,6 +219,51 @@ func TestManualCompactionTransportBudget(t *testing.T) {
 				t.Fatal(done.runErr)
 			}
 		})
+	}
+}
+
+func TestManualCompactionReusesRejectedCandidateWithoutRepeatedRequest(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		calls++
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Checkpoint.\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":2}}\n\ndata: [DONE]\n\n")
+	}))
+	defer srv.Close()
+	m := transportCompactModel(t, srv.URL)
+	source, _ := m.Chat.Context.Encode()
+	compact := func() {
+		t.Helper()
+		cmd := m.submit("/compact")
+		if cmd == nil {
+			t.Fatal(m.Alerts)
+		}
+		done := cmd().(compactDoneMsg)
+		if done.runErr == nil {
+			t.Fatal("placeholder accepted")
+		}
+		if follow := m.onCompactDone(done); follow != nil {
+			t.Fatal("rejected candidate published")
+		}
+	}
+	compact()
+	compact()
+	after, _ := m.Chat.Context.Encode()
+	if calls != 1 || source != after || m.Chat.Runtime.Attempts != 1 {
+		t.Fatalf("same-source repeat regenerated or mutated: calls=%d attempts=%d", calls, m.Chat.Runtime.Attempts)
+	}
+	m.Chat.Context.Add("note", "user", "New exact user constraint", false)
+	compact()
+	if calls != 2 {
+		t.Fatalf("changed source failed to retry: %d", calls)
+	}
+	m.Cfg.Decision.RiskThreshold = .25
+	compact()
+	if calls != 3 {
+		t.Fatalf("changed judge settings failed to retry: %d", calls)
 	}
 }
 
@@ -401,6 +457,8 @@ func TestManualCompactionSelectedJudgeOriginalSession(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			want := map[string]string{"accept": "applied", "reject": "unchanged", "uncertain": "unchanged", "stale": "stale_origin", "cancel": "cancelled"}[disposition]
+			assertCompactionLifecycle(t, events, want)
 			raw, judgments, compacts, snapshots := "", 0, 0, 0
 			for _, e := range events {
 				switch e.Kind {
@@ -434,5 +492,72 @@ func TestManualCompactionSelectedJudgeOriginalSession(t *testing.T) {
 				t.Error("owned busy token leaked")
 			}
 		})
+	}
+}
+
+func assertCompactionLifecycle(t *testing.T, events []session.Event, want string) {
+	t.Helper()
+	started, finished, operation := 0, 0, ""
+	for i, e := range events {
+		if e.Kind != "compaction_started" && e.Kind != "compaction_finished" {
+			continue
+		}
+		var v map[string]string
+		if err := json.Unmarshal([]byte(e.Text), &v); err != nil {
+			t.Fatal(err)
+		}
+		if e.Kind == "compaction_started" {
+			started++
+			operation = v["operation_id"]
+			continue
+		}
+		finished++
+		if operation == "" || v["operation_id"] != operation || v["outcome"] != want || i != len(events)-1 {
+			t.Fatalf("wrong owner/outcome/order: %+v; want %s, event %d/%d", v, want, i, len(events))
+		}
+	}
+	if started != 1 || finished != 1 {
+		t.Fatalf("lifecycle start=%d finish=%d", started, finished)
+	}
+}
+
+func TestManualCompactionLifecycleRecordingAndStoreFailure(t *testing.T) {
+	m := transportCompactModel(t, "http://127.0.0.1:1") // No model request is reached.
+	original := m.Chat.Context.Clone()
+	blocked := filepath.Join(t.TempDir(), "not-directory")
+	if err := os.WriteFile(blocked, []byte("owned sentinel"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m.SessionsPath = blocked
+	if cmd := m.compactChat(); cmd != nil || m.Chat.Compacting || !reflect.DeepEqual(m.Chat.Context, original) {
+		t.Fatal("failed start receipt launched work or changed context")
+	}
+	m.SessionsPath = filepath.Join(t.TempDir(), "sessions")
+	m.StorePath = blocked
+	cmd := m.compactChat()
+	if cmd == nil {
+		t.Fatal(m.Alerts)
+	}
+	done := cmd().(compactDoneMsg)
+	if done.runErr == nil {
+		t.Fatal("expected store refusal")
+	}
+	m.onCompactDone(done)
+	events, err := session.Read(done.archiveDir, done.archiveSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCompactionLifecycle(t, events, "failed")
+	if !reflect.DeepEqual(m.Chat.Context, original) {
+		t.Fatal("failure changed original")
+	}
+	// A terminal recording failure must remain unknown to the observer and
+	// cannot apply the candidate in the originating UI.
+	m.Chat.Compacting = true
+	changed := original.Clone()
+	changed.Add("summary", "assistant", "different context", false)
+	m.onCompactDone(compactDoneMsg{operationID: "owned", archiveDir: blocked, archiveSession: "owner", origin: m.origin(), persisted: true, summary: "different context", continuation: changed})
+	if m.Chat.Compacting || !reflect.DeepEqual(m.Chat.Context, original) {
+		t.Fatal("failed end recording applied summary or retained busy owner")
 	}
 }

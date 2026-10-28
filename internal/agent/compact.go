@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"specific-harness/internal/prompts"
 	"strings"
+	"unicode"
 
 	"specific-harness/internal/decision"
 	"specific-harness/internal/llm"
@@ -180,20 +181,51 @@ func (r *Runner) Compact(ctx context.Context, c session.Continuation) (next sess
 	if b.Len() == 0 {
 		return c, "", false, nil
 	}
-	for _, e := range c.Entries {
+	answers := answerGroupEntries(c)
+	for i, e := range c.Entries {
 		if e.Message.Role == "system" {
 			continue
 		}
+		if answers[i] {
+			write(e, true)
+			continue
+		}
 		switch e.Kind {
-		case "intent", "task", "note", "failure", "evidence", "guidance":
+		case "intent", "task", "note", "answer", "failure", "evidence", "guidance":
 			write(e, true)
 		}
 	}
 	budget := summaryBudget(r.Compaction, r.MaxTokens, c.Compactions)
-	rendered, err := r.Prompts.Render("templates.compaction", map[string]any{"Words": wordsFor(budget, r.Compaction.WordsPerToken), "Range": ""})
+	scope := fmt.Sprintf("Replaceable history precedes retained entry %d of %d (zero-based). Later retained entries may be absent from this input.", ks, len(c.Entries))
+	rendered, err := r.Prompts.Render("templates.compaction", map[string]any{"Words": wordsFor(budget, r.Compaction.WordsPerToken), "Range": scope})
 	if err != nil {
 		return c, "", false, err
 	}
+	if !r.ManualDecisions {
+		if r.Judge == nil {
+			return c, "", false, fmt.Errorf("compaction needs the selected decision judge -- context intact")
+		}
+		// Reserve space for the requested summary, capped at 16 KiB. This is
+		// planning headroom, not a promise about model output; actual output is
+		// checked again before judgment and is never trimmed.
+		reserve := min(max(budget*4, 1024), 16<<10)
+		if _, err := r.compactionRequest(c, b.String(), strings.Repeat("x", reserve)); err != nil {
+			return c, "", false, err
+		}
+	}
+	keyRaw, err := json.Marshal(struct {
+		Context                         session.Continuation
+		Source, Prompt, Model, Judgment string
+		Config                          Compaction
+		Prune                           Prune
+		Workspace, Session              string
+		MaxTokens                       int
+		Manual                          bool
+	}{c, b.String(), rendered, r.ModelKey, r.Prompts.Text("decision.compaction.instructions"), r.Compaction, r.Prune, r.Workspace, r.SessionID, r.MaxTokens, r.ManualDecisions})
+	if err != nil {
+		return c, "", false, err
+	}
+	candidateKey := sha256.Sum256(keyRaw)
 	msgs := []llm.Message{{Role: "system", Content: rendered}, {Role: "user", Content: b.String()}}
 	input := c
 	input.SchemaBytes = 0
@@ -208,63 +240,78 @@ func (r *Runner) Compact(ctx context.Context, c session.Continuation) (next sess
 	var reply string
 	var u llm.Usage
 	var rawReply llm.Reply
-	// Summaries are clean documents: the summary call never thinks.
-	summaryModel := r.Model
-	if client, ok := r.Model.(*llm.Client); ok {
-		summaryModel = client.WithoutThinking()
-	}
-	if model, ok := summaryModel.(ToolModel); ok {
-		// Reuse streaming inactivity/cancellation without advertising tools.
-		watcher := *r
-		watcher.Continuation = c
-		observedCtx, setupErr := watcher.thinkingContext(ctx, func(k, v string) error {
-			if r.Session != nil {
-				if err := r.Session.Append(ctx, r.SessionID, k, v); err != nil {
-					return errors.Join(compactionRecordFailure, err)
+	if cached := r.compactionCandidate; cached != nil && cached.Key == candidateKey {
+		if cached.Rejected {
+			return c, "", false, nil
+		}
+		if cached.Rejection != "" {
+			return c, "", false, fmt.Errorf("%s", cached.Rejection)
+		}
+		reply = cached.Summary
+	} else {
+		r.compactionCandidate = nil
+		// Summaries are clean documents: the summary call never thinks.
+		summaryModel := r.Model
+		if client, ok := r.Model.(*llm.Client); ok {
+			summaryModel = client.WithoutThinking()
+		}
+		if model, ok := summaryModel.(ToolModel); ok {
+			// Reuse streaming inactivity/cancellation without advertising tools.
+			watcher := *r
+			watcher.Continuation = c
+			observedCtx, setupErr := watcher.thinkingContext(ctx, func(k, v string) error {
+				if r.Session != nil {
+					if err := r.Session.Append(ctx, r.SessionID, k, v); err != nil {
+						return errors.Join(compactionRecordFailure, err)
+					}
 				}
+				return nil
+			})
+			if setupErr != nil {
+				return c, "", false, setupErr
 			}
-			return nil
-		})
-		if setupErr != nil {
-			return c, "", false, setupErr
+			result, callErr := model.ChatTools(observedCtx, msgs, nil, nil)
+			rawReply = result
+			reply, u, err = result.Message.Content, result.Usage, callErr
+			if err == nil && len(result.Message.ToolCalls) > 0 {
+				err = fmt.Errorf("compaction returned unrequested tool calls — context intact")
+			}
+		} else {
+			reply, rawReply.Served, u, err = summaryModel.Chat(ctx, msgs)
+			rawReply.Message = llm.Message{Role: "assistant", Content: reply}
+			rawReply.Usage = u
 		}
-		result, callErr := model.ChatTools(observedCtx, msgs, nil, nil)
-		rawReply = result
-		reply, u, err = result.Message.Content, result.Usage, callErr
-		if err == nil && len(result.Message.ToolCalls) > 0 {
-			err = fmt.Errorf("compaction returned unrequested tool calls — context intact")
+		if u.Reported {
+			r.UsedIn += u.In
+			r.UsedOut += u.Out
+		} else {
+			r.UsageUnknown = true
 		}
-	} else {
-		reply, rawReply.Served, u, err = summaryModel.Chat(ctx, msgs)
-		rawReply.Message = llm.Message{Role: "assistant", Content: reply}
-		rawReply.Usage = u
-	}
-	if u.Reported {
-		r.UsedIn += u.In
-		r.UsedOut += u.Out
-	} else {
-		r.UsageUnknown = true
-	}
-	if r.Session != nil {
-		// Cancellation ends generation, not recording its already received bytes.
-		logCtx := context.WithoutCancel(ctx)
-		log := func(k, v string) error { return r.Session.Append(logCtx, r.SessionID, k, v) }
-		raw, _ := json.Marshal(rawReply)
-		if archiveErr := nativeArchiveHeader(map[string]any{"Compaction": true, "Bytes": len(raw), "Usage": u}, "compaction", log); archiveErr != nil {
-			return c, "", false, errors.Join(err, compactionRecordFailure, archiveErr)
+		if r.Session != nil {
+			// Cancellation ends generation, not recording its already received bytes.
+			logCtx := context.WithoutCancel(ctx)
+			log := func(k, v string) error { return r.Session.Append(logCtx, r.SessionID, k, v) }
+			raw, _ := json.Marshal(rawReply)
+			if archiveErr := nativeArchiveHeader(map[string]any{"Compaction": true, "Bytes": len(raw), "Usage": u}, "compaction", log); archiveErr != nil {
+				return c, "", false, errors.Join(err, compactionRecordFailure, archiveErr)
+			}
+			if archiveErr := nativeArchiveFragments(raw, "compaction", log); archiveErr != nil {
+				return c, "", false, errors.Join(err, compactionRecordFailure, archiveErr)
+			}
 		}
-		if archiveErr := nativeArchiveFragments(raw, "compaction", log); archiveErr != nil {
-			return c, "", false, errors.Join(err, compactionRecordFailure, archiveErr)
+		if err != nil {
+			return c, "", false, fmt.Errorf("compaction summary call failed: %w", err)
 		}
-	}
-	if err != nil {
-		return c, "", false, fmt.Errorf("compaction summary call failed: %w", err)
-	}
-	if rawReply.FinishReason != "" && rawReply.FinishReason != "stop" {
-		return c, "", false, fmt.Errorf("compaction summary is unfinished (finish reason %s) — context intact", rawReply.FinishReason)
-	}
-	if strings.TrimSpace(reply) == "" {
-		return c, "", false, fmt.Errorf("compaction summary came back empty — context intact")
+		if rawReply.FinishReason != "" && rawReply.FinishReason != "stop" {
+			return c, "", false, fmt.Errorf("compaction summary is unfinished (finish reason %s) — context intact", rawReply.FinishReason)
+		}
+		if !summaryHasContent(reply) {
+			reason := "compaction summary is empty or has no substantive content; context intact. Change source or compaction settings before retrying"
+			r.compactionCandidate = &compactionCandidate{Key: candidateKey, Summary: reply, Rejection: reason}
+			return c, "", false, fmt.Errorf("%s", reason)
+		}
+
+		r.compactionCandidate = &compactionCandidate{Key: candidateKey, Summary: reply}
 	}
 	// Size is never stated to the model. The limit is capacity admission
 	// below: a summary that does not fit with retained context, or does
@@ -293,7 +340,13 @@ func (r *Runner) Compact(ctx context.Context, c session.Continuation) (next sess
 	if estimate >= c.Estimate() {
 		return c, "", false, fmt.Errorf("compaction summary does not reduce estimated retained context (%d tokens) — context intact", estimate)
 	}
-	if accepted, err := r.reviewCompaction(ctx, c, b.String(), reply); err != nil || !accepted {
+	accepted, err := r.reviewCompaction(ctx, c, b.String(), reply)
+	if err == nil && accepted {
+		r.compactionCandidate = nil
+	} else if err == nil && r.compactionCandidate != nil {
+		r.compactionCandidate.Rejected = true
+	} // A settled rejection is final for this source/settings candidate.
+	if err != nil || !accepted {
 		return c, "", false, err
 	}
 	out.Compactions++
@@ -326,44 +379,38 @@ func (r *Runner) reviewCompaction(ctx context.Context, c session.Continuation, s
 	if r.Judge == nil {
 		return false, fmt.Errorf("compaction needs the selected decision judge — context intact")
 	}
-	anchors := []session.Entry{}
-	ids := []string{}
-	for _, e := range c.Entries {
-		switch e.Kind {
-		case "intent", "task", "note", "failure", "evidence", "guidance":
-			anchors = append(anchors, e)
+	var req decision.Request
+	var v decision.Verdict
+	var err error
+	maxContextBytes := 0
+	for admission := 0; ; admission++ {
+		req, err = r.compactionRequestLimit(c, source, summary, maxContextBytes)
+		if err != nil {
+			return false, err
 		}
-		for _, call := range e.Message.ToolCalls {
-			ids = append(ids, call.ID)
+		v, err = r.Judge(ctx, req)
+		if err == nil {
+			break
+		}
+		var capacity *decision.ContextCapacityError
+		if !errors.As(err, &capacity) || admission >= 12 || ctx.Err() != nil {
+			return false, fmt.Errorf("compaction decision unavailable; context intact: %w", err)
+		}
+		// Retry only a typed pre-inference refusal. Reuse the exact candidate;
+		// halve optional projected history, never mandatory facts or the summary.
+		maxContextBytes = len(req.Context) / 2
+		if r.Session != nil {
+			if e := r.Session.Append(ctx, r.SessionID, "judgment-error", "compaction-facts admission refused before inference; retaining candidate and reducing optional projection: "+err.Error()); e != nil {
+				return false, errors.Join(compactionRecordFailure, e)
+			}
 		}
 	}
-	anchors, repeated := shareAnchorContent(anchors)
-	raw, err := json.Marshal(struct {
-		Summary               string
-		Anchors               []session.Entry
-		Coding                *session.CodingState
-		Assignment            *session.Assignment
-		Workflow              *session.WorkflowScope
-		SourceSHA256          string
-		SourceBytes           int
-		SourceCallIDs         []string
-		SessionID             string
-		RepeatedAnchorContent []anchorContentReference `json:",omitempty"`
-	}{summary, anchors, c.Coding, c.Assignment, c.Workflow, fmt.Sprintf("%x", sha256.Sum256([]byte(source))), len(source), ids, r.SessionID, repeated})
-	if err != nil {
-		return false, err
-	}
-	const accept = "the summary is factually consistent with essential anchors"
-	req := decision.Request{Context: string(raw), Instructions: r.Prompts.Text("decision.compaction.instructions"), Options: []string{accept, "the summary contradicts, invents or omits essential facts"}}
-	v, err := r.Judge(ctx, req)
-	if err != nil {
-		return false, fmt.Errorf("compaction decision unavailable — context intact: %w", err)
-	}
+
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
 	resolution := "context retained; summary not applied"
-	if v.Option == accept && v.Confidence > .5 {
+	if v.Option == compactionAccept && v.Confidence > .5 {
 		resolution = "accepted"
 	}
 	var saved error
@@ -400,4 +447,16 @@ func shareAnchorContent(anchors []session.Entry) ([]session.Entry, []anchorConte
 		}
 	}
 	return out, refs
+}
+
+// This only rejects empty/placeholder prose. Factual completeness remains the
+// existing compaction decision's responsibility, never a word-count heuristic.
+func summaryHasContent(text string) bool {
+	boilerplate := map[string]bool{"checkpoint": true, "summary": true, "summarized": true, "context": true, "conversation": true, "compact": true, "compacted": true, "done": true, "complete": true, "completed": true, "nothing": true, "everything": true, "all": true, "the": true, "is": true, "has": true, "been": true, "was": true, "successfully": true, "work": true, "requested": true}
+	for _, word := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }) {
+		if !boilerplate[word] {
+			return true
+		}
+	}
+	return false
 }

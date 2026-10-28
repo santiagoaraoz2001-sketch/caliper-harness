@@ -21,10 +21,11 @@ type Effect struct {
 	ID     string `json:"id,omitempty"`
 }
 type Result struct {
-	Data        json.RawMessage `json:"data,omitempty"`
-	Errors      []string        `json:"errors,omitempty"`
-	Effects     []Effect        `json:"effects,omitempty"`
-	DataOmitted bool            `json:"data_omitted,omitempty"`
+	Data              json.RawMessage `json:"data,omitempty"`
+	Errors            []string        `json:"errors,omitempty"`
+	Effects           []Effect        `json:"effects,omitempty"`
+	DataOmitted       bool            `json:"data_omitted,omitempty"`
+	DomainBudgetBasis string          `json:"domain_budget_basis,omitempty"`
 }
 type budgetKey struct{}
 type requestBudget struct {
@@ -34,6 +35,7 @@ type requestBudget struct {
 	rows, bytes int
 	effects     []Effect
 	sessionUses []struct{ dir, id string }
+	domains     map[string][]int
 }
 
 func budget(ctx context.Context) *requestBudget {

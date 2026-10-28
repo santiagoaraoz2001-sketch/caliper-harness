@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"specific-harness/internal/testfs"
 	"strings"
 	"sync"
 	"testing"
@@ -64,7 +65,7 @@ func TestStorePathAliases(t *testing.T) {
 	path := filepath.Join(dir, "db")
 	a := openLease(t, path)
 	link := filepath.Join(dir, "alias")
-	if err := os.Symlink(dir, link); err != nil {
+	if err := testfs.Symlink(dir, link); err != nil {
 		t.Fatal(err)
 	}
 	hard := filepath.Join(dir, "hard-db")

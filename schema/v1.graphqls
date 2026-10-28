@@ -21,7 +21,7 @@ type Query {
   """Read authored comments for an exact task attempt. Oversized raw logs refuse before fetch."""
   taskComments(taskId: ID!, attempt: Int!, limit: Int!): [TaskComment!]!
   """Read authored project knowledge heads, or an immutable version by id. Not verified execution evidence."""
-  knowledge(key: String, id: ID, limit: Int): [Knowledge!]!
+  knowledge(key: String, id: ID, limit: Int, text: String, section: String, offset: Int, linkedFrom: String, linkedTo: String, relation: String): [Knowledge!]!
   """Read observations recorded for one Approach. Authored opportunities, not verified defects or required work."""
   notices(approachId: ID!, limit: Int): [Knowledge!]!
   version: String!
@@ -66,8 +66,8 @@ type Mutation {
   addTaskComment(taskId: ID!, expectedAttempt: Int!, text: String!): TaskComment!
   """Author fresh Draft PAT with four explicit partial-effect receipts; does not activate, Ready or claim work."""
   prepareTask(input: FreshTaskInput!): PreparedTask!
-  """Append an authored project note using the actual current id; empty expectedPreviousId creates a new key."""
-  appendKnowledge(key: String!, body: String!, expectedPreviousId: ID!, taskId: ID, filePath: String): Knowledge!
+  """Create the complete next document version, not appended text. Preserve still-valid facts; use a separate key for a feature-only note. Actual current expectedPreviousId is required; empty creates a new key."""
+  appendKnowledge(key: String!, body: String!, expectedPreviousId: ID!, taskId: ID, filePath: String, references: [KnowledgeReferenceInput!]): Knowledge!
   """Record a weak spot, brittle code, potential issue or opportunity noticed during an Approach. Creates a separate project note; does not change workflow or verification."""
   noticed(approachId: ID!, body: String!, filePath: String): Knowledge!
   """Compatibility name for appendKnowledge; appends an immutable version with the same compare-and-set rule."""
@@ -158,6 +158,8 @@ type Plan {
 }
 
 type Approach {
+  "Read-only readable rendering; title retains the exact authored contract."
+  display: String!
   id: ID!
   title: String!
   state: String!
@@ -206,7 +208,20 @@ type Knowledge {
  previousId: ID!
  taskId: ID!
  filePath: String!
+ """caliper-default or project-authored; neither is verification evidence."""
+ source: String!
+ """Recorded source fingerprint; empty means unknown."""
+ fileSHA256: String!
+ """unchanged, changed, missing or unknown; source freshness does not prove correctness."""
+ freshness: String!
+ """Selected heading sections. text matches keywords case-insensitively; section selects an exact anchor."""
+ sections: [KnowledgeSection!]!
+ references: [KnowledgeReference!]!
 }
+
+type KnowledgeSection { id: String!, title: String!, body: String!, references: [KnowledgeReference!]! }
+input KnowledgeReferenceInput { key: String!, relation: String!, section: String, sourceSection: String, label: String }
+type KnowledgeReference { key: String!, relation: String!, section: String!, sourceSection: String!, label: String!, status: String! }
 
 type TaskComment {
  id: ID!

@@ -1,6 +1,7 @@
 package decision
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -30,6 +31,15 @@ func LogJudgment(log func(kind, text string), source string, req Request, v Verd
 	}
 	if v.ConfidenceSource != "" {
 		log("judgment_protocol", fmt.Sprintf("source=%s | protocol=%s | confidence_source=%s | model=%s | device=%s", source, v.Protocol, v.ConfidenceSource, v.Model, v.Device))
+	}
+	if len(v.Usage) > 0 {
+		raw, _ := json.Marshal(struct {
+			Source   string          `json:"source"`
+			Protocol string          `json:"protocol,omitempty"`
+			Model    string          `json:"model"`
+			Usage    json.RawMessage `json:"usage"`
+		}{source, v.Protocol, v.Model, json.RawMessage(v.Usage)})
+		log("judgment_usage", string(raw))
 	}
 	ctx := req.Context
 	if maxCtx > 0 && len([]rune(ctx)) > maxCtx {

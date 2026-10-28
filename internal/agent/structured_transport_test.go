@@ -145,7 +145,7 @@ func TestStructuredRunnerRefusalAndRecordingSettlement(t *testing.T) {
 			} else if !os.IsNotExist(effectErr) {
 				t.Fatalf("negative call executed %v", effectErr)
 			}
-			if mode == "partial" || mode == "record reply" || mode == "record result" || mode == "duplicate JSON" {
+			if mode == "partial" || mode == "record reply" || mode == "record result" {
 				if err == nil || runner.Outcome.ExitCode() == 0 {
 					t.Fatalf("failure promoted %v %+v", err, runner.Outcome)
 				}

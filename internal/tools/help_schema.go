@@ -7,12 +7,16 @@ import (
 	"github.com/agnivade/levenshtein"
 	"github.com/vektah/gqlparser/v2/ast"
 	api "specific-harness/internal/graph"
+	"specific-harness/internal/memory"
 	"specific-harness/internal/prompts"
 	"specific-harness/internal/tool"
 )
 
 func helpSchemaIndex(active *tool.Registry, pc *prompts.Catalog) string {
 	text := pc.Text("help.schema.index")
+	if graph, ok := active.Lookup("graphql"); ok && graph.GraphQLFields != nil {
+		text = pc.Text("help.schema.role_index")
+	}
 	for _, name := range active.Names() {
 		d, _ := active.Lookup(name)
 		text += pc.Format("help.schema.index_entry", name, d.Desc)
@@ -90,8 +94,14 @@ func schemaUnknown(topic string, names []string, prefix string, pc *prompts.Cata
 
 func helpGraphQLSchema(suffix string, d tool.Definition, pc *prompts.Catalog) (string, error) {
 	names := api.ModelFields()
+	if d.GraphQLFields != nil {
+		names = d.GraphQLFields
+	}
 	if suffix == "" {
 		text := pc.Text("help.schema.graphql.index")
+		if d.GraphQLFields != nil {
+			text = pc.Text("help.schema.graphql.role_index")
+		}
 		for _, name := range names {
 			root, f := api.ModelOperation(name)
 			required := *f
@@ -112,11 +122,28 @@ func helpGraphQLSchema(suffix string, d tool.Definition, pc *prompts.Catalog) (s
 	name := strings.TrimPrefix(suffix, ".")
 	schema := api.ModelSchema()
 	root, field := api.ModelOperation(name)
+	if d.GraphQLFields != nil {
+		allowed := false
+		for _, candidate := range names {
+			allowed = allowed || candidate == name
+		}
+		if field != nil && !allowed {
+			return pc.Text("help.unavailable"), nil
+		}
+		if field == nil && !graphTypeReachable(schema, names, name) {
+			return pc.Text("help.unavailable"), nil
+		}
+
+	}
 	if field == nil {
 		if typ := schema.Types[name]; typ != nil && !strings.HasPrefix(name, "__") && name != "Query" && name != "Mutation" {
 			var fields []string
 			for _, f := range typ.Fields {
-				fields = append(fields, "  "+graphSignature(f))
+				text := "  " + graphSignature(f)
+				if name == "KnowledgeReferenceInput" && f.Name == "relation" {
+					text += " (allowed: " + strings.Join(memory.KnowledgeRelations(), ", ") + ")"
+				}
+				fields = append(fields, text)
 			}
 			return pc.Format("help.schema.graphql.type", name, strings.Join(fields, "\n")), nil
 		}
@@ -147,9 +174,24 @@ func helpGraphQLSchema(suffix string, d tool.Definition, pc *prompts.Catalog) (s
 		}
 		call += " { " + selection + " }"
 	}
+	if name == "knowledge" {
+		call = `knowledge(text:"<keyword>",limit:3) { key sections { id title } }`
+	}
 	text := pc.Format("help.schema.graphql.operation", graphSignature(field), (tool.Definition{Name: d.Name, Prompts: pc, Example: tool.Args{"query": operation + " { " + call + " }"}}).CallTemplate())
+	if typ := schema.Types[field.Type.Name()]; typ != nil && typ.IsCompositeType() {
+		text += "\nReturned fields: help(topic=\"schema.graphql." + typ.Name + "\")."
+	}
 	if pc.Has("help.schema.graphql." + name) {
-		text += "\n" + pc.Text("help.schema.graphql."+name)
+		if name == "knowledge" {
+			text += "\n" + pc.Text("help.graphql.readonly")
+		} else {
+			text += "\n" + pc.Text("help.schema.graphql."+name)
+		}
+	}
+	if name == "appendKnowledge" || name == "putKnowledge" {
+		// The advertised write-schema route must also expose the prerequisite
+		// first-use read, from the same recipe as ordinary and worker help.
+		text += "\n" + pc.Text("help.graphql.readonly")
 	}
 	return text, nil
 }
@@ -207,4 +249,50 @@ func graphInput(schema *ast.Schema, name string, typ *ast.Type) string {
 		return "false"
 	}
 	return fmt.Sprintf("%q", "<"+name+">")
+}
+
+// Reachable type help mirrors the same allowed roots, including nested fields
+// and inputs. Host-only schema types never become a discovery side channel.
+func graphTypeReachable(schema *ast.Schema, roots []string, target string) bool {
+	seen := map[string]bool{}
+	var visit func(string) bool
+	visit = func(name string) bool {
+		if seen[name] || strings.HasPrefix(name, "__") {
+			return false
+		}
+		seen[name] = true
+		if name == target {
+			return true
+		}
+		t := schema.Types[name]
+		if t == nil {
+			return false
+		}
+		for _, f := range t.Fields {
+			if visit(f.Type.Name()) {
+				return true
+			}
+			for _, a := range f.Arguments {
+				if visit(a.Type.Name()) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	for _, name := range roots {
+		_, f := api.ModelOperation(name)
+		if f == nil {
+			continue
+		}
+		if visit(f.Type.Name()) {
+			return true
+		}
+		for _, a := range f.Arguments {
+			if visit(a.Type.Name()) {
+				return true
+			}
+		}
+	}
+	return false
 }

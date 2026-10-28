@@ -71,20 +71,31 @@ func Ready(ctx context.Context, d Deps, approachID string) (*plan.Approach, erro
 	})
 }
 func checkCoherence(ctx context.Context, d Deps, approachID string, p *plan.Plan, tasks []*plan.Task) error {
+	a, err := plan.GetApproach(d.Store, approachID)
+	if err != nil {
+		return err
+	}
 	if err := requiredCommands(d, tasks); err != nil {
 		return err
 	}
-	req, size, err := coherenceRequest(d, p, tasks)
+	req, size, err := coherenceRequest(d, p, a, tasks)
 	if err != nil {
 		return err
 	}
 	if d.ManualReadiness {
 		prompt := fmt.Sprintf("Decision model disabled — approve approach %q as ready for execution? Review the complete task briefs below; this is readiness approval, not evidence that code passed checks or independent review.\n", approachID)
-		for _, row := range strings.Split(req.Context, "\n") {
-			prompt += fmt.Sprintf("\n%+q", row)
-		}
+		prompt += humanReadinessContext(p, a, tasks)
 		accepted := false
-		if d.Ask != nil {
+		if d.ConfirmReadiness != nil {
+			snapshot, err := plan.ReadinessBriefSnapshot(d.Store, approachID, p, a, tasks)
+			if err != nil {
+				return err
+			}
+			accepted, err = d.ConfirmReadiness(ctx, approachID, snapshot, req.Context, prompt)
+			if err != nil {
+				return err
+			}
+		} else if d.Ask != nil {
 			accepted = d.Ask(ctx, prompt)
 		} else if d.In != nil && d.Out != nil {
 			accepted = auth.Ask(ctx, d.In, d.Out, prompt)
@@ -122,12 +133,18 @@ func checkCoherence(ctx context.Context, d Deps, approachID string, p *plan.Plan
 	}
 	if v.Confidence < d.Threshold {
 		prompt := fmt.Sprintf("unsure — leans %s (confidence %.3f) — admit approach %q anyway?", v.Option, v.Confidence, approachID)
-		prompt += "\nJudged context (quoted rows; escapes are literal characters):"
-		for _, row := range strings.Split(req.Context, "\n") {
-			prompt += fmt.Sprintf("\n%+q", row)
-		}
+		prompt += "\nComplete judged brief:\n" + humanReadinessContext(p, a, tasks)
 		accepted := false
-		if d.Ask != nil {
+		if d.ConfirmReadiness != nil {
+			snapshot, err := plan.ReadinessBriefSnapshot(d.Store, approachID, p, a, tasks)
+			if err != nil {
+				return err
+			}
+			accepted, err = d.ConfirmReadiness(ctx, approachID, snapshot, req.Context, prompt)
+			if err != nil {
+				return err
+			}
+		} else if d.Ask != nil {
 			accepted = d.Ask(ctx, prompt)
 		} else if d.In != nil && d.Out != nil {
 			accepted = auth.Ask(ctx, d.In, d.Out, prompt)
@@ -153,6 +170,10 @@ func checkCoherence(ctx context.Context, d Deps, approachID string, p *plan.Plan
 // ReadinessBudget reports the current complete request, without judging or transitioning.
 // Draft work may exceed the budget; Ready rebuilds and enforces it independently.
 func ReadinessBudget(d Deps, approachID string) (size, maximum, overage int, err error) {
+	a, err := plan.GetApproach(d.Store, approachID)
+	if err != nil {
+		return 0, 0, 0, err
+	}
 	p, err := plan.ApproachPlan(d.Store, approachID)
 	if err != nil {
 		return 0, 0, 0, err
@@ -161,7 +182,7 @@ func ReadinessBudget(d Deps, approachID string) (size, maximum, overage int, err
 	if err != nil {
 		return 0, 0, 0, err
 	}
-	_, size, err = coherenceRequest(d, p, tasks)
+	_, size, err = coherenceRequest(d, p, a, tasks)
 	maximum = d.CoherenceMaxChars
 	if maximum > 0 && size > maximum {
 		overage = size - maximum
@@ -169,9 +190,9 @@ func ReadinessBudget(d Deps, approachID string) (size, maximum, overage int, err
 	return
 }
 
-func coherenceRequest(d Deps, p *plan.Plan, tasks []*plan.Task) (decision.Request, int, error) {
+func coherenceRequest(d Deps, p *plan.Plan, a *plan.Approach, tasks []*plan.Task) (decision.Request, int, error) {
 	req := decision.Request{
-		Context:      coherenceContext(p, tasks),
+		Context:      coherenceContext(p, a, tasks),
 		Instructions: d.Prompts.Text("decision.readiness.instructions"),
 		Options:      []string{d.Prompts.Text("decision.readiness.ready"), d.Prompts.Text("decision.readiness.revise")},
 	}
@@ -183,13 +204,29 @@ func coherenceRequest(d Deps, p *plan.Plan, tasks []*plan.Task) (decision.Reques
 }
 
 // coherenceContext retains every task field; the complete request is bounded above.
-func coherenceContext(p *plan.Plan, tasks []*plan.Task) string {
+func coherenceContext(p *plan.Plan, a *plan.Approach, tasks []*plan.Task) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Plan goal: %s\nTasks:\n", p.Goal)
+	fmt.Fprintf(&b, "Plan goal: %s\nApproach %s declared scope and strategy: %s\nTasks (assess their collective coverage of that Approach):\n", p.Goal, a.ID, a.Title)
 	for i, t := range tasks {
 		fmt.Fprintf(&b, "%d. %s — %s\ncurrent: %s\ntarget: %s\nsketch: %s\nacceptance: %s\ntests: %s\nverify: %s\nacceptance_command: %s\ncheck_command: %s\n", i+1, t.Title, t.Prompt, t.Current, t.Target, t.Sketch, t.Acceptance, t.Tests, t.Verify, t.AcceptanceCommand, t.CheckCommand)
 	}
 	return b.String()
+}
+
+// Presentation is separate from the exact snapshot and judge input. Every field
+// remains visible, including unknown structured fields from older/newer clients.
+func humanReadinessContext(p *plan.Plan, a *plan.Approach, tasks []*plan.Task) string {
+	copyPlan := *p
+	copyPlan.Goal = plan.DisplayStructured(p.Goal)
+	copyApproach := *a
+	copyApproach.Title = plan.DisplayStructured(a.Title)
+	copyTasks := make([]*plan.Task, 0, len(tasks))
+	for _, task := range tasks {
+		copyTask := *task
+		copyTask.Sketch = plan.DisplayStructured(task.Sketch)
+		copyTasks = append(copyTasks, &copyTask)
+	}
+	return plan.DisplayText(coherenceContext(&copyPlan, &copyApproach, copyTasks))
 }
 
 // Required execution needs a declared command before admitting queued work.

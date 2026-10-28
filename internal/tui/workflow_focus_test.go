@@ -2,13 +2,16 @@ package tui
 
 import (
 	"encoding/json"
+	"specific-harness/internal/plan"
 	"specific-harness/internal/session"
+	"specific-harness/internal/store"
+	workspaceFiles "specific-harness/internal/tools/files"
 	"strings"
 	"testing"
 )
 
 func TestWorkflowExplicitEntry(t *testing.T) {
-	m := plansModel(t)
+	m := workflowModel(t)
 	m.navigate(ViewChat, "")
 	m = submit(m, "/workflow P1-A1-T1")
 	raw, _ := json.Marshal(m.Chat.Context)
@@ -38,7 +41,7 @@ func TestWorkflowExplicitEntry(t *testing.T) {
 }
 
 func TestWorkflowRestoredLabelsTabsAndSharedBusy(t *testing.T) {
-	m := plansModel(t)
+	m := workflowModel(t)
 	m.navigate(ViewChat, "")
 	m = submit(m, "/workflow P1-A1-T1")
 	saved := m.Chat.Context.Clone()
@@ -58,7 +61,7 @@ func TestWorkflowRestoredLabelsTabsAndSharedBusy(t *testing.T) {
 		t.Fatal("restored footer reports coding")
 	}
 	m = submit(m, "/tools")
-	if !strings.Contains(m.Chat.Lines[len(m.Chat.Lines)-1].Text, "selected-node legal operations") {
+	if !strings.Contains(m.Chat.Lines[len(m.Chat.Lines)-1].Text, "next request") {
 		t.Fatal("restored /tools falsely lists coding")
 	}
 	before, _ := json.Marshal(m.Chat.Context)
@@ -86,4 +89,25 @@ func TestWorkflowRestoredLabelsTabsAndSharedBusy(t *testing.T) {
 	if m.Chat.Context.Workflow.ID != "task-one" {
 		t.Fatal("stale run changed focus")
 	}
+}
+
+// Explicit workflow selection uses the same physical project owner as a run.
+func workflowModel(t *testing.T) Model {
+	t.Helper()
+	m := plansModel(t)
+	w, err := workspaceFiles.Capture(m.Cfg.Tools.Bash, m.Cfg.PromptCatalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.Open(m.StorePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for _, id := range []string{"p1", "p2"} {
+		if _, err = plan.BindProject(t.Context(), s, id, w.Path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return m
 }

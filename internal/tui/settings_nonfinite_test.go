@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -57,8 +58,8 @@ func TestSettingsNonFiniteArmedRefusal(t *testing.T) {
 				serverBefore, modelBefore, windowBefore := m.Server, m.ModelName, m.St.CtxWindow
 				m = selectSettingsFloat(t, m, sel)
 				m = submit(m, bad)
-				if m.Settings.Editing != nil {
-					t.Error("refused edit remained armed")
+				if m.Settings.Editing == nil {
+					t.Error("refused edit lost correction focus")
 				}
 				if !reflect.DeepEqual(m.Cfg, cfgBefore) || m.Server != serverBefore || m.ModelName != modelBefore || m.St.CtxWindow != windowBefore {
 					t.Error("refusal changed complete config or derived run state")
@@ -159,6 +160,17 @@ func formatNonFinite(x float64) string {
 }
 
 func TestSettingsFiniteBoundariesArmed(t *testing.T) {
+	// This round-trip compares against Defaults, not a loaded user profile.
+	// Omitted optional Serve lists deliberately inherit personal connections;
+	// isolate those inputs rather than weakening the whole-config assertion.
+	home := t.TempDir()
+	for key, value := range map[string]string{
+		"HOME": home, "USERPROFILE": home,
+		"APPDATA": filepath.Join(home, "config"), "LOCALAPPDATA": filepath.Join(home, "local"),
+		"XDG_CONFIG_HOME": filepath.Join(home, "config"), "XDG_DATA_HOME": filepath.Join(home, "data"),
+	} {
+		t.Setenv(key, value)
+	}
 	for sel, f := range settingFields() {
 		if f.Kind != "float" {
 			continue
@@ -174,6 +186,12 @@ func TestSettingsFiniteBoundariesArmed(t *testing.T) {
 				m = key(m, "s")
 				back, used, err := config.Load(m.CfgPath)
 				if err != nil || !used || !reflect.DeepEqual(back, m.Cfg) {
+					a, b := reflect.ValueOf(back), reflect.ValueOf(m.Cfg)
+					for i := 0; i < a.NumField(); i++ {
+						if a.Field(i).CanInterface() && !reflect.DeepEqual(a.Field(i).Interface(), b.Field(i).Interface()) {
+							t.Logf("persisted config differs in %s", a.Type().Field(i).Name)
+						}
+					}
 					t.Fatalf("finite setting did not stick: used=%v err=%v", used, err)
 				}
 				assertSettingsRequestEncodes(t, m.Cfg)

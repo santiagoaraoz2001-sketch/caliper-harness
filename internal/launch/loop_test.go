@@ -92,7 +92,7 @@ func TestSubagentInheritsCompaction(t *testing.T) {
 	task.Prompt = strings.Repeat("source context ", 160)
 	const window = 4000
 	big := "```tool\ntool: nope\nx: " + strings.Repeat("z", 12800) + "\n```"
-	model := &loopModel{replies: []string{big, "SUMMARY", "done"},
+	model := &loopModel{replies: []string{big, "Requested tool was unavailable; no work was executed.", "done"},
 		usage: llm.Usage{In: 850, Out: 5, Reported: true}}
 	d := depsFor(s, nil)
 	d.NewModel = func() agent.Model { return model }
@@ -155,7 +155,7 @@ func TestSubagentInheritsCompaction(t *testing.T) {
 				t.Errorf("summary fixture input estimate %d reaches window %d", estimate, window)
 			}
 			for _, msg := range res.Transcript {
-				if msg.Content == session.SummaryPrefix+"SUMMARY" {
+				if msg.Content == session.SummaryPrefix+"Requested tool was unavailable; no work was executed." {
 					return
 				}
 			}

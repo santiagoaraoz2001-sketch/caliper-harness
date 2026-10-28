@@ -91,7 +91,7 @@ func TestObservedHistoryExpiryDeletionPartialAndEmpty(t *testing.T) {
 		t.Fatal("expired capture was silently reread")
 	}
 	m = submit(m, "/open-diff 17")
-	if !strings.Contains(m.captureNotice(), "removed-line excerpt") {
+	if !strings.Contains(m.captureNotice(), "retained") {
 		t.Fatal("deleted excerpt presented as whole file")
 	}
 	m.onDiffEvent(diffEventMsg{ev: watch.Event{Seq: 18, Path: "space name.go", Truncated: true, After: []string{"partial"}}})
@@ -230,7 +230,7 @@ func TestOriginalCommandsRemainUnchangedWithAdditions(t *testing.T) {
 			t.Fatalf("original command %s missing", name)
 		}
 	}
-	additions := []string{"open-diff", "changes", "turns", "setup", "update", "manage", "style"}
+	additions := []string{"open-diff", "changes", "turns", "setup", "update", "manage", "style", "tests"}
 	for _, name := range additions {
 		if !names[name] {
 			t.Fatalf("added command %s missing", name)

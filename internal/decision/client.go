@@ -75,6 +75,7 @@ type Verdict struct {
 	Device           string
 	Protocol         string `json:",omitempty"`
 	ConfidenceSource string `json:",omitempty"`
+	Usage            string `json:",omitempty"` // Optional provider accounting; nil means unknown, never zero.
 }
 
 type judgeRequest struct {
@@ -89,11 +90,12 @@ type judgeRequest struct {
 }
 
 type judgeResponse struct {
-	Pick       *int     `json:"pick"`
-	Option     string   `json:"option"`
-	Confidence *float64 `json:"confidence"`
-	Model      string   `json:"model"`
-	Device     string   `json:"device"`
+	Pick       *int            `json:"pick"`
+	Option     string          `json:"option"`
+	Confidence *float64        `json:"confidence"`
+	Model      string          `json:"model"`
+	Device     string          `json:"device"`
+	Usage      json.RawMessage `json:"usage,omitempty"`
 }
 
 // Judge sends one request and validates the verdict: pick present and in
@@ -213,7 +215,7 @@ func (c *Client) Judge(ctx context.Context, r Request) (Verdict, error) {
 	if *jr.Confidence < 0 || *jr.Confidence > 1 {
 		return Verdict{}, fmt.Errorf("decision sidecar confidence %v is not a probability", *jr.Confidence)
 	}
-	return Verdict{Pick: *jr.Pick, Option: jr.Option, Confidence: *jr.Confidence, Model: jr.Model, Device: jr.Device}, nil
+	return Verdict{Pick: *jr.Pick, Option: jr.Option, Confidence: *jr.Confidence, Model: jr.Model, Device: jr.Device, Usage: optionalUsage(jr.Usage)}, nil
 }
 
 // ContextCapacityError is an explicit capacity refusal before inference, from
@@ -244,6 +246,7 @@ func nativeCapacityRefusal(body []byte) bool {
 	for _, format := range []string{
 		"request has %d tokens; model context limit is %d; shorten context/options",
 		"request has %d tokens; decision input limit is %d; shorten context/options",
+		"request (%d tokens) exceeds the available context size (%d tokens), try increasing it",
 	} {
 		var count, maximum int
 		n, err := fmt.Sscanf(response.Error, format, &count, &maximum)
@@ -269,3 +272,11 @@ func (c *Client) WithPrompts(pc *prompts.Catalog) *Client { c.Prompts = pc; retu
 
 // WithParams applies existing configured generation controls to ordinary chat judges only.
 func (c *Client) WithParams(p llm.Params) *Client { c.params = &p; return c }
+
+// Preserve reported usage without inventing a cross-provider unit conversion.
+func optionalUsage(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	return string(raw)
+}

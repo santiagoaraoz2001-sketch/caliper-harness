@@ -2,8 +2,17 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
-const {validateRelease, registryState, newer, platforms} = require('./check-npm-release.cjs');
+const {validateRelease, validateSource, registryState, newer, platforms} = require('./check-npm-release.cjs');
 const sha = (bytes, algorithm = 'sha256', encoding = 'hex') => crypto.createHash(algorithm).update(bytes).digest(encoding);
+test('draft source and published tag must bind the exact checked-out commit', () => {
+  const head = 'a'.repeat(40), other = 'b'.repeat(40);
+  assert.equal(validateSource({draft: true, target_commitish: head}, head, '').source, head);
+  assert.equal(validateSource({draft: false, target_commitish: head}, head, head).tag, head);
+  assert.throws(() => validateSource({draft: true, target_commitish: other}, head, ''), /target differs/);
+  assert.throws(() => validateSource({draft: false, target_commitish: head}, head, other), /tag differs/);
+  assert.throws(() => validateSource({draft: true, target_commitish: 'MacOS'}, head, ''), /target differs/);
+  assert.throws(() => validateSource({draft: true, target_commitish: head}, 'MacOS', ''), /exact commit/);
+});
 function fixture() {
   const pkg = {name: 'caliper-harness', version: '0.1.2'};
   const lock = {...pkg, packages: {'': {...pkg}}};

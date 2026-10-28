@@ -324,7 +324,7 @@ func briefPage(s *store.Store, scope *session.WorkflowScope, args tool.Args, cap
 		if err != nil {
 			return "", err
 		}
-		body = "title:\n" + a.Title
+		body = "approach:\n" + plan.DisplayStructured(a.Title)
 	case "task":
 		t, err := plan.GetTask(s, scope.ID)
 		if err != nil {

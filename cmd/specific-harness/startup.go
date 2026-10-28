@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"specific-harness/internal/bundle"
+	"specific-harness/internal/tools/bash"
 	"specific-harness/internal/tui"
 	"strings"
 	"sync"
@@ -192,7 +193,10 @@ func (s *startupDisplay) dependencies() bool {
 	}
 	s.begin("Tools", "Checking command availability")
 	var missing []string
-	for _, name := range []string{"bash", "rg"} {
+	if _, err := bash.ShellPath(); err != nil {
+		missing = append(missing, "native Bash")
+	}
+	for _, name := range []string{"rg"} {
 		if _, err := bundle.Tool(name); err != nil {
 			missing = append(missing, name)
 		}

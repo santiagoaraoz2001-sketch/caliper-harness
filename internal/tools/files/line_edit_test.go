@@ -3,6 +3,7 @@ package files
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"specific-harness/internal/config"
@@ -43,6 +44,64 @@ func lineInvoke(defs []tool.Definition, native bool, slots map[string]string) (t
 type fmtError string
 
 func (e fmtError) Error() string { return string(e) }
+
+// A whole-line edit must not silently fuse its last replacement line with a
+// caller's untouched code. Exact spans and the end of the file remain literal.
+func TestLineEditBoundaryRefusesBeforePublication(t *testing.T) {
+	for _, native := range []bool{false, true} {
+		for _, newline := range []string{"\n", "\r\n"} {
+			t.Run(fmt.Sprintf("native=%t/newline=%q", native, newline), func(t *testing.T) {
+				root := t.TempDir()
+				path := filepath.Join(root, "a")
+				raw := "head" + newline + "old" + newline + "tail"
+				if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+					t.Fatal(err)
+				}
+				w := &Workspace{Path: root, Caps: config.Defaults().Tools.Bash}
+				defs := w.Definitions()
+				if _, err := invokeDefinitions(t, defs, "read", map[string]string{"path": "a"}); err != nil {
+					t.Fatal(err)
+				}
+				args := map[string]string{"path": "a", "start_line": "2", "end_line": "2", "new": "replacement", "expected_hash": digest([]byte(raw))}
+				res, err := lineInvoke(defs, native, args)
+				if err == nil || !strings.Contains(err.Error(), "untouched line 3") || res.Changed || res.FileEffect != nil {
+					t.Fatalf("ambiguous edit published: %+v %v", res, err)
+				}
+				unchanged, err := os.ReadFile(path)
+				if err != nil || string(unchanged) != raw {
+					t.Fatalf("refusal changed bytes: %q %v", unchanged, err)
+				}
+				// Correction uses the same observation/hash: no forced reread.
+				args["new"] += newline
+				if res, err = lineInvoke(defs, native, args); err != nil || !res.Changed {
+					t.Fatalf("corrected edit: %+v %v", res, err)
+				}
+				want := "head" + newline + "replacement" + newline + "tail"
+				got, _ := os.ReadFile(path)
+				if string(got) != want {
+					t.Fatalf("untouched boundary: %q", got)
+				}
+				// EOF does not need a separator and must not acquire one.
+				if _, err = invokeDefinitions(t, defs, "read", map[string]string{"path": "a"}); err != nil {
+					t.Fatal(err)
+				}
+				args["expected_hash"], args["start_line"], args["end_line"], args["new"] = digest(got), "3", "3", "end"
+				if _, err = lineInvoke(defs, native, args); err != nil {
+					t.Fatal(err)
+				}
+				// An explicit exact-span join is intentional and stays possible.
+				if _, err = lineInvoke(defs, native, map[string]string{"path": "a", "old": "replacement" + newline, "new": "joined"}); err != nil {
+					t.Fatal(err)
+				}
+				got, _ = os.ReadFile(path)
+				if string(got) != "head"+newline+"joinedend" {
+					t.Fatalf("literal exact span/EOF changed: %q", got)
+				}
+			})
+		}
+	}
+}
+
 func TestLineEditInterfaceBytesAndGuards(t *testing.T) {
 	for _, native := range []bool{false, true} {
 		t.Run(map[bool]string{false: "text", true: "native"}[native], func(t *testing.T) {

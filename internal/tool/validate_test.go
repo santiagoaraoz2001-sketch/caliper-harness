@@ -38,3 +38,30 @@ func TestNativeTypeRepairRefersToAdvertisedArgumentsWithoutCallCount(t *testing.
 		t.Fatalf("native repair adds a contradictory call-count instruction: %q", repair)
 	}
 }
+
+func TestNativeSearchArgumentsDoNotBecomeBashEffects(t *testing.T) {
+	d := fixtureTool()
+	d.Purpose = strings.Repeat("Unrelated Git, Python and service guidance. ", 100)
+	for _, raw := range []string{
+		`{"command":"grep","pattern":"^export (function|const|class)"}`,
+		`{"command":"grep","path":"src/core/world.mjs","pattern":"const SAFE|place\\(|wreck|asteroid|debris"}`,
+	} {
+		args, repair := ValidateJSON(d, raw)
+		if args != nil || !strings.Contains(repair, "pattern") || !strings.Contains(repair, "from bash") {
+			t.Fatalf("invalid Bash call must stay refused, not become search: %v %s", args, repair)
+		}
+		if strings.Contains(raw, `"path"`) && !strings.Contains(repair, `"path", "pattern"`) {
+			t.Fatal("repair must name all invalid fields together", repair)
+		}
+		if len(repair) > 600 || strings.Contains(repair, d.Purpose) || strings.Count(repair, "Current arguments:") != 1 {
+			t.Fatalf("repair should contain one bounded argument correction, not repeat full help (%d bytes): %s", len(repair), repair)
+		}
+	}
+	// Existing compatibility is still definition-owned; conflicting aliases stay refused.
+	if args, repair := ValidateJSON(d, `{"command":"echo ok"}`); repair != "" || args["cmd"] != "echo ok" {
+		t.Fatalf("command alias changed: %v %s", args, repair)
+	}
+	if args, repair := ValidateJSON(d, `{"command":"one","cmd":"two"}`); args != nil || repair == "" {
+		t.Fatal("conflicting aliases must not dispatch", args, repair)
+	}
+}

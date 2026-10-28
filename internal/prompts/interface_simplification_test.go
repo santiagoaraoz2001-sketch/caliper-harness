@@ -7,8 +7,11 @@ import (
 
 func TestInterfaceSimplificationKeepsEntryCurrentAndPlanningBoundary(t *testing.T) {
 	pc := Builtin()
-	if got := strings.TrimSpace(pc.Text("planning.entry")); got != "Call plan with {}; returns the first question." {
-		t.Fatalf("entry competes with later questions: %s", got)
+	entry := strings.TrimSpace(pc.Text("planning.entry"))
+	for _, required := range []string{"Call plan with {} alone", "do not combine", "first question", "current allowed fields"} {
+		if !strings.Contains(entry, required) {
+			t.Fatalf("entry lost its atomic current-question contract %q: %s", required, entry)
+		}
 	}
 	for _, key := range []string{"planning.entry", "help.plan", "system.task.prepare", "system.workflow.focused", "preparation.guided_next"} {
 		text := pc.Text(key)

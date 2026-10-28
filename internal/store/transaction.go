@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/kuzudb/go-kuzu"
 )
 
 // Tx uses the writer connection only during Update. Callbacks must use Tx,
-// never Store methods: a nested queued write cannot finish until they return.
+// never Store methods: the writer owns reader exclusion and queued writes;
+// either a nested Store read or write cannot finish until the callback returns.
 type Tx struct {
 	conn *kuzu.Connection
 	ctx  context.Context
@@ -73,7 +75,7 @@ func (s *Store) UpdateContext(ctx context.Context, fn func(*Tx) error) error {
 func (d *database) transactContext(conn *kuzu.Connection, ctx context.Context, fn func(*Tx) error) (err error) {
 	tx := &Tx{conn: conn, ctx: ctx}
 	if err = tx.Write("BEGIN TRANSACTION", nil); err != nil {
-		return err
+		return fmt.Errorf("begin transaction: %w", err)
 	}
 	tx.used = false // BEGIN is owned here, not a callback statement.
 	committed := false
@@ -87,6 +89,15 @@ func (d *database) transactContext(conn *kuzu.Connection, ctx context.Context, f
 			conn.SetTimeout(0)
 			used := tx.used
 			rollbackErr := tx.Write("ROLLBACK", nil)
+			rollbackConfirmed := rollbackErr == nil
+			// Some failed native statements already end the transaction. Preserve
+			// the primary error without claiming confirmed rollback or replay safety.
+			if rollbackErr != nil && strings.Contains(rollbackErr.Error(), "No active transaction for ROLLBACK") {
+				rollbackErr = nil
+			}
+			if rollbackErr != nil {
+				rollbackErr = fmt.Errorf("rollback cleanup: %w", rollbackErr)
+			}
 			var maintenanceErr error
 			if used {
 				// Kuzu0.11.3 leaves a stale next-version pointer after rolling
@@ -97,29 +108,35 @@ func (d *database) transactContext(conn *kuzu.Connection, ctx context.Context, f
 				// its checkpoint waits while holding their cleanup mutex.
 				maintenanceErr = d.checkpointAfterRollback(conn)
 			}
-			err = &TransactionError{err: errors.Join(err, rollbackErr, maintenanceErr), rolledBack: !commitAttempted && rollbackErr == nil, maintenanceErr: maintenanceErr}
+			err = &TransactionError{err: errors.Join(err, rollbackErr, maintenanceErr), rolledBack: !commitAttempted && rollbackConfirmed, maintenanceErr: maintenanceErr}
 		}
 		tx.conn = nil
 	}()
 	if err = fn(tx); err != nil {
+		err = fmt.Errorf("transaction callback: %w", err)
 		return err
 	}
 	commitAttempted = true
 	err = tx.Write("COMMIT", nil)
 	committed = err == nil
+	if err != nil {
+		err = fmt.Errorf("commit transaction (outcome uncertain): %w", err)
+	}
 	return err
 }
 
 // Called only by the serialized writer after native statement settlement.
 func (d *database) checkpointAfterRollback(conn *kuzu.Connection) error {
-	d.readers.Lock()
-	defer d.readers.Unlock()
+	// The serialized writer already holds the reader exclusion through settlement.
 	conn.SetTimeout(0)
 	result, err := run(conn, "CHECKPOINT", nil)
 	if result != nil {
 		result.Close()
 	}
-	return err
+	if err != nil {
+		return fmt.Errorf("checkpoint after rollback: %w", err)
+	}
+	return nil
 }
 
 func (d *database) writeStatement(conn *kuzu.Connection, query string, params map[string]any) error {

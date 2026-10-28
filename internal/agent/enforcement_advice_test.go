@@ -123,7 +123,7 @@ func TestEnforcementReceivesProtectedUserRequestsAndActualFinal(t *testing.T) {
 				return decision.Verdict{Option: coherent, Confidence: .9}, nil
 			}
 			text, _, err := r.Run(context.Background(), request)
-			if err != nil || text != answer || r.Outcome.Status != outcome.Stopped || len(model.seen) != 2 || len(seen) != 2 || seen[0] || !seen[1] {
+			if err != nil || text != answer || r.Outcome.Status != outcome.Completed || len(model.seen) != 2 || len(seen) != 1 || !seen[0] {
 				t.Fatalf("control changed: text=%q outcome=%+v generations=%d decisions=%v error=%v", text, r.Outcome, len(model.seen), seen, err)
 			}
 		})

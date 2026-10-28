@@ -1,0 +1,1565 @@
+{
+  "provenance": "Derived metadata from candidate9 reviewer 20261026-184002-1509; all100 settled calls in order. Source bodies/reasoning remain TEMP. Non-read outputs are represented by their exact original digest, preserving equality only; this is packet replay, not provider inference.",
+  "archive_sha256": "6fe5f504436a5fc4eadca1db362bb565367389873ba7372611ec5b58204a9efc",
+  "receipts": [
+    {
+      "line": 12,
+      "tool": "read",
+      "args": {
+        "limit": 2000,
+        "offset": 1,
+        "outline": false,
+        "path": "package.json"
+      },
+      "receipt_sha256": "f04ea2d9d5a3ee0b181d5a5e80de031000226b0498c8712fb2eace8b63e1ef2e",
+      "projection": "package.json sha256=3f4a593ba3d8db285639ca7f43bbc9472d4d864440dd25f230b5b1448372319d\n[source body omitted in derived regression fixture]\n[15 lines shown from line 1; shown_range=1-15; EOF=true; truncated=false; metadata not source lines]",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-1-0"
+    },
+    {
+      "line": 15,
+      "tool": "read",
+      "args": {
+        "limit": 2000,
+        "offset": 1,
+        "outline": false,
+        "path": "server.mjs"
+      },
+      "receipt_sha256": "863b3110499a607fa775b665243248e005b5be87e542cbf20e7648ae5eefc3e3",
+      "projection": "server.mjs sha256=2b588111abea543838c4a44146d87c0b2fc22f7262f015cd1edd64fde2c4b6de\n[source body omitted in derived regression fixture]\n[72 lines shown from line 1; shown_range=1-72; EOF=true; truncated=false; metadata not source lines]",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-1-1"
+    },
+    {
+      "line": 18,
+      "tool": "read",
+      "args": {
+        "limit": 2000,
+        "offset": 1,
+        "outline": false,
+        "path": "tests\\run.mjs"
+      },
+      "receipt_sha256": "8ed7300d25b573965258224edc1c0705b57ea26b1f303f7e7f73fb90433ee034",
+      "projection": "tests\\run.mjs sha256=515b3c8cd55602ba325a82d0543b4d7e5628c0c57a331fad44bc7ede470a73ae\n[source body omitted in derived regression fixture]\n[140 lines shown from line 1; shown_range=1-140; EOF=true; truncated=false; metadata not source lines]",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-1-2"
+    },
+    {
+      "line": 26,
+      "tool": "read",
+      "args": {
+        "limit": 2000,
+        "offset": 1,
+        "outline": false,
+        "path": "README.md"
+      },
+      "receipt_sha256": "c0a68486564574a0dec4d610798d27799ff89409b99d491f003d95acf1afcc3e",
+      "projection": "README.md sha256=1ea6c82cbde61761c8dec4018c546eccf698d9b15a7c1e425bc683396eb39482\n[source body omitted in derived regression fixture]\n[63 lines shown from line 1; shown_range=1-63; EOF=true; truncated=false; metadata not source lines]",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-4-0"
+    },
+    {
+      "line": 29,
+      "tool": "read",
+      "args": {
+        "limit": 2000,
+        "offset": 1,
+        "outline": false,
+        "path": "DESIGN.md"
+      },
+      "receipt_sha256": "86db1b67ce6dc23d23d968eca8a599bb1409d7b100fcb4b3c2ff52ed04f1ef20",
+      "projection": "DESIGN.md sha256=805a19e5876f425b6900d943aa1e9d2cae122b7976a0af361c5c183bf39970c9\n[source body omitted in derived regression fixture]\n[67 lines shown from line 1; shown_range=1-67; EOF=true; truncated=false; metadata not source lines]",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-4-1"
+    },
+    {
+      "line": 32,
+      "tool": "find_file",
+      "args": {
+        "offset": 0,
+        "path": ".",
+        "pattern": "*"
+      },
+      "receipt_sha256": "b87e8c6fe6e42a943427a9683610321ec88d1b61c62235259c9ed643e582bf39",
+      "projection": "observed result sha256=b87e8c6fe6e42a943427a9683610321ec88d1b61c62235259c9ed643e582bf39",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-4-2"
+    },
+    {
+      "line": 44,
+      "tool": "grep",
+      "args": {
+        "context": 3,
+        "ignore_case": false,
+        "limit": 100,
+        "literal": false,
+        "offset": 0,
+        "path": "server.mjs",
+        "pattern": "decodeURIComponent"
+      },
+      "receipt_sha256": "e343d0ba7c62a1d3aec7997c7466a91b9832cc35c4bf66d4622c5945126347dc",
+      "projection": "observed result sha256=e343d0ba7c62a1d3aec7997c7466a91b9832cc35c4bf66d4622c5945126347dc",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-7-0"
+    },
+    {
+      "line": 52,
+      "tool": "read",
+      "args": {
+        "limit": 14,
+        "offset": 24,
+        "outline": false,
+        "path": "server.mjs"
+      },
+      "receipt_sha256": "d94c99f6f713d94eebcb890bef8024732623fdfe7a18c1689309688cd4f3cbbc",
+      "projection": "tool result (truncated):\n[source body omitted in derived regression fixture]\n[14 lines shown from line 24; shown_range=24-37; EOF=false; truncated=true; next_offset=38; metadata not source lines]",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-8-0"
+    },
+    {
+      "line": 60,
+      "tool": "read",
+      "args": {
+        "limit": 10,
+        "offset": 33,
+        "outline": false,
+        "path": "server.mjs"
+      },
+      "receipt_sha256": "389727c01b45b14c0b4a29d5648b04ab6aa774e2b0279efc13b7d5db5fd74e1f",
+      "projection": "tool result (truncated):\n[source body omitted in derived regression fixture]\n[10 lines shown from line 33; shown_range=33-42; EOF=false; truncated=true; next_offset=43; metadata not source lines]",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-9-0"
+    },
+    {
+      "line": 68,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 5,
+        "literal": false,
+        "offset": 0,
+        "path": "server.mjs",
+        "pattern": "const p = normalize"
+      },
+      "receipt_sha256": "35065bee63424ff451191bfb4c082f3287ec45a48b017661225fed5b3c18bc8a",
+      "projection": "observed result sha256=35065bee63424ff451191bfb4c082f3287ec45a48b017661225fed5b3c18bc8a",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-10-0"
+    },
+    {
+      "line": 80,
+      "tool": "find_file",
+      "args": {
+        "offset": 0,
+        "path": ".",
+        "pattern": "*.html"
+      },
+      "receipt_sha256": "31e959c92547f5e34feefb5643c93944985c70366923dd3d81f894ee727916a0",
+      "projection": "observed result sha256=31e959c92547f5e34feefb5643c93944985c70366923dd3d81f894ee727916a0",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-11-0"
+    },
+    {
+      "line": 88,
+      "tool": "grep",
+      "args": {
+        "context": 2,
+        "ignore_case": false,
+        "limit": 100,
+        "literal": false,
+        "offset": 0,
+        "path": "server.mjs",
+        "pattern": "\\.\\."
+      },
+      "receipt_sha256": "1d7f63e35c0ad1d3ecca61ef976d019abbfe54d519f366fbbeb581d6abc89cb1",
+      "projection": "observed result sha256=1d7f63e35c0ad1d3ecca61ef976d019abbfe54d519f366fbbeb581d6abc89cb1",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-12-0"
+    },
+    {
+      "line": 96,
+      "tool": "grep",
+      "args": {
+        "context": 2,
+        "ignore_case": false,
+        "limit": 100,
+        "literal": true,
+        "offset": 0,
+        "path": "server.mjs",
+        "pattern": "%2e%2e"
+      },
+      "receipt_sha256": "1d7f63e35c0ad1d3ecca61ef976d019abbfe54d519f366fbbeb581d6abc89cb1",
+      "projection": "observed result sha256=1d7f63e35c0ad1d3ecca61ef976d019abbfe54d519f366fbbeb581d6abc89cb1",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-13-0"
+    },
+    {
+      "line": 99,
+      "tool": "find_file",
+      "args": {
+        "offset": 0,
+        "path": ".",
+        "pattern": "**/*"
+      },
+      "receipt_sha256": "b87e8c6fe6e42a943427a9683610321ec88d1b61c62235259c9ed643e582bf39",
+      "projection": "observed result sha256=b87e8c6fe6e42a943427a9683610321ec88d1b61c62235259c9ed643e582bf39",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-13-1"
+    },
+    {
+      "line": 107,
+      "tool": "grep",
+      "args": {
+        "context": 4,
+        "ignore_case": false,
+        "limit": 100,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "scaffold ok"
+      },
+      "receipt_sha256": "8e2d9138d86b95b918e75f237179a1774f91f8c9ff8700b47c35a7b704a55b8f",
+      "projection": "observed result sha256=8e2d9138d86b95b918e75f237179a1774f91f8c9ff8700b47c35a7b704a55b8f",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-15-0"
+    },
+    {
+      "line": 119,
+      "tool": "grep",
+      "args": {
+        "context": 2,
+        "ignore_case": false,
+        "limit": 100,
+        "literal": false,
+        "offset": 0,
+        "path": "server.mjs",
+        "pattern": "ROOT \\+ sep"
+      },
+      "receipt_sha256": "eb5841581838e845d1572d5a1b59a17d4af5e656a00f7f89d005b945511f2c62",
+      "projection": "observed result sha256=eb5841581838e845d1572d5a1b59a17d4af5e656a00f7f89d005b945511f2c62",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-16-0"
+    },
+    {
+      "line": 127,
+      "tool": "read",
+      "args": {
+        "limit": 1,
+        "offset": 34,
+        "outline": false,
+        "path": "server.mjs"
+      },
+      "receipt_sha256": "02be8f069538c6084b5ded235916ce5c00dc5a4f2e708804fcc67141b3b707b0",
+      "projection": "tool result (truncated):\n[source body omitted in derived regression fixture]\n[1 lines shown from line 34; shown_range=34-34; EOF=false; truncated=true; next_offset=35; metadata not source lines]",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-17-0"
+    },
+    {
+      "line": 135,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 1,
+        "literal": false,
+        "offset": 0,
+        "path": "server.mjs",
+        "pattern": "decodeURIComponent"
+      },
+      "receipt_sha256": "8c2220cc62fb0b9183403aaf98645b0681af3ded45207147570c753a91e42584",
+      "projection": "observed result sha256=8c2220cc62fb0b9183403aaf98645b0681af3ded45207147570c753a91e42584",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-18-0"
+    },
+    {
+      "line": 143,
+      "tool": "grep",
+      "args": {
+        "context": 3,
+        "ignore_case": false,
+        "limit": 100,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "console.log\\(`\\$\\{passed\\}"
+      },
+      "receipt_sha256": "c28d480ddfe1118d7018313a30385bbffa6a821a2b4d557c4fcf501ee4f257c2",
+      "projection": "observed result sha256=c28d480ddfe1118d7018313a30385bbffa6a821a2b4d557c4fcf501ee4f257c2",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-19-0"
+    },
+    {
+      "line": 151,
+      "tool": "grep",
+      "args": {
+        "context": 6,
+        "ignore_case": false,
+        "limit": 100,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "failed > 0"
+      },
+      "receipt_sha256": "f772c77f981580206517fc47acd59c978a8b15606ce9034716fcecc9221cf4b9",
+      "projection": "observed result sha256=f772c77f981580206517fc47acd59c978a8b15606ce9034716fcecc9221cf4b9",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-20-0"
+    },
+    {
+      "line": 163,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "glob": "*.mjs",
+        "ignore_case": false,
+        "limit": 30,
+        "literal": false,
+        "offset": 0,
+        "path": ".",
+        "pattern": "import .* from '(?!\\.|node:)"
+      },
+      "receipt_sha256": "cb91eb560e379d142bf3f0fbfcbb265c230b322235a9442f59f3edc2f5c92895",
+      "projection": "observed result sha256=cb91eb560e379d142bf3f0fbfcbb265c230b322235a9442f59f3edc2f5c92895",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-21-0"
+    },
+    {
+      "line": 171,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "glob": "*.mjs",
+        "ignore_case": false,
+        "limit": 40,
+        "literal": false,
+        "offset": 0,
+        "path": ".",
+        "pattern": "^import"
+      },
+      "receipt_sha256": "dffd53c1d6dcc913f2310ae1679785b8c97962b3ad3d65d73f49c22054595020",
+      "projection": "observed result sha256=dffd53c1d6dcc913f2310ae1679785b8c97962b3ad3d65d73f49c22054595020",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-22-0"
+    },
+    {
+      "line": 179,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 10,
+        "literal": false,
+        "offset": 0,
+        "path": "README.md",
+        "pattern": "npm start"
+      },
+      "receipt_sha256": "75db6373d9e37caf0bc106f4f2f822713023e57c620d212b0e1f3636f4f884ae",
+      "projection": "observed result sha256=75db6373d9e37caf0bc106f4f2f822713023e57c620d212b0e1f3636f4f884ae",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-23-0"
+    },
+    {
+      "line": 182,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 10,
+        "literal": false,
+        "offset": 0,
+        "path": "README.md",
+        "pattern": "## Controls"
+      },
+      "receipt_sha256": "6112540a11a94aa54a8561340c20d3d5eb5ae5309e24ad3731bd7626389ba61d",
+      "projection": "observed result sha256=6112540a11a94aa54a8561340c20d3d5eb5ae5309e24ad3731bd7626389ba61d",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-23-1"
+    },
+    {
+      "line": 190,
+      "tool": "grep",
+      "args": {
+        "context": 1,
+        "ignore_case": false,
+        "limit": 100,
+        "literal": false,
+        "offset": 0,
+        "path": "README.md",
+        "pattern": "4173"
+      },
+      "receipt_sha256": "083e3827b598b0657e1708b816f195cafc5ae3ed6bca23a8f0f9c2cf6014c966",
+      "projection": "observed result sha256=083e3827b598b0657e1708b816f195cafc5ae3ed6bca23a8f0f9c2cf6014c966",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-25-0"
+    },
+    {
+      "line": 193,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 100,
+        "literal": false,
+        "offset": 0,
+        "path": "README.md",
+        "pattern": "npm run check"
+      },
+      "receipt_sha256": "a0b48ea92f5d7120e77136be41bf330ef5d4cbfe5c220c9fd1308215ebdfa54b",
+      "projection": "observed result sha256=a0b48ea92f5d7120e77136be41bf330ef5d4cbfe5c220c9fd1308215ebdfa54b",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-25-1"
+    },
+    {
+      "line": 205,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 5,
+        "literal": false,
+        "offset": 0,
+        "path": "server.mjs",
+        "pattern": "normalize\\(join"
+      },
+      "receipt_sha256": "35065bee63424ff451191bfb4c082f3287ec45a48b017661225fed5b3c18bc8a",
+      "projection": "observed result sha256=35065bee63424ff451191bfb4c082f3287ec45a48b017661225fed5b3c18bc8a",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-27-0"
+    },
+    {
+      "line": 213,
+      "tool": "grep",
+      "args": {
+        "context": 2,
+        "ignore_case": false,
+        "limit": 100,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "process.exitCode"
+      },
+      "receipt_sha256": "9d3697201d6da5acac182baa701485fef09d7d9f9b9ae549003b7d8cde8f8d7d",
+      "projection": "observed result sha256=9d3697201d6da5acac182baa701485fef09d7d9f9b9ae549003b7d8cde8f8d7d",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-28-0"
+    },
+    {
+      "line": 221,
+      "tool": "grep",
+      "args": {
+        "context": 3,
+        "ignore_case": false,
+        "limit": 100,
+        "literal": false,
+        "offset": 0,
+        "path": "server.mjs",
+        "pattern": "server.listen"
+      },
+      "receipt_sha256": "c8d3997b7c0efc35d8ffdc0058dc3fdc6ae63e6d5823cf523db39de50ba97f24",
+      "projection": "observed result sha256=c8d3997b7c0efc35d8ffdc0058dc3fdc6ae63e6d5823cf523db39de50ba97f24",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-29-0"
+    },
+    {
+      "line": 229,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "server.mjs",
+        "pattern": "normalize"
+      },
+      "receipt_sha256": "206929ac90fa31014fd84f5b5a31774a1f59bc45a77462c5eaaca54819944cc4",
+      "projection": "observed result sha256=206929ac90fa31014fd84f5b5a31774a1f59bc45a77462c5eaaca54819944cc4",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-30-0"
+    },
+    {
+      "line": 241,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 5,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "ok\\('README has a controls section'"
+      },
+      "receipt_sha256": "f5571def820c936aec6629d9a0067c7692ca67e9b9f28820a12f9661feb78ee5",
+      "projection": "observed result sha256=f5571def820c936aec6629d9a0067c7692ca67e9b9f28820a12f9661feb78ee5",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-31-0"
+    },
+    {
+      "line": 249,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 5,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "readme.includes"
+      },
+      "receipt_sha256": "b4b8c9320cb85ee995f15492f968a281a7f144b074a81d22b2f7508f834ce6f2",
+      "projection": "observed result sha256=b4b8c9320cb85ee995f15492f968a281a7f144b074a81d22b2f7508f834ce6f2",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-32-0"
+    },
+    {
+      "line": 257,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "readFileSync"
+      },
+      "receipt_sha256": "6373838cbb2ce663e5add1509c37d2ce196781c7a3fe7b9041bc7b1cfe2f66a4",
+      "projection": "observed result sha256=6373838cbb2ce663e5add1509c37d2ce196781c7a3fe7b9041bc7b1cfe2f66a4",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-33-0"
+    },
+    {
+      "line": 265,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "throw"
+      },
+      "receipt_sha256": "1d7f63e35c0ad1d3ecca61ef976d019abbfe54d519f366fbbeb581d6abc89cb1",
+      "projection": "observed result sha256=1d7f63e35c0ad1d3ecca61ef976d019abbfe54d519f366fbbeb581d6abc89cb1",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-34-0"
+    },
+    {
+      "line": 273,
+      "tool": "grep",
+      "args": {
+        "context": 2,
+        "ignore_case": false,
+        "limit": 100,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "catch"
+      },
+      "receipt_sha256": "e2e4407a4f6a55881200a0f1648bb323f1c124192ee5bb1df24ea60768be548f",
+      "projection": "observed result sha256=e2e4407a4f6a55881200a0f1648bb323f1c124192ee5bb1df24ea60768be548f",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-35-0"
+    },
+    {
+      "line": 285,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 5,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "process.exit"
+      },
+      "receipt_sha256": "2ce1d56110834a910801b8e4987f2efe397ecdf1decae19b380657747fc4edc0",
+      "projection": "observed result sha256=2ce1d56110834a910801b8e4987f2efe397ecdf1decae19b380657747fc4edc0",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-36-0"
+    },
+    {
+      "line": 293,
+      "tool": "grep",
+      "args": {
+        "context": 2,
+        "ignore_case": false,
+        "limit": 100,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "JSON.parse"
+      },
+      "receipt_sha256": "7e703cca5f08e77177e8fd49003a393b7ae69cb9d5d88c6455367ae3f4ff6b46",
+      "projection": "observed result sha256=7e703cca5f08e77177e8fd49003a393b7ae69cb9d5d88c6455367ae3f4ff6b46",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-37-0"
+    },
+    {
+      "line": 301,
+      "tool": "grep",
+      "args": {
+        "context": 1,
+        "ignore_case": false,
+        "limit": 100,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "testCore|core.test.mjs"
+      },
+      "receipt_sha256": "71841a5c21cad269b2440be6c6b68dfc630f00b4ab345f2b7db26de1c29e1378",
+      "projection": "observed result sha256=71841a5c21cad269b2440be6c6b68dfc630f00b4ab345f2b7db26de1c29e1378",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-38-0"
+    },
+    {
+      "line": 309,
+      "tool": "grep",
+      "args": {
+        "context": 1,
+        "ignore_case": false,
+        "limit": 100,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "read\\('README.md'\\)|read\\('DESIGN.md'\\)|read\\('server.mjs'\\)"
+      },
+      "receipt_sha256": "fdfcf30e6e65324527945d46eccb0950f28bd62ff371548ef062b5fa8d408bb5",
+      "projection": "observed result sha256=fdfcf30e6e65324527945d46eccb0950f28bd62ff371548ef062b5fa8d408bb5",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-39-0"
+    },
+    {
+      "line": 317,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "readme = read"
+      },
+      "receipt_sha256": "f4d989b0ea74b7255ece1abe9ee585f247e5033fb1eb2594df2d4d69b1daa5e2",
+      "projection": "observed result sha256=f4d989b0ea74b7255ece1abe9ee585f247e5033fb1eb2594df2d4d69b1daa5e2",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-40-0"
+    },
+    {
+      "line": 329,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 10,
+        "literal": false,
+        "offset": 0,
+        "path": "README.md",
+        "pattern": "src/|server.mjs|tests/run.mjs|index.html"
+      },
+      "receipt_sha256": "e2c1c9905bc4a996d69dcf9b96dbeac0fbc3e4f6148a009e933b776ffa3bbaf1",
+      "projection": "observed result sha256=e2c1c9905bc4a996d69dcf9b96dbeac0fbc3e4f6148a009e933b776ffa3bbaf1",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-41-0"
+    },
+    {
+      "line": 337,
+      "tool": "grep",
+      "args": {
+        "context": 2,
+        "ignore_case": false,
+        "limit": 100,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "read\\(rel\\)"
+      },
+      "receipt_sha256": "eba022f54c459784b6c8ed3aa9fa60372b9637fc55b2ffdbe9ec432c0efc5039",
+      "projection": "observed result sha256=eba022f54c459784b6c8ed3aa9fa60372b9637fc55b2ffdbe9ec432c0efc5039",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-42-0"
+    },
+    {
+      "line": 345,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "const readme = read"
+      },
+      "receipt_sha256": "f4d989b0ea74b7255ece1abe9ee585f247e5033fb1eb2594df2d4d69b1daa5e2",
+      "projection": "observed result sha256=f4d989b0ea74b7255ece1abe9ee585f247e5033fb1eb2594df2d4d69b1daa5e2",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-43-0"
+    },
+    {
+      "line": 353,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "skip|SKIP"
+      },
+      "receipt_sha256": "a3452de0620cbf46f7632fa1610816e2b398ad8be78d1556528388537b8ad8ed",
+      "projection": "observed result sha256=a3452de0620cbf46f7632fa1610816e2b398ad8be78d1556528388537b8ad8ed",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-44-0"
+    },
+    {
+      "line": 361,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "ok\\('package.json parses'"
+      },
+      "receipt_sha256": "361a4e92890e086e985b99eb23d4f198ac97f5a56d51c290ab2f637bbd18ea51",
+      "projection": "observed result sha256=361a4e92890e086e985b99eb23d4f198ac97f5a56d51c290ab2f637bbd18ea51",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-45-0"
+    },
+    {
+      "line": 373,
+      "tool": "grep",
+      "args": {
+        "context": 1,
+        "ignore_case": false,
+        "limit": 100,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "ok\\('scripts.start"
+      },
+      "receipt_sha256": "8fa06f7a2869597dd047fc2bf6448f7db862d3a2f5546bb0d75ea8928b39d456",
+      "projection": "observed result sha256=8fa06f7a2869597dd047fc2bf6448f7db862d3a2f5546bb0d75ea8928b39d456",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-46-0"
+    },
+    {
+      "line": 381,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 6,
+        "literal": false,
+        "offset": 0,
+        "path": "README.md",
+        "pattern": "DESIGN.md|README"
+      },
+      "receipt_sha256": "e18338158d2d1d3429a1b486c782eb4d6049ea2fac19cd352ae1ec7effdfb69b",
+      "projection": "observed result sha256=e18338158d2d1d3429a1b486c782eb4d6049ea2fac19cd352ae1ec7effdfb69b",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-47-0"
+    },
+    {
+      "line": 389,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 6,
+        "literal": false,
+        "offset": 0,
+        "path": "server.mjs",
+        "pattern": "from '"
+      },
+      "receipt_sha256": "f4aea89d7f13d7cf3ef279a562f3d99a97f001409dd3112fda402e187dd5df9d",
+      "projection": "observed result sha256=f4aea89d7f13d7cf3ef279a562f3d99a97f001409dd3112fda402e187dd5df9d",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-48-0"
+    },
+    {
+      "line": 397,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 30,
+        "literal": false,
+        "offset": 0,
+        "path": ".",
+        "pattern": "https?:"
+      },
+      "receipt_sha256": "e943d0214cd7a344a6418437aecce41098fbcf89c546c85092b1e08f2f78dc86",
+      "projection": "observed result sha256=e943d0214cd7a344a6418437aecce41098fbcf89c546c85092b1e08f2f78dc86",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-49-0"
+    },
+    {
+      "line": 405,
+      "tool": "find_dir",
+      "args": {
+        "limit": 2000,
+        "offset": 1,
+        "path": ".",
+        "pattern": "*"
+      },
+      "receipt_sha256": "5d2903db0238429a92261d9617314c1244c81951f87a150578efb40e2b0bd5c5",
+      "projection": "observed result sha256=5d2903db0238429a92261d9617314c1244c81951f87a150578efb40e2b0bd5c5",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-50-0"
+    },
+    {
+      "line": 417,
+      "tool": "find_file",
+      "args": {
+        "offset": 0,
+        "path": "tests",
+        "pattern": "*"
+      },
+      "receipt_sha256": "aaed19bdd7bdc9bc687898b861207eead7392337bf01c58572c9cc1d47bf0553",
+      "projection": "observed result sha256=aaed19bdd7bdc9bc687898b861207eead7392337bf01c58572c9cc1d47bf0553",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-51-0"
+    },
+    {
+      "line": 425,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "scripts.check"
+      },
+      "receipt_sha256": "685dfd656f5312b95d7a329abea018d4ee0f8be5927d7297187dfd1c41b1929d",
+      "projection": "observed result sha256=685dfd656f5312b95d7a329abea018d4ee0f8be5927d7297187dfd1c41b1929d",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-52-0"
+    },
+    {
+      "line": 433,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "main\\(\\)"
+      },
+      "receipt_sha256": "92d284c520ba4d4394d22b1abb67b5e82d658323db880ce68f78a004bc65cb4e",
+      "projection": "observed result sha256=92d284c520ba4d4394d22b1abb67b5e82d658323db880ce68f78a004bc65cb4e",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-53-0"
+    },
+    {
+      "line": 441,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 10,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "ok\\("
+      },
+      "receipt_sha256": "543ebbe63190c18752fa84e4bbd378082307ae70e6c0c960ff0f92ec0bc0dc4a",
+      "projection": "observed result sha256=543ebbe63190c18752fa84e4bbd378082307ae70e6c0c960ff0f92ec0bc0dc4a",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-54-0"
+    },
+    {
+      "line": 449,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 10,
+        "literal": false,
+        "offset": 10,
+        "path": "tests\\run.mjs",
+        "pattern": "ok\\("
+      },
+      "receipt_sha256": "317833c6aed02678529415c6dbebb8ff33a2723a1e4704cb66de5de47fb78af6",
+      "projection": "observed result sha256=317833c6aed02678529415c6dbebb8ff33a2723a1e4704cb66de5de47fb78af6",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-55-0"
+    },
+    {
+      "line": 461,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "const pkg = JSON.parse"
+      },
+      "receipt_sha256": "eaca90ee507341af204025011ca9321f12cbf62e4a7aa7375b032b3ab86dd368",
+      "projection": "observed result sha256=eaca90ee507341af204025011ca9321f12cbf62e4a7aa7375b032b3ab86dd368",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-56-0"
+    },
+    {
+      "line": 469,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "external imports"
+      },
+      "receipt_sha256": "02d040614591a12f7e892b128a696ef7d9bee19094115df555c5af80b3ab65dd",
+      "projection": "observed result sha256=02d040614591a12f7e892b128a696ef7d9bee19094115df555c5af80b3ab65dd",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-57-0"
+    },
+    {
+      "line": 477,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "from\\\\s"
+      },
+      "receipt_sha256": "349270c7bf83b8569acd9cccad675efc1fb43645f58be608a884af91885d4a85",
+      "projection": "observed result sha256=349270c7bf83b8569acd9cccad675efc1fb43645f58be608a884af91885d4a85",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-58-0"
+    },
+    {
+      "line": 485,
+      "tool": "grep",
+      "args": {
+        "context": 1,
+        "ignore_case": false,
+        "limit": 5,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "no external imports|process.exitCode = 1"
+      },
+      "receipt_sha256": "5317199ba15389a60f1553502bc1be27dcfc70969559baccbd03c42e938b2e67",
+      "projection": "observed result sha256=5317199ba15389a60f1553502bc1be27dcfc70969559baccbd03c42e938b2e67",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-59-0"
+    },
+    {
+      "line": 493,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "scaffold ok"
+      },
+      "receipt_sha256": "23e323bf9ef42bdd6445970b1a563f066cd22b208cf366f7bb8e5d19916dfd9d",
+      "projection": "observed result sha256=23e323bf9ef42bdd6445970b1a563f066cd22b208cf366f7bb8e5d19916dfd9d",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-60-0"
+    },
+    {
+      "line": 505,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "'package.json parses'"
+      },
+      "receipt_sha256": "361a4e92890e086e985b99eb23d4f198ac97f5a56d51c290ab2f637bbd18ea51",
+      "projection": "observed result sha256=361a4e92890e086e985b99eb23d4f198ac97f5a56d51c290ab2f637bbd18ea51",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-61-0"
+    },
+    {
+      "line": 513,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "readFileSync\\(join"
+      },
+      "receipt_sha256": "b76b2513d7554b32d9cda947f944c6bb987254b7715e8787c137d5eb4a034e77",
+      "projection": "observed result sha256=b76b2513d7554b32d9cda947f944c6bb987254b7715e8787c137d5eb4a034e77",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-62-0"
+    },
+    {
+      "line": 521,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "'Verified log'"
+      },
+      "receipt_sha256": "1d7f63e35c0ad1d3ecca61ef976d019abbfe54d519f366fbbeb581d6abc89cb1",
+      "projection": "observed result sha256=1d7f63e35c0ad1d3ecca61ef976d019abbfe54d519f366fbbeb581d6abc89cb1",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-63-0"
+    },
+    {
+      "line": 529,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "Verified log"
+      },
+      "receipt_sha256": "a44b3af188d62276e2803be0e17f915df2b6d38205762a93fd5c3c71f2a1af0b",
+      "projection": "observed result sha256=a44b3af188d62276e2803be0e17f915df2b6d38205762a93fd5c3c71f2a1af0b",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-64-0"
+    },
+    {
+      "line": 537,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "DESIGN.md",
+        "pattern": "Verified log"
+      },
+      "receipt_sha256": "567df2d98adab96433b99f8cab4d440c92bd7952c14fbaa55f5a971d698c004f",
+      "projection": "observed result sha256=567df2d98adab96433b99f8cab4d440c92bd7952c14fbaa55f5a971d698c004f",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-65-0"
+    },
+    {
+      "line": 549,
+      "tool": "grep",
+      "args": {
+        "context": 1,
+        "ignore_case": false,
+        "limit": 100,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "testStaticIntegrity|indexHtml"
+      },
+      "receipt_sha256": "b05cef1b61f633c4588f62dd800687e3bb36e904798c68d91df58efa45bd2221",
+      "projection": "observed result sha256=b05cef1b61f633c4588f62dd800687e3bb36e904798c68d91df58efa45bd2221",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-66-0"
+    },
+    {
+      "line": 557,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "function walk"
+      },
+      "receipt_sha256": "a23830c728d41c03b85ac1219f5f12508b6d26fc429fdff0c9020ac934d1b62b",
+      "projection": "observed result sha256=a23830c728d41c03b85ac1219f5f12508b6d26fc429fdff0c9020ac934d1b62b",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-67-0"
+    },
+    {
+      "line": 565,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "node_modules"
+      },
+      "receipt_sha256": "e7a5c6eea68c6349d2a129cb1a5245c0df2e31c0783762370df4f97d947d518d",
+      "projection": "observed result sha256=e7a5c6eea68c6349d2a129cb1a5245c0df2e31c0783762370df4f97d947d518d",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-68-0"
+    },
+    {
+      "line": 573,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "await mod.default"
+      },
+      "receipt_sha256": "39b910aa138e1b4b5bc77441c8ca6b64c316410f929df8ec45d07b16f1a28a74",
+      "projection": "observed result sha256=39b910aa138e1b4b5bc77441c8ca6b64c316410f929df8ec45d07b16f1a28a74",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-69-0"
+    },
+    {
+      "line": 581,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 5,
+        "literal": false,
+        "offset": 0,
+        "path": "README.md",
+        "pattern": "Auto-save|auto-save|auto-saves"
+      },
+      "receipt_sha256": "907a228aeded0603ffae28446dda7e59b727513bebc2253c14290667709941be",
+      "projection": "observed result sha256=907a228aeded0603ffae28446dda7e59b727513bebc2253c14290667709941be",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-70-0"
+    },
+    {
+      "line": 593,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "check.*node tests/run.mjs"
+      },
+      "receipt_sha256": "9c921284d4f88987beac6b4b415d64f8de9709d6bb1e325b6772a7e5dddc40aa",
+      "projection": "observed result sha256=9c921284d4f88987beac6b4b415d64f8de9709d6bb1e325b6772a7e5dddc40aa",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-71-0"
+    },
+    {
+      "line": 601,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "testScaffold\\(\\)"
+      },
+      "receipt_sha256": "780a587297fa2d3ec97ecc52fd88b6201a7057364626678fd876b499c3b8c824",
+      "projection": "observed result sha256=780a587297fa2d3ec97ecc52fd88b6201a7057364626678fd876b499c3b8c824",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-72-0"
+    },
+    {
+      "line": 609,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "README has a controls"
+      },
+      "receipt_sha256": "f5571def820c936aec6629d9a0067c7692ca67e9b9f28820a12f9661feb78ee5",
+      "projection": "observed result sha256=f5571def820c936aec6629d9a0067c7692ca67e9b9f28820a12f9661feb78ee5",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-73-0"
+    },
+    {
+      "line": 617,
+      "tool": "grep",
+      "args": {
+        "context": 1,
+        "ignore_case": false,
+        "limit": 100,
+        "literal": false,
+        "offset": 0,
+        "path": "README.md",
+        "pattern": "PORT=8080"
+      },
+      "receipt_sha256": "ff89fca3bf4b047296a2722befca4cc9b54127d5eb1ff41725c9ebd3d50756f5",
+      "projection": "observed result sha256=ff89fca3bf4b047296a2722befca4cc9b54127d5eb1ff41725c9ebd3d50756f5",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-74-0"
+    },
+    {
+      "line": 625,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 5,
+        "literal": false,
+        "offset": 0,
+        "path": "DESIGN.md",
+        "pattern": "Unverified log"
+      },
+      "receipt_sha256": "7cb735985c810b07c5a7de88ad1d2f671576adb594f070da8497b9e3114cbc4b",
+      "projection": "observed result sha256=7cb735985c810b07c5a7de88ad1d2f671576adb594f070da8497b9e3114cbc4b",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-75-0"
+    },
+    {
+      "line": 637,
+      "tool": "grep",
+      "args": {
+        "context": 1,
+        "ignore_case": false,
+        "limit": 100,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "no index.html yet"
+      },
+      "receipt_sha256": "1f166cc3317ef8ca17991433bb84ac7103ebfe58dc5a45ca871c29c155bca185",
+      "projection": "observed result sha256=1f166cc3317ef8ca17991433bb84ac7103ebfe58dc5a45ca871c29c155bca185",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-76-0"
+    },
+    {
+      "line": 645,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "scaffold assertions|scaffold ok"
+      },
+      "receipt_sha256": "23e323bf9ef42bdd6445970b1a563f066cd22b208cf366f7bb8e5d19916dfd9d",
+      "projection": "observed result sha256=23e323bf9ef42bdd6445970b1a563f066cd22b208cf366f7bb8e5d19916dfd9d",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-77-0"
+    },
+    {
+      "line": 653,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "scaffold ok"
+      },
+      "receipt_sha256": "23e323bf9ef42bdd6445970b1a563f066cd22b208cf366f7bb8e5d19916dfd9d",
+      "projection": "observed result sha256=23e323bf9ef42bdd6445970b1a563f066cd22b208cf366f7bb8e5d19916dfd9d",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-78-0"
+    },
+    {
+      "line": 661,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "npm run check"
+      },
+      "receipt_sha256": "fe89ef8b0c5d8a35c642b9fd86cdd3ad6e684566a6d5c3bf0baa2fc4f617a83b",
+      "projection": "observed result sha256=fe89ef8b0c5d8a35c642b9fd86cdd3ad6e684566a6d5c3bf0baa2fc4f617a83b",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-79-0"
+    },
+    {
+      "line": 669,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "README.md",
+        "pattern": "npm install"
+      },
+      "receipt_sha256": "af22c73c6799f06449f004af176dd917ca09bf2dab1c8269bc36fb02bf0e6fb1",
+      "projection": "observed result sha256=af22c73c6799f06449f004af176dd917ca09bf2dab1c8269bc36fb02bf0e6fb1",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-80-0"
+    },
+    {
+      "line": 681,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "'node server.mjs'"
+      },
+      "receipt_sha256": "c348e390c94b5c0491b2b887017c6ba7f5928ce66426f969832228fd1ae106e4",
+      "projection": "observed result sha256=c348e390c94b5c0491b2b887017c6ba7f5928ce66426f969832228fd1ae106e4",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-81-0"
+    },
+    {
+      "line": 689,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "pkg.type"
+      },
+      "receipt_sha256": "22566d610caf25d4cd658549514bfeb39e870f0f66b51bbba675ebaa3ab8ef05",
+      "projection": "observed result sha256=22566d610caf25d4cd658549514bfeb39e870f0f66b51bbba675ebaa3ab8ef05",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-82-0"
+    },
+    {
+      "line": 697,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "process.exitCode"
+      },
+      "receipt_sha256": "2ce1d56110834a910801b8e4987f2efe397ecdf1decae19b380657747fc4edc0",
+      "projection": "observed result sha256=2ce1d56110834a910801b8e4987f2efe397ecdf1decae19b380657747fc4edc0",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-83-0"
+    },
+    {
+      "line": 705,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "scaffold ok"
+      },
+      "receipt_sha256": "23e323bf9ef42bdd6445970b1a563f066cd22b208cf366f7bb8e5d19916dfd9d",
+      "projection": "observed result sha256=23e323bf9ef42bdd6445970b1a563f066cd22b208cf366f7bb8e5d19916dfd9d",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-84-0"
+    },
+    {
+      "line": 713,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "server.mjs",
+        "pattern": "PORT = Number"
+      },
+      "receipt_sha256": "e2aece6c6d6d540513b7bba05f337806a4bcec91e445c5aa5274c53c2298645e",
+      "projection": "observed result sha256=e2aece6c6d6d540513b7bba05f337806a4bcec91e445c5aa5274c53c2298645e",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-85-0"
+    },
+    {
+      "line": 725,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "README.md",
+        "pattern": "localhost:4173"
+      },
+      "receipt_sha256": "fa54f002d73c1ee782d9bb7050a8e7b0277e23e22b97b68492bef09b3b72969c",
+      "projection": "observed result sha256=fa54f002d73c1ee782d9bb7050a8e7b0277e23e22b97b68492bef09b3b72969c",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-86-0"
+    },
+    {
+      "line": 733,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "testScaffold();"
+      },
+      "receipt_sha256": "1d7f63e35c0ad1d3ecca61ef976d019abbfe54d519f366fbbeb581d6abc89cb1",
+      "projection": "observed result sha256=1d7f63e35c0ad1d3ecca61ef976d019abbfe54d519f366fbbeb581d6abc89cb1",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-87-0"
+    },
+    {
+      "line": 741,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "scaffold ok"
+      },
+      "receipt_sha256": "23e323bf9ef42bdd6445970b1a563f066cd22b208cf366f7bb8e5d19916dfd9d",
+      "projection": "observed result sha256=23e323bf9ef42bdd6445970b1a563f066cd22b208cf366f7bb8e5d19916dfd9d",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-88-0"
+    },
+    {
+      "line": 749,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 5,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "ok\\('server serves text"
+      },
+      "receipt_sha256": "0dcd630eb744194ae24f6cda75404c91c486c82b45444ff13ad803bea7817665",
+      "projection": "observed result sha256=0dcd630eb744194ae24f6cda75404c91c486c82b45444ff13ad803bea7817665",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-89-0"
+    },
+    {
+      "line": 757,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 10,
+        "literal": false,
+        "offset": 0,
+        "path": "README.md",
+        "pattern": "Key|thrust|Rotate|Pause|Tab|Mute|Interact"
+      },
+      "receipt_sha256": "f586458deb3ad70871ed77f3240ff2aa139f2e2d79e4e78e2da030b828362e38",
+      "projection": "observed result sha256=f586458deb3ad70871ed77f3240ff2aa139f2e2d79e4e78e2da030b828362e38",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-90-0"
+    },
+    {
+      "line": 769,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "ok\\('DESIGN.md exists"
+      },
+      "receipt_sha256": "54045c9c7ee2bcf21315bfa44076a9b3dbf80a798d88544536caf8586e507814",
+      "projection": "observed result sha256=54045c9c7ee2bcf21315bfa44076a9b3dbf80a798d88544536caf8586e507814",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-91-0"
+    },
+    {
+      "line": 777,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "read\\('DESIGN.md'\\)"
+      },
+      "receipt_sha256": "a44b3af188d62276e2803be0e17f915df2b6d38205762a93fd5c3c71f2a1af0b",
+      "projection": "observed result sha256=a44b3af188d62276e2803be0e17f915df2b6d38205762a93fd5c3c71f2a1af0b",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-92-0"
+    },
+    {
+      "line": 785,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "read\\('server.mjs'\\)"
+      },
+      "receipt_sha256": "5cb0680733e25280a853b6116bbee62be03f96b0821ca4c03ba3114a955d83c2",
+      "projection": "observed result sha256=5cb0680733e25280a853b6116bbee62be03f96b0821ca4c03ba3114a955d83c2",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-93-0"
+    },
+    {
+      "line": 793,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "read\\('README.md'\\)"
+      },
+      "receipt_sha256": "f4d989b0ea74b7255ece1abe9ee585f247e5033fb1eb2594df2d4d69b1daa5e2",
+      "projection": "observed result sha256=f4d989b0ea74b7255ece1abe9ee585f247e5033fb1eb2594df2d4d69b1daa5e2",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-94-0"
+    },
+    {
+      "line": 801,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "scaffold ok"
+      },
+      "receipt_sha256": "23e323bf9ef42bdd6445970b1a563f066cd22b208cf366f7bb8e5d19916dfd9d",
+      "projection": "observed result sha256=23e323bf9ef42bdd6445970b1a563f066cd22b208cf366f7bb8e5d19916dfd9d",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-95-0"
+    },
+    {
+      "line": 813,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "main\\(\\).catch"
+      },
+      "receipt_sha256": "c5b622789f3144bd0b1ad4c9900156782e03664195faa328d37f6b3ad5e4aaa4",
+      "projection": "observed result sha256=c5b622789f3144bd0b1ad4c9900156782e03664195faa328d37f6b3ad5e4aaa4",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-96-0"
+    },
+    {
+      "line": 821,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "process.exitCode = 1"
+      },
+      "receipt_sha256": "2ce1d56110834a910801b8e4987f2efe397ecdf1decae19b380657747fc4edc0",
+      "projection": "observed result sha256=2ce1d56110834a910801b8e4987f2efe397ecdf1decae19b380657747fc4edc0",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-97-0"
+    },
+    {
+      "line": 829,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "failed > 0"
+      },
+      "receipt_sha256": "6c59f3b7ca071f890ce76f85729081051d58099dccbdef588e572f1a0388b194",
+      "projection": "observed result sha256=6c59f3b7ca071f890ce76f85729081051d58099dccbdef588e572f1a0388b194",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-98-0"
+    },
+    {
+      "line": 837,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "scaffold ok"
+      },
+      "receipt_sha256": "23e323bf9ef42bdd6445970b1a563f066cd22b208cf366f7bb8e5d19916dfd9d",
+      "projection": "observed result sha256=23e323bf9ef42bdd6445970b1a563f066cd22b208cf366f7bb8e5d19916dfd9d",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-99-0"
+    },
+    {
+      "line": 845,
+      "tool": "grep",
+      "args": {
+        "context": 0,
+        "ignore_case": false,
+        "limit": 3,
+        "literal": false,
+        "offset": 0,
+        "path": "tests\\run.mjs",
+        "pattern": "console.log\\(''\\)"
+      },
+      "receipt_sha256": "757fcaba93d945d4e7550dd32593b6514c8f7ca13a9458702381baa0b9ce0132",
+      "projection": "observed result sha256=757fcaba93d945d4e7550dd32593b6514c8f7ca13a9458702381baa0b9ce0132",
+      "call_id": "0d0e5a6d-d234-492c-afbd-f730e983e2fc-step-100-0"
+    }
+  ]
+}

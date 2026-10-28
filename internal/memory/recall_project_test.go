@@ -93,7 +93,7 @@ func TestQueryProjectExistingBudgetAndCancellation(t *testing.T) {
 		if err != nil || !utf8.ValidString(got) || limit > 0 && utf8.RuneCountInString(got) > limit {
 			t.Fatalf("cap %d violated: %q %v", limit, got, err)
 		}
-		if limit > 0 && limit < len([]rune(body)) && !strings.HasSuffix(got, "…") {
+		if got != "" && limit > 0 && limit < len([]rune(body)) && !strings.HasSuffix(got, "…") {
 			t.Fatalf("omission undisclosed: %q", got)
 		}
 	}

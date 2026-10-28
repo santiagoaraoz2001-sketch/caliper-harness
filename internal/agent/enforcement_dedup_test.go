@@ -111,7 +111,7 @@ func TestEnforcementDiscoverySameObservationRetainedOnce(t *testing.T) {
 				}
 				return decision.Verdict{Option: coherent, Confidence: .9}, nil
 			}
-			if _, err = r.enforce(ctx, false, "", func(string, string) error { return nil }); err != nil || calls != 1 {
+			if _, err = r.enforce(ctx, true, "unverified final claim", func(string, string) error { return nil }); err != nil || calls != 1 {
 				t.Fatalf("actual judgment failed: calls=%d error=%v", calls, err)
 			}
 			after, _ := json.Marshal([]*observed{r.enforcement.latest, r.enforcement.discovery})
@@ -127,7 +127,7 @@ func TestEnforcementDiscoverySameObservationRetainedOnce(t *testing.T) {
 func TestEnforcementOwnAdviceDoesNotRejudgeUnchangedEvidence(t *testing.T) {
 	ctx := context.Background()
 	facts := map[string]string{"state": "running", "task": "actual controlled task"}
-	actual := tool.Result{Text: strings.Repeat("retained source κ\n", 2000), Truncated: true}
+	actual := tool.Result{Failed: true, Text: strings.Repeat("retained source κ\n", 2000), Truncated: true}
 	r := &Runner{Continuation: session.Continuation{Workflow: &session.WorkflowScope{Store: "controlled-store", Kind: "root"}}, Threshold: .7, Registry: tool.NewRegistry(), Assigned: &AssignedOps{Facts: func(context.Context) (any, error) { return facts, nil }}}
 	r.Continuation.Add("intent", "user", "original coding requirement", false)
 	r.Continuation.Coding = &session.CodingState{TaskID: "actual controlled task", Workspace: "actual workspace", Command: "actual check"}

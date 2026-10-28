@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"specific-harness/internal/decision"
+	"specific-harness/internal/tools/process"
 	"strings"
 	"testing"
 	"time"
@@ -93,12 +94,12 @@ func TestDecisionRecipeFlagsMatchActualPythonCLI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	python, err := exec.LookPath("python3")
+	python, err := process.Executable("python3")
 	if err != nil {
-		python, err = exec.LookPath("python")
+		python, err = process.Executable("python")
 	}
 	if err != nil {
-		t.Skip("python 3 not on PATH — actual CLI flag contract unexercised")
+		t.Skip("verified Python 3 unavailable — actual CLI flag contract unexercised")
 	}
 	help, err := exec.Command(python, script, "--help").CombinedOutput()
 	if err != nil {

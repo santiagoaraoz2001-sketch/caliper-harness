@@ -341,6 +341,7 @@ func ProbeAll(client *http.Client, endpoints []Endpoint) []Health {
 
 // Recipe starts one server: argv plus its working directory.
 type Recipe struct {
+	LogMaxBytes   int64  // positive caps persisted service output while continuing to drain it
 	Discovered    bool   // installed launcher choice; select an existing local asset to load
 	Runtime       string // explicit worker wire contract, independent of display name
 	Name          string
@@ -503,7 +504,8 @@ func StartContext(ctx context.Context, r Recipe, logPath string, probeTimeout ..
 			}
 		}
 	}
-	if _, err := exec.LookPath(r.Argv[0]); err != nil {
+	executable, err := r.Executable()
+	if err != nil {
 		return nil, fmt.Errorf("recipe %q needs %q on PATH: %v", r.Name, r.Argv[0], err)
 	}
 	if r.localPath != "" {
@@ -515,8 +517,7 @@ func StartContext(ctx context.Context, r Recipe, logPath string, probeTimeout ..
 	if err != nil {
 		return nil, fmt.Errorf("recipe %q cannot open log %s: %v", r.Name, logPath, err)
 	}
-	defer f.Close()
-	cmd := exec.Command(r.Argv[0], r.Argv[1:]...)
+	cmd := exec.Command(executable, r.Argv[1:]...)
 	cmd.Env = append(os.Environ(), r.Env...)
 	if r.managedPython {
 		cmd.Env = bundle.PythonEnv(os.Environ(), r.Env)
@@ -525,21 +526,52 @@ func StartContext(ctx context.Context, r Recipe, logPath string, probeTimeout ..
 		cmd.Dir = r.Dir
 	}
 	cmd.Stdout, cmd.Stderr = f, f
+	if r.LogMaxBytes > 0 {
+		output := &boundedServiceLog{file: f, remaining: r.LogMaxBytes}
+		cmd.Stdout, cmd.Stderr = output, output
+		cmd.WaitDelay = time.Second
+	}
 	if err := ctx.Err(); err != nil {
+		_ = f.Close()
 		return nil, err
 	}
 	stopTree, err := startResident(cmd)
 	if err != nil {
+		_ = f.Close()
 		return nil, fmt.Errorf("recipe %q failed to start: %v", r.Name, err)
 	}
 	p := &Proc{stopTree: stopTree, cmd: cmd, done: make(chan struct{}), localPath: r.localPath, url: r.URL, runtime: r.Runtime}
 	go func() {
 		_ = cmd.Wait()
+		_ = f.Close()
 		// A launcher can exit while its server children remain alive.
 		p.cleanup()
 		close(p.done)
 	}()
 	return p, nil
+}
+
+// os/exec serializes writes because stdout and stderr use this same writer.
+// Return the consumed byte count even after the cap, so logging never blocks a
+// long-lived service or grows storage without bound.
+type boundedServiceLog struct {
+	file      *os.File
+	remaining int64
+}
+
+func (w *boundedServiceLog) Write(p []byte) (int, error) {
+	n := len(p)
+	if int64(len(p)) > w.remaining {
+		p = p[:w.remaining]
+	}
+	if len(p) > 0 {
+		written, err := w.file.Write(p)
+		w.remaining -= int64(written)
+		if err != nil {
+			return written, err
+		}
+	}
+	return n, nil
 }
 
 // Runtime is the selected wire contract of the process actually launched.

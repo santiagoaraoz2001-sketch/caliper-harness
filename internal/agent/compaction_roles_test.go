@@ -29,7 +29,7 @@ func TestCompactionRoleSeparation(t *testing.T) {
 		"[kind=output role=tool recorded observation reference-only=false]\nreceipt\r\n\n[tool receipt id=call-α name=read]\n" +
 		"[kind=intent role=user user text reference-only=true]\nORIGINAL TASK\r\n\n" +
 		"[kind=failure role=user recorded observation reference-only=true]\nCHECK FAILED: é\r\n\n"
-	want := []llm.Message{{Role: "system", Content: "WORDS=1000; legacy-range="}, {Role: "user", Content: wantSource}}
+	want := []llm.Message{{Role: "system", Content: "WORDS=1000; legacy-range=Replaceable history precedes retained entry 5 of 5 (zero-based). Later retained entries may be absent from this input."}, {Role: "user", Content: wantSource}}
 	for _, transport := range []string{"plain", "stream"} {
 		t.Run(transport, func(t *testing.T) {
 			dir := t.TempDir()

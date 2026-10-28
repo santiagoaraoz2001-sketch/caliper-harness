@@ -72,7 +72,7 @@ func TestManualCompactionCancellationHoldsOwnerAndNextRun(t *testing.T) {
 	m.Cfg.Templates.Path = "../../templates"
 	m.Chat.Context = session.Continuation{Version: 1}
 	m.Chat.Context.Add("intent", "user", "ORIGINAL", false)
-	m.Chat.Context.Add("history", "assistant", "consumed work", false)
+	m.Chat.Context.Add("history", "assistant", strings.Repeat("consumed work ", 100), false)
 	before := m.Chat.Context.Clone()
 	cmd := m.compactChat()
 	if cmd == nil || !m.Chat.Compacting {
@@ -154,10 +154,11 @@ func TestFooterMeasurementSeparateFromCumulativeCost(t *testing.T) {
 func TestManualCompactionOriginPersistenceAndClose(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.Copy(io.Discard, r.Body)
-		io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"COMPACTED\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":600}}\n\ndata: [DONE]\n\n")
+		io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Pending check exited5; preserve the user note.\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":600}}\n\ndata: [DONE]\n\n")
 	}))
 	defer srv.Close()
 	cfg := testCfg()
+	cfg.Context.Keep = .01
 	cfg.Templates.Path = "../../templates"
 	dir := t.TempDir()
 	cfg.Store.Path = dir + "/kuzu"
@@ -199,7 +200,7 @@ func TestManualCompactionOriginPersistenceAndClose(t *testing.T) {
 	for _, e := range origin.Context.Entries {
 		applied += e.Message.Content
 	}
-	if !strings.Contains(applied, "COMPACTED") || strings.Contains(applied, "DISCARDED") {
+	if !strings.Contains(applied, "Pending check exited5; preserve the user note.") || strings.Contains(applied, "DISCARDED") {
 		t.Fatalf("persisted success not applied to owner context: %s; alerts%v", applied, m.Alerts)
 	}
 	if origin.LastIn != 120 || origin.LastOut != 600 || origin.Context.Measured {
@@ -217,7 +218,7 @@ func TestManualCompactionOriginPersistenceAndClose(t *testing.T) {
 	for _, v := range restored.Messages() {
 		text += v.Content
 	}
-	for _, v := range []string{"ORIGINAL", "COMPACTED", "actual check exit5", "NOTE"} {
+	for _, v := range []string{"ORIGINAL", "Pending check exited5; preserve the user note.", "actual check exit5", "NOTE"} {
 		if !strings.Contains(text, v) {
 			t.Errorf("persisted fact lost%q", v)
 		}
@@ -240,6 +241,7 @@ func TestManualCompactionConfigAfterAppendKeepsUIAndResetsResumeBasis(t *testing
 	}))
 	defer srv.Close()
 	cfg := testCfg()
+	cfg.Context.Keep = .01
 	cfg.Templates.Path = "../../templates"
 	dir := t.TempDir()
 	cfg.Store.Path = dir + "/kuzu"
@@ -382,6 +384,7 @@ func TestDeferredTitleClosedOriginCannotRenameRecreatedTab(t *testing.T) {
 		}
 	}()
 	cfg := testCfg()
+	cfg.Context.Keep = .01
 	cfg.Model.Server, cfg.Model.Name, cfg.Model.Runtime = srv.URL+"/v1", "title-fixture", "openai"
 	m := New(cfg, "test")
 	m.Server, m.ModelName = cfg.Model.Server, cfg.Model.Name

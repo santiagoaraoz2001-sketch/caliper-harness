@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -352,6 +353,14 @@ func TestInputFidelityPromptWireAndNativeSession(t *testing.T) {
 			select {
 			case <-settled:
 			case <-ctx.Done():
+				p.Quit()
+				select {
+				case got := <-finished:
+					if state, ok := got.m.(Model); ok {
+						t.Fatalf("actual run did not settle: alerts=%+v running=%v transcript=%+v", state.Alerts, state.Chat.Running, state.Chat.Lines)
+					}
+				case <-time.After(time.Second):
+				}
 				t.Fatal("actual run did not settle")
 			}
 			p.Quit()
@@ -367,6 +376,11 @@ func TestInputFidelityPromptWireAndNativeSession(t *testing.T) {
 			}
 			if final.Chat.Running || final.Chat.LastPrompt != want || final.Chat.LastFull != want || len(final.Hist) != 1 || final.Hist[0] != want {
 				t.Fatalf("submitted data mismatch last%q full%q hist%q running%v", final.Chat.LastPrompt, final.Chat.LastFull, final.Hist, final.Chat.Running)
+			}
+			for _, line := range final.Chat.Lines {
+				if strings.Contains(line.Text, "effective_prompt_sha256") || strings.Contains(line.Text, "raw_prompt") {
+					t.Fatalf("internal submission metadata leaked into transcript: %q", line.Text)
+				}
 			}
 			var wire []byte
 			select {
@@ -397,16 +411,26 @@ func TestInputFidelityPromptWireAndNativeSession(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			havePrompt, haveStopped := false, false
+			havePrompt, haveDone, haveEvidence, haveSubmission := false, false, false, false
 			for _, e := range events {
+				if e.Kind == "submission" {
+					var submitted map[string]string
+					if err := json.Unmarshal([]byte(e.Text), &submitted); err != nil {
+						t.Fatal(err)
+					}
+					haveSubmission = submitted["trigger"] == "submit" && submitted["raw_prompt"] == want && submitted["effective_prompt_sha256"] == fmt.Sprintf("%x", sha256.Sum256([]byte(want)))
+				}
 				if e.Kind == "prompt" {
 					havePrompt = e.Text == want
 				}
-				if e.Kind == "stopped" && strings.Contains(e.Text, "current declared check missing, denied, incomplete or stale") {
-					haveStopped = true
+				if e.Kind == "done" && e.Text == "fixture reply" {
+					haveDone = true
+				}
+				if e.Kind == "evidence" && strings.Contains(e.Text, "correctness/test count unverified") {
+					haveEvidence = true
 				}
 			}
-			if !havePrompt || !haveStopped {
+			if !havePrompt || !haveDone || !haveEvidence || !haveSubmission {
 				t.Fatalf("session raw events%+v", events)
 			}
 			if err := os.WriteFile(filepath.Join(dir, "request.json"), wire, 0600); err != nil {

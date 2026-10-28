@@ -176,6 +176,7 @@ var sourceTokens = regexp.MustCompile(`(?m)("(?:[^"\\]|\\.)*"|'[^']*'|#.*$|//.*$
 var sgrSequence = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func sourceText(text string) string {
+	text = displayLineEndings(text)
 	return sourceTokens.ReplaceAllStringFunc(text, func(token string) string {
 		style := PathSt
 		if strings.HasPrefix(token, "#") || strings.HasPrefix(token, "//") {
@@ -189,6 +190,7 @@ func sourceText(text string) string {
 	})
 }
 func diffSource(prefix, text string, w int, added bool) string {
+	text = displayLineEndings(text)
 	base := RemoveSt
 	bg := "#482A2D"
 	if added {
@@ -216,6 +218,12 @@ func diffSource(prefix, text string, w int, added bool) string {
 	row.WriteString(base.Render(text[last:]))
 	row.WriteString(base.Render(strings.Repeat(" ", max(0, w-ansi.StringWidth(prefix+text)))))
 	return shadedRow(row.String(), w, base, bg)
+}
+
+// Normalize display text before ANSI styling can hide a trailing carriage return.
+// Captures and quoted source retain their original content and line indices.
+func displayLineEndings(text string) string {
+	return strings.TrimSuffix(strings.ReplaceAll(text, "\r\n", "\n"), "\r")
 }
 func (m Model) ownedHint(text string) string {
 	if m.Chat.Dialog != nil && m.Chat.Dialog.Kind == "ask" {

@@ -11,7 +11,7 @@ func TestSimplificationAllIndependentValidationErrors(t *testing.T) {
 	var previous string
 	for i := 0; i < 20; i++ {
 		args, repair := ValidateJSON(d, input)
-		for _, part := range []string{`argument "aaa"`, `argument "zzz"`, "edit needs path", "edit needs new", "edit needs a JSON int for count"} {
+		for _, part := range []string{`unsupported arguments "aaa", "zzz"`, "edit needs path", "edit needs new", "edit needs a JSON int for count"} {
 			if !strings.Contains(repair, part) {
 				t.Fatalf("missing %s from %q", part, repair)
 			}

@@ -275,7 +275,7 @@ func TestCompactionRejectsFullRetainedContextOverflow(t *testing.T) {
 	c.Add("intent", "user", strings.Repeat("i", 2500), false)
 	c.Add("reply", "assistant", strings.Repeat("h", 5000), false)
 	before := c.Clone()
-	m := &scriptModel{replies: []string{strings.Repeat("summary ", 950)}}
+	m := &scriptModel{replies: []string{strings.Repeat("evidence ", 950)}}
 	r := truthRunner(t, m, 10000)
 	r.Compaction.Summary, r.Compaction.Max, r.Compaction.WordsPerToken = 90, 90, 10
 	next, _, ran, err := r.Compact(context.Background(), c)

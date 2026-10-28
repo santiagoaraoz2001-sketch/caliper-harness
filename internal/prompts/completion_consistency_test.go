@@ -7,12 +7,20 @@ import (
 
 func TestCompletionGuidanceAgreesAcrossRolesAndReferences(t *testing.T) {
 	pc := Builtin()
-	for _, key := range []string{"system.task.handoff", "templates.subagent", "planning.running", "verification.paired_passed", "progress.validate", "help.plan", "help.reference.pat", "help.reference.workers"} {
+	for _, key := range []string{"system.task.handoff", "planning.running", "verification.paired_passed", "progress.validate", "help.plan", "help.reference.pat", "help.reference.workers"} {
 		text := strings.Join(strings.Fields(pc.texts[key]), " ")
 		for _, want := range []string{"normal final answer", "no tool call", "independent review"} {
 			if !strings.Contains(text, want) {
 				t.Errorf("%s omits %q", key, want)
 			}
+		}
+	}
+	// launch composes the frozen worker brief with the same handoff used by
+	// main-task execution. Requiring a second copy in the brief caused bloat.
+	worker := strings.Join(strings.Fields(pc.texts["templates.subagent"]+"\n"+pc.Text("system.task.handoff")+"\n"+pc.Text("system.coding.requirements")), " ")
+	for _, want := range []string{"normal final answer", "no tool call", "independent review"} {
+		if strings.Count(worker, want) != 1 {
+			t.Errorf("composed worker needs one completion instruction %q", want)
 		}
 	}
 	for _, key := range []string{"system.text.instructions", "system.task.prepare"} {

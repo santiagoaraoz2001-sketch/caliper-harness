@@ -9,9 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"specific-harness/internal/checkreport"
 	"specific-harness/internal/outcome"
 	"specific-harness/internal/session"
 	"specific-harness/internal/tool"
+	"specific-harness/internal/tools/process"
 )
 
 var CodingTools = []string{"read", "read_outside", "find_outside", "edit", "write", "bash", "grep", "find_file", "find_dir", "help", "ask", "check"}
@@ -24,11 +27,11 @@ func ToolNames(view string) []string {
 	return append(append([]string(nil), CodingTools...), "graphql", "fetch", "judge", "recall", "launch", "workflow_plan", "workflow_approach", "workflow_task", "workflow_block", "workflow_ready", "workflow_transition", "workflow_status", "workflow_pause", "workflow_retire", "workflow_resume")
 }
 func (r *Runner) codingStart() {
-	if !r.CodingRequired {
+	if !r.CodingObligation() {
 		return
 	}
 	c := r.Continuation.Coding
-	if c == nil || c.Closed || !r.assignedClaim && c.Attempt > 0 {
+	if c == nil || c.Closed || r.Assigned != nil && !r.assignedClaim && c.Attempt > 0 {
 		c = &session.CodingState{TaskID: session.NewID(), Workspace: r.Workspace}
 		r.Continuation.Coding = c
 	}
@@ -37,10 +40,27 @@ func (r *Runner) codingStart() {
 	}
 	c.Workspace = r.Workspace
 	c.ConfigCommand = r.CheckCommand
+	if c.Attempt == 0 {
+		if !c.Report.Equal(r.CheckReport) {
+			c.Invalidate("required report contract changed")
+		}
+		c.Report = r.CheckReport.Clone()
+	}
 	if strings.TrimSpace(r.CheckCommand) != "" {
 		c.Command = r.CheckCommand
 		c.Source = "configured"
 	}
+}
+
+// CodingObligation describes this run's execution contract, not its available
+// tools. Inspecting or discussing old work does not adopt its execution duty.
+func (r *Runner) CodingObligation() bool {
+	return r.CodingRequired && (!r.CodingOnEffects || r.turnEffects || r.assignedClaim)
+}
+
+func (r *Runner) activateCoding() {
+	r.turnEffects = true
+	r.codingStart()
 }
 func (r *Runner) codingRecord(ctx context.Context) error {
 	if r.Session == nil {
@@ -63,11 +83,11 @@ func (r *Runner) CodingExec(next Exec) Exec {
 		if err := r.codingAdmission(ctx, d); err != nil {
 			return tool.Result{}, err
 		}
-		c := r.Continuation.Coding
-		if c == nil {
-			return next(ctx, d, a)
+		if d.Name == "check" && r.CodingRequired {
+			r.activateCoding()
 		}
-		if d.Name == "launch" || d.Name == "workflow_resume" {
+		c := r.Continuation.Coding
+		if c != nil && (d.Name == "launch" || d.Name == "workflow_resume") {
 			c.Invalidate("child workflow admitted")
 			if e := r.codingRecord(ctx); e != nil {
 				return tool.Result{}, e
@@ -85,6 +105,13 @@ func (r *Runner) CodingExec(next Exec) Exec {
 				res.Changed = true
 			}
 			if beforeErr != nil || afterErr != nil || before != after {
+				if r.CodingRequired {
+					r.activateCoding()
+					c = r.Continuation.Coding
+				}
+				if c == nil {
+					return res, e
+				}
 				c.Invalidate("shell changed project contents or content observation was unavailable")
 				e = errors.Join(e, r.codingRecord(ctx))
 			}
@@ -94,6 +121,13 @@ func (r *Runner) CodingExec(next Exec) Exec {
 			r.observeFile(res, e)
 		}
 		if (d.Name == "edit" || d.Name == "write") && res.Changed {
+			if r.CodingRequired {
+				r.activateCoding()
+				c = r.Continuation.Coding
+			}
+			if c == nil {
+				return res, e
+			}
 			c.Invalidate("file mutation or uncertain mutation outcome")
 			if saved := r.codingRecord(ctx); e == nil {
 				e = saved
@@ -103,7 +137,15 @@ func (r *Runner) CodingExec(next Exec) Exec {
 	}
 }
 func (r *Runner) CheckDefinition(bash tool.Definition, acceptanceCommand ...string) tool.Definition {
-	params := append([]tool.Param(nil), bash.Params...)
+	params := make([]tool.Param, 0, len(bash.Params))
+	for _, param := range bash.Params {
+		if param.Name != "service" {
+			if param.Name == "timeout" && r.CheckTimeoutSeconds > 0 {
+				param.Default = fmt.Sprint(r.CheckTimeoutSeconds)
+			}
+			params = append(params, param)
+		}
+	}
 	params[0].Required = strings.TrimSpace(r.CheckCommand) == ""
 	params[0].Default = r.CheckCommand
 	if params[0].Required {
@@ -123,7 +165,20 @@ func (r *Runner) CheckDefinition(bash tool.Definition, acceptanceCommand ...stri
 	if acceptance != "" || r.assignedClaim {
 		params = append(params, tool.Param{Name: "acceptance_cmd", Desc: r.Prompts.Text("tools.check.parameters.acceptance_cmd"), Type: tool.TypeString, Default: acceptance, Required: acceptance == "", ExactEnum: true, Enum: []string{acceptance}})
 	}
-	return tool.Definition{Name: "check", Desc: r.Prompts.Text("tools.check.description"), Purpose: r.Prompts.Text("tools.check.purpose"), Params: params, Execute: func(ctx context.Context, a tool.Args) (tool.Result, error) {
+	purpose := r.Prompts.Text("tools.check.purpose")
+	// The current run/claim owner supplies this captured contract. Historical
+	// CodingState is provenance, not authority for a newly advertised schema.
+	contract := r.CheckReport
+	if contract.Format != "" {
+		raw, _ := json.Marshal(contract)
+		purpose += "\n" + r.Prompts.Format("tools.check.report_contract", string(raw))
+	}
+	return tool.Definition{Name: "check", Desc: r.Prompts.Text("tools.check.description"), Purpose: purpose, Params: params, Execute: func(ctx context.Context, a tool.Args) (tool.Result, error) {
+		// Checks must await actual command exits. A Bash service action has a
+		// different lifetime and must never start/stop a preview as verification.
+		if _, supplied := a["service"]; supplied {
+			return tool.Result{}, fmt.Errorf("check does not accept service actions; use bash for session services")
+		}
 		if err := ctx.Err(); err != nil {
 			return tool.Result{}, err
 		}
@@ -132,6 +187,9 @@ func (r *Runner) CheckDefinition(bash tool.Definition, acceptanceCommand ...stri
 		acceptance, _ := a["acceptance_cmd"].(string)
 		if c == nil {
 			return tool.Result{}, fmt.Errorf("ordinary coding state is unavailable")
+		}
+		if !c.Report.Equal(r.CheckReport) {
+			return tool.Result{}, fmt.Errorf("required report contract changed; readmit the task before checking")
 		}
 		paired := c.AcceptanceCommand != "" || c.Attempt > 0
 		if paired && (strings.TrimSpace(c.AcceptanceCommand) == "" || acceptance != c.AcceptanceCommand) {
@@ -148,7 +206,11 @@ func (r *Runner) CheckDefinition(bash tool.Definition, acceptanceCommand ...stri
 			c.Source = "assigned"
 		}
 		c.Invalidate("verification episode admitted")
-		receipt := &session.CheckReceipt{Command: cmd, Cwd: c.Workspace, Revision: c.Revision, EpisodeStarted: time.Now().UTC().Format(time.RFC3339Nano), Status: "unexecuted", Reason: "configured suite not executed", Acceptance: &session.CommandReceipt{Command: acceptance, Cwd: c.Workspace, Status: "unexecuted"}}
+		receipt := &session.CheckReceipt{Report: c.Report.Clone(), RunID: uuid.NewString(), Command: cmd, Cwd: c.Workspace, Revision: c.Revision, EpisodeStarted: time.Now().UTC().Format(time.RFC3339Nano), Status: "unexecuted", Reason: "configured suite not executed", Acceptance: &session.CommandReceipt{Command: acceptance, Cwd: c.Workspace, Status: "unexecuted"}}
+		if receipt.Report.Format == checkreport.EvidenceFormat {
+			observed := process.ObservePrerequisites(c.Workspace, receipt.RunID, receipt.Report)
+			receipt.Prerequisites = &observed
+		}
 		if !paired {
 			receipt.Direct = true
 			receipt.Acceptance = nil
@@ -176,7 +238,7 @@ func (r *Runner) CheckDefinition(bash tool.Definition, acceptanceCommand ...stri
 			first, err = Direct(ctx, bash, args)
 			ar.Ended, ar.ExitCode, ar.Text, ar.Truncated = time.Now().UTC().Format(time.RFC3339Nano), first.ExitCode, first.Text, first.Truncated
 			ar.Status, ar.Reason = checkStatus(first, err)
-			if !ar.Passed() || ctx.Err() != nil {
+			if ctx.Err() != nil {
 				receipt.EpisodeEnded = ar.Ended
 			}
 			if saved := r.codingRecord(ctx); saved != nil {
@@ -184,7 +246,7 @@ func (r *Runner) CheckDefinition(bash tool.Definition, acceptanceCommand ...stri
 				receipt.EpisodeEnded = time.Now().UTC().Format(time.RFC3339Nano)
 				return first, errors.Join(err, saved)
 			}
-			if !ar.Passed() || ctx.Err() != nil {
+			if ctx.Err() != nil {
 				if receipt.EpisodeEnded == "" {
 					receipt.EpisodeEnded = time.Now().UTC().Format(time.RFC3339Nano)
 					err = errors.Join(err, r.codingRecord(ctx))
@@ -203,10 +265,31 @@ func (r *Runner) CheckDefinition(bash tool.Definition, acceptanceCommand ...stri
 			return first, e
 		}
 		args["cmd"] = cmd
-		res, err := Direct(ctx, bash, args)
+		acceptanceErr := err
+		res, err := Direct(process.WithTestRun(ctx, receipt.RunID), bash, args)
 		receipt.Ended, receipt.ExitCode, receipt.Text, receipt.Truncated = time.Now().UTC().Format(time.RFC3339Nano), res.ExitCode, res.Text, res.Truncated
 		receipt.EpisodeEnded = receipt.Ended
 		receipt.Status, receipt.Reason = checkStatus(res, err)
+		reportText := receipt.Text
+		if receipt.ExitCode != nil && *receipt.ExitCode != 0 {
+			reportText = strings.TrimSuffix(reportText, fmt.Sprintf("\n[exit code %d]", *receipt.ExitCode))
+		}
+		var prerequisites []checkreport.PrerequisiteReport
+		if receipt.Prerequisites != nil {
+			prerequisites = append(prerequisites, *receipt.Prerequisites)
+		}
+		receipt.Coverage = checkreport.Evaluate(receipt.Report, cmd, receipt.RunID, reportText, receipt.Truncated, receipt.Started, receipt.Ended, prerequisites...)
+		if receipt.Report.Format != "" && receipt.Status == "passed" {
+			receipt.Reason = receipt.Coverage.Reason
+			if !receipt.Coverage.Satisfied() {
+				receipt.Status = "unverified"
+				if receipt.Coverage.Failed > 0 {
+					receipt.Status = "failed"
+				}
+				res.Failed = true
+			}
+		}
+
 		if ctx.Err() != nil {
 			receipt.Status, receipt.Reason, err = "unverified", ctx.Err().Error(), ctx.Err()
 		}
@@ -217,6 +300,8 @@ func (r *Runner) CheckDefinition(bash tool.Definition, acceptanceCommand ...stri
 		if paired {
 			res.Text = "Acceptance: " + ar.Reason + "\n" + ar.Text + "\nConfigured suite: " + receipt.Reason + "\n" + res.Text
 			res.Truncated = res.Truncated || ar.Truncated
+			res.Failed = res.Failed || !ar.Passed() || receipt.Status != "passed"
+			err = errors.Join(acceptanceErr, err)
 		} else {
 			res.Text = "Declared check: " + receipt.Reason + "\n" + res.Text
 		}
@@ -270,6 +355,9 @@ func (r *Runner) codingOutcome() (outcome.Status, string) {
 		return outcome.Failed, "coding receipt recording failed: " + r.codingErr.Error()
 	}
 	if c.Passed() {
+		if c.Report.Format != "" {
+			return outcome.Completed, c.Receipt.Coverage.Reason
+		}
 		return outcome.Completed, "declared check passed; coverage/test count unknown"
 	}
 	if c != nil && c.Receipt != nil && c.Receipt.Acceptance != nil && c.Receipt.Acceptance.Status == "failed" {
@@ -321,7 +409,7 @@ func evidenceQuote(s string) string {
 	return fmt.Sprintf("%q", s)
 }
 func (r *Runner) completionEvidence() string {
-	if !r.CodingRequired {
+	if !r.CodingObligation() {
 		return ""
 	}
 	f := &r.fileEvidence

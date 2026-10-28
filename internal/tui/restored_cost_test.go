@@ -17,6 +17,7 @@ import (
 func restoredCostModel(t *testing.T) Model {
 	t.Helper()
 	cfg := testCfg()
+	cfg.Context.Keep = .01
 	dir := t.TempDir()
 	cfg.Store.Path, cfg.Sessions.Path = dir+"/kuzu", dir+"/sessions"
 	m := New(cfg, "test")
@@ -92,7 +93,7 @@ func TestRestoredCostUnavailableUntilNewRun(t *testing.T) {
 func TestRestoredCostManualCompactionAndTabOwnership(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.Copy(io.Discard, r.Body)
-		io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"COMPACTED\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":600}}\n\ndata: [DONE]\n\n")
+		io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Pending source checks remain unverified.\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":600}}\n\ndata: [DONE]\n\n")
 	}))
 	defer srv.Close()
 	m := restoredCostModel(t)

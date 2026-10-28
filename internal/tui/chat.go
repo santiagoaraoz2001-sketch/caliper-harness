@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -49,6 +50,7 @@ type Line struct {
 // Dialog is one modal prompt; the agent goroutine waits on Answer.
 type Dialog struct {
 	Workflow string // owning approach for workflow confirmation
+	Tests    string // separate deterministic test-run owner
 	Kind     string // "auth" or "ask"
 	Prompt   string
 	Scroll   int         // authorization inspection only
@@ -69,16 +71,19 @@ type Dialog struct {
 // Lines is a "[120-122, 140]" viewer reference; Quote holds the
 // captured lines so the model sees exactly what was referenced.
 type Comment struct {
-	Source string
-	Ref    string
-	Lines  string
-	Quote  string
-	Text   string
+	Source  string
+	Ref     string
+	Lines   string
+	Quote   string
+	Text    string
+	Capture string `json:",omitempty"`
 }
 
 // Chat is one conversation: transcript, stream, run state, history.
 type Chat struct {
 	Tools          string
+	RegistryNames  []string
+	RegistryKnown  bool
 	Lines          []Line
 	TurnStarts     []int // Visible root-prompt positions, retained per tab; never model input.
 	Recorded       map[int]session.Entry
@@ -89,37 +94,39 @@ type Chat struct {
 	// Stream buffers are pointers: bubbletea copies the Model by
 	// value on every message, and a copied strings.Builder panics
 	// on its next write. Shared pointers make copies safe.
-	Stream         *strings.Builder
-	FlushedAll     *strings.Builder
-	Streaming      bool
-	StreamActivity string
-	Running        bool
-	Seq            int
-	History        []llm.Message // compatibility input only; continuation is authoritative after a run
-	Context        session.Continuation
-	ID             string
-	compactCancel  context.CancelFunc
-	Compacting     bool
-	LastPrompt     string
-	LastFull       string
-	LastIn         int
-	LastOut        int
-	LastUnknown    bool
-	Runtime        runtimeMetrics
-	LastCostKnown  bool // settled new-run accounting; prior totals are unavailable after resume
-	Recalled       int
-	Dialog         *Dialog
-	pinTop         int
-	readOrigin     chatOrigin
-	pinned         bool
-	scrollDrag     bool
-	scrollDragY    int
-	scrollDragTop  int
-	stopFlag       bool
-	pendingNew     bool
-	cancel         context.CancelFunc
-	btw            *btwBox
-	carry          []string
+	Stream          *strings.Builder
+	FlushedAll      *strings.Builder
+	Streaming       bool
+	StreamActivity  string
+	Running         bool
+	Seq             int
+	History         []llm.Message // compatibility input only; continuation is authoritative after a run
+	Context         session.Continuation
+	ID              string
+	compactCancel   context.CancelFunc
+	compactCache    agent.CompactionCache
+	compactCacheKey string
+	Compacting      bool
+	LastPrompt      string
+	LastFull        string
+	LastIn          int
+	LastOut         int
+	LastUnknown     bool
+	Runtime         runtimeMetrics
+	LastCostKnown   bool // settled new-run accounting; prior totals are unavailable after resume
+	Recalled        int
+	Dialog          *Dialog
+	pinTop          int
+	readOrigin      chatOrigin
+	pinned          bool
+	scrollDrag      bool
+	scrollDragY     int
+	scrollDragTop   int
+	stopFlag        bool
+	pendingNew      bool
+	cancel          context.CancelFunc
+	btw             *btwBox
+	carry           []session.UserNote
 	// Turns counts completed assistant turns for the tab retitler.
 	Turns int
 	// SessionIDs are this chat's run ids, oldest first: the Decisions
@@ -141,13 +148,17 @@ func (m *Model) noteSession(id string) {
 // loop, the run goroutine pops between steps.
 type btwBox struct {
 	mu        sync.Mutex
-	notes     []string
+	notes     []session.UserNote
+	owner     string
+	archive   string
 	interrupt context.CancelFunc
 }
 
-func (b *btwBox) push(s string) {
+func (b *btwBox) push(s string) { b.pushNote(session.UserNote{Text: s}) }
+
+func (b *btwBox) pushNote(note session.UserNote) {
 	b.mu.Lock()
-	b.notes = append(b.notes, s)
+	b.notes = append(b.notes, note)
 	interrupt := b.interrupt
 	b.mu.Unlock()
 	if interrupt != nil {
@@ -171,23 +182,41 @@ func (b *btwBox) pending() bool {
 	return len(b.notes) > 0
 }
 
-func (b *btwBox) pop() string {
+func (b *btwBox) pop() string { n, _ := b.popNote(); return n.Text }
+func (b *btwBox) popNote() (session.UserNote, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if len(b.notes) == 0 {
-		return ""
+		return session.UserNote{}, false
 	}
 	n := b.notes[0]
 	b.notes = b.notes[1:]
-	return n
+	return n, true
 }
-
-func (b *btwBox) drain() []string {
+func (b *btwBox) drainNotes() []session.UserNote {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	out := b.notes
 	b.notes = nil
 	return out
+}
+func (b *btwBox) drain() []string {
+	notes := b.drainNotes()
+	out := make([]string, len(notes))
+	for i, n := range notes {
+		out[i] = n.Text
+	}
+	return out
+}
+func appendUserNote(archive, kind string, n session.UserNote) error {
+	if archive == "" || n.SessionID == "" || n.ID == "" {
+		return fmt.Errorf("user comment has no owning session archive")
+	}
+	raw, err := json.Marshal(n)
+	if err != nil {
+		return err
+	}
+	return session.Append(archive, n.SessionID, session.Event{Kind: kind, Text: string(raw)})
 }
 
 // Chat messages. seq drops stragglers across stop/new boundaries.
@@ -218,6 +247,7 @@ type showDialogMsg struct {
 	seq          int
 	kind, prompt string
 	workflow     string
+	tests        string
 	answer       chan string
 	questions    []ask.Question
 	askDone      chan []ask.Answer
@@ -229,14 +259,19 @@ type origin struct {
 	key      string
 }
 type compactDoneMsg struct {
-	ctx          context.Context
-	persisted    bool
-	origin       origin
-	continuation session.Continuation
-	summary      string
-	in, out      int
-	unknown      bool
-	runErr       error
+	operationID, archiveDir, archiveSession string
+	ctx                                     context.Context
+	persisted                               bool
+	origin                                  origin
+	continuation                            session.Continuation
+	summary                                 string
+	in, out                                 int
+	unknown                                 bool
+	runErr                                  error
+	measurements                            []string
+	measurementErr                          error
+	cache                                   agent.CompactionCache
+	cacheKey                                string
 }
 
 func (m Model) contextKey() string {
@@ -330,6 +365,9 @@ func buildPrompt(raw string, fb []Comment) string {
 		}
 		if f.Text != "" {
 			head.WriteString(" " + f.Text)
+		}
+		if f.Capture != "" {
+			head.WriteString(" (" + f.Capture + ")")
 		}
 		b.WriteString(head.String() + "\n")
 		if f.Quote != "" {
@@ -456,10 +494,14 @@ func (c *Chat) page(d, h, total int) {
 // startRun launches one agent run in the background: dialog-backed
 // auth, discarded stdout, tokens to the loop, session fanned out.
 func (m *Model) startRun(raw string) {
+	m.startRunWithTrigger(raw, "submit")
+}
+
+func (m *Model) startRunWithTrigger(raw, trigger string) {
 	if m.servingPending() {
 		return
 	}
-	if m.Chat.Running || m.Wf.Busy != "" || m.compactBusy(false) {
+	if m.Chat.Running || m.Wf.Busy != "" || m.Tests.Busy != "" || m.compactBusy(false) {
 		m.alert("info", "a run or compaction is already in flight — /btw to interject, /stop to take over")
 		m.Input.SetValue(raw)
 		m.Input.SetCursor(len(raw))
@@ -498,6 +540,7 @@ func (m *Model) startRun(raw string) {
 	}
 	id := session.NewID()
 	m.noteSession(id)
+	box.owner, box.archive = id, m.SessionsPath
 	sessLog := graph.NewSessionLog(graph.New(s, m.Version, m.SessionsPath))
 	send := func(msg tea.Msg) {
 		if m.Shared.Prog != nil {
@@ -508,16 +551,28 @@ func (m *Model) startRun(raw string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.Chat.cancel = cancel
 	dialogs := make(chan struct{}, 1)
+	registryLive := false
 	r, notes, err := run.New(run.Deps{
-		Tools: m.Chat.Tools, Cfg: m.Cfg, Server: m.Server, Model: m.ModelName,
+		Services: m.Shared.Services,
+		Tools:    m.Chat.toolView(), Cfg: m.Cfg, Server: m.Server, Model: m.ModelName,
 		MaxSteps: m.Cfg.Agent.MaxSteps, Window: m.St.CtxWindow,
 		Store: s, Session: fanout, SessionID: id,
 		AskYesNo: m.askConfirm(seq, "", dialogs), Ask: m.askDialog(seq, dialogs),
 		In: strings.NewReader(""), Out: io.Discard, ReplyOut: io.Discard,
-		OnToken:      func(d string) { send(tokenMsg{seq: seq, delta: d}) },
+		OnToken: func(d string) { send(tokenMsg{seq: seq, delta: d}) },
+		OnRegistryChange: func(names []string) {
+			if !registryLive {
+				return
+			} // Factory runs on the UI loop; do not synchronously send to that same loop.
+			raw, _ := json.Marshal(names)
+			send(eventMsg{seq: seq, kind: "registry", text: string(raw)})
+		},
 		History:      m.Chat.History,
 		Continuation: m.Chat.Context,
-		Btw:          box.pop,
+		BtwNote:      box.popNote,
+		BtwAcknowledge: func(ctx context.Context, note session.UserNote) error {
+			return appendUserNote(box.archive, "btw_ack", note)
+		},
 	}, prompt)
 	if err != nil {
 		s.Close()
@@ -543,9 +598,25 @@ func (m *Model) startRun(raw string) {
 			}
 		})
 	}
+	if r.Registry != nil {
+		m.Chat.RegistryNames = append([]string(nil), r.Registry.Names()...)
+		m.Chat.RegistryKnown = true
+	}
+	registryLive = true
 	r.GenerationInterrupt = box.generating
 	r.UserCommentPending = box.pending
 	go func() {
+		// Record the exact composer input separately from the comment-composed
+		// prompt. Observers can bind a submission without parsing user prose.
+		submission, _ := json.Marshal(map[string]string{
+			"raw_prompt": raw, "effective_prompt_sha256": fmt.Sprintf("%x", sha256.Sum256([]byte(prompt))),
+			"trigger": trigger,
+		})
+		if err := fanout.Append(ctx, id, "submission", string(submission)); err != nil {
+			// Diagnostic provenance cannot grant authority or introduce another
+			// run gate. The runner owns durable execution/settlement failures.
+			send(eventMsg{seq: seq, kind: "measurement_error", text: "submission provenance: " + err.Error()})
+		}
 		final, _, runErr := r.Run(ctx, prompt)
 		s.Close()
 		cancel()
@@ -727,6 +798,10 @@ func (m *Model) onEvent(msg eventMsg) {
 		return
 	}
 	switch msg.kind {
+	case "registry":
+		if json.Unmarshal([]byte(msg.text), &m.Chat.RegistryNames) == nil {
+			m.Chat.RegistryKnown = true
+		}
 	case "stream_activity":
 		m.Chat.StreamActivity = msg.text
 	case "measurement_error":
@@ -743,6 +818,7 @@ func (m *Model) onEvent(msg eventMsg) {
 	case "task_settled":
 		m.alert("info", msg.text)
 	case "tool":
+		m.Chat.StreamActivity = "executing tool"
 		m.Chat.Runtime.Tools++
 		m.flushStream()
 		m.Chat.appendLine(lineTool, msg.text)
@@ -772,10 +848,11 @@ func (m *Model) onEvent(msg eventMsg) {
 			}
 		}
 		m.lastTool, m.lastToolAt = msg.text, time.Now()
-	case "btw":
+	case "btw", "btw_received":
 		m.flushStream()
 		m.Chat.appendLine(lineUser, "btw: "+truncate(msg.text, 200))
 	case "native_result":
+		m.Chat.StreamActivity = ""
 		var entry session.Entry
 		if json.Unmarshal([]byte(msg.text), &entry) == nil {
 			m.Chat.appendLine(lineResult, entry.Message.Content)
@@ -835,6 +912,7 @@ func (m *Model) onEvent(msg eventMsg) {
 		}
 	case "reasoning":
 	case "result":
+		m.Chat.StreamActivity = ""
 		m.Chat.appendLine(lineResult, msg.text)
 	case "error":
 		m.Chat.appendLine(lineSys, msg.text)
@@ -844,7 +922,7 @@ func (m *Model) onEvent(msg eventMsg) {
 		} else {
 			m.Chat.appendLine(lineSys, truncate(msg.text, 120))
 		}
-	case "prompt", "done", "behavior", "evidence", "coding", "continuation":
+	case "prompt", "submission", "done", "behavior", "evidence", "coding", "continuation":
 	case "judgment-input", "judgment_protocol", "call_resolution", "bound_call":
 		// Internal evidence remains in the session archive. Calls/results and
 		// parsed judgments already have their own user-facing transcript rows.
@@ -866,9 +944,7 @@ func (m *Model) onRunDone(msg runDoneMsg) tea.Cmd {
 		m.observeWorker("issue")
 	}
 	m.Chat.Context = msg.continuation
-	if msg.continuation.Workflow != nil {
-		m.Chat.Tools = "workflow"
-	}
+	m.Chat.Tools = msg.continuation.ToolView
 	if msg.continuation.Coding != nil {
 		m.Chat.appendLine(lineSys, fmt.Sprintf("check: %s (revision %d)", func() string {
 			if msg.continuation.Coding.Passed() {
@@ -1030,7 +1106,7 @@ func (m *Model) drainBtw() {
 	if m.Chat.btw == nil {
 		return
 	}
-	if left := m.Chat.btw.drain(); len(left) > 0 {
+	if left := m.Chat.btw.drainNotes(); len(left) > 0 {
 		m.Chat.carry = append(m.Chat.carry, left...)
 		m.Chat.appendLine(lineSys, fmt.Sprintf("carried %d unheard note(s) to the next run", len(left)))
 	}
@@ -1047,12 +1123,21 @@ func (m *Model) btwChat(args []string) {
 		m.alert("err", "no run in flight — just type in chat")
 		return
 	}
-	m.Chat.btw.push(strings.Join(args, " "))
+	note := session.UserNote{ID: session.NewID(), Text: strings.Join(args, " "), SessionID: m.Chat.btw.owner}
+	if err := appendUserNote(m.Chat.btw.archive, "btw_queued", note); err != nil {
+		m.alert("err", "comment not queued: "+err.Error())
+		return
+	}
+	m.Chat.btw.pushNote(note)
 	m.alert("info", "noted — pauses generation and delivers a user comment after current effects settle")
 }
 
 // newChat stops quietly and starts a fresh conversation.
 func (m *Model) newChat() {
+	if m.Tests.Busy != "" {
+		m.alert("info", "wait for the active test command or /stop it before starting a new chat")
+		return
+	}
 	if m.Chat.Compacting {
 		m.Chat.pendingNew = true
 		m.Chat.stopFlag = true
@@ -1072,6 +1157,7 @@ func (m *Model) newChat() {
 	m.Chat = Chat{ID: session.NewID(), Seq: seq, Stream: &strings.Builder{}, FlushedAll: &strings.Builder{}}
 	m.Chat.carry = carry
 	m.Alerts = nil
+	m.alertHidden = false
 }
 
 // retryChat resubmits the last raw prompt.
@@ -1084,7 +1170,7 @@ func (m *Model) retryChat() {
 		m.alert("info", "nothing to retry")
 		return
 	}
-	m.startRun(m.Chat.LastPrompt)
+	m.startRunWithTrigger(m.Chat.LastPrompt, "retry")
 }
 
 // clearChat clears the view and alerts; history (context) stays.
@@ -1098,9 +1184,10 @@ func (m *Model) clearChat() {
 	m.Chat.DiffGroups = nil
 	m.Chat.unpin()
 	m.Alerts = nil
+	m.alert("info", "View cleared; model context retained. Use /new for a fresh conversation.")
 }
 
-// contextChat reports the last run's usage.
+// contextChat keeps the last measured prompt separate from run cost ownership.
 func (m *Model) contextChat() {
 	if !m.Chat.Running && !m.Chat.Context.Measured && len(m.Chat.Context.Entries) == 0 && len(m.Chat.History) == 0 && !m.Chat.LastCostKnown && m.Chat.LastIn == 0 && m.Chat.LastOut == 0 && !m.Chat.LastUnknown {
 		m.alert("info", "no run yet")
@@ -1111,15 +1198,21 @@ func (m *Model) contextChat() {
 		reading = kfmt(m.Chat.Context.Prompt)
 	}
 	cost := "prior run cost unavailable after resume"
-	if m.Chat.LastCostKnown {
-		cost = fmt.Sprintf("cumulative last-run cost: %s in, %s out", kfmt(m.Chat.LastIn), kfmt(m.Chat.LastOut))
-	} else if m.Chat.Running {
+	if m.Chat.Running {
 		cost = "current run cost available after settlement"
+	} else if m.Chat.LastCostKnown && m.Chat.LastUnknown && m.Chat.LastIn == 0 && m.Chat.LastOut == 0 {
+		cost = "cumulative last-run cost: unknown"
+	} else if m.Chat.LastCostKnown {
+		cost = fmt.Sprintf("cumulative last-run cost: %s in, %s out", kfmt(m.Chat.LastIn), kfmt(m.Chat.LastOut))
 	} else if m.Chat.LastIn != 0 || m.Chat.LastOut != 0 || m.Chat.LastUnknown {
-		cost += fmt.Sprintf("; new compaction cost since resume: %s in, %s out", kfmt(m.Chat.LastIn), kfmt(m.Chat.LastOut))
+		if m.Chat.LastUnknown && m.Chat.LastIn == 0 && m.Chat.LastOut == 0 {
+			cost += "; new compaction cost since resume: unknown"
+		} else {
+			cost += fmt.Sprintf("; new compaction cost since resume: %s in, %s out", kfmt(m.Chat.LastIn), kfmt(m.Chat.LastOut))
+		}
 	}
 	s := fmt.Sprintf("last measured request prompt: %s / %s; %s", reading, kfmt(m.St.CtxWindow), cost)
-	if m.Chat.LastUnknown {
+	if m.Chat.LastUnknown && !m.Chat.Running {
 		s += " (some exchanges unreported)"
 	}
 	m.alert("info", s)
@@ -1127,6 +1220,10 @@ func (m *Model) contextChat() {
 
 // compactChat owns one bounded call; navigation does not transfer its ownership.
 func (m *Model) compactChat() tea.Cmd {
+	if m.Tests.Busy != "" {
+		m.alert("info", "wait for the active test command or /stop it before compacting")
+		return nil
+	}
 	if m.servingPending() {
 		return nil
 	}
@@ -1172,8 +1269,13 @@ func (m *Model) compactChat() tea.Cmd {
 	server, model, runtime := m.Server, m.ModelName, cfg.Model.Runtime
 	params := run.ModelParams(cfg.Params)
 	dj := decision.New(cfg.Decision.Server, cfg.Decision.Model, cfg.Decision.Device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithDisabled(cfg.Decision.Disabled).WithSelection(decision.SelectionFor(cfg.Decision)).WithPrompts(pc).WithInputLimit(cfg.Decision.MaxInputTokens).WithParams(run.ModelParams(cfg.Params))
-	r := agent.Runner{ManualDecisions: cfg.Decision.Disabled, Ask: m.askYesNo(m.Chat.Seq), Prompts: pc, ModelKey: m.contextKey(), Model: llm.New(server, model).WithPlainTimeout(time.Duration(cfg.Model.PlainRequestTimeoutSeconds) * time.Second).WithRuntime(runtime).WithParams(params), MaxTokens: m.St.CtxWindow, TemplatesDir: cfg.TemplatesDir(), Compaction: agent.Compaction{Summary: cfg.Context.Summary, Step: cfg.Context.SummaryStep, Max: cfg.Context.SummaryMax, WordsPerToken: cfg.Context.SummaryWordsPerToken}, Judge: dj.Judge, Threshold: cfg.Decision.RiskThreshold, JudgmentContextChars: cfg.Decision.JudgmentContextChars}
+	r := agent.Runner{ManualDecisions: cfg.Decision.Disabled, Ask: m.askYesNo(m.Chat.Seq), Prompts: pc, ModelKey: m.contextKey(), Model: llm.New(server, model).WithPlainTimeout(time.Duration(cfg.Model.PlainRequestTimeoutSeconds) * time.Second).WithRuntime(runtime).WithParams(params), MaxTokens: m.St.CtxWindow, TemplatesDir: cfg.TemplatesDir(), Prune: agent.Prune{SchemasKeep: cfg.Schemas.KeepLatest, OutputsAgeTokens: cfg.Context.OutputPruneAfterTokens}, Compaction: agent.Compaction{Keep: cfg.Context.Keep, Trigger: cfg.Context.Trigger, Summary: cfg.Context.Summary, Step: cfg.Context.SummaryStep, Max: cfg.Context.SummaryMax, WordsPerToken: cfg.Context.SummaryWordsPerToken}, Judge: dj.Judge, JudgePreflight: dj.Preflight, Threshold: cfg.Decision.RiskThreshold, JudgmentContextChars: cfg.Decision.JudgmentContextChars}
 	r.ThinkingLoop = run.ThinkingLoopPolicy(cfg)
+	judgeKey, _ := json.Marshal(cfg.Decision)
+	cacheKey := m.originKey() + string(judgeKey)
+	if m.Chat.compactCacheKey == cacheKey {
+		r.ImportCompactionCache(m.Chat.compactCache)
+	}
 	var ctx context.Context
 	var cancel context.CancelFunc
 	if m.Cfg.Agent.MaxRunSeconds > 0 {
@@ -1181,20 +1283,55 @@ func (m *Model) compactChat() tea.Cmd {
 	} else {
 		ctx, cancel = context.WithCancel(context.Background())
 	}
+	operationID := session.NewID()
+	if err := recordCompaction(dir, id, operationID, "compaction_started", "", nil); err != nil {
+		cancel()
+		m.alert("err", "compaction did not start: "+err.Error())
+		return nil
+	}
 	m.Chat.compactCancel = cancel
 	m.Chat.Compacting = true
 	m.Chat.stopFlag = false
 	return func() tea.Msg {
 		s, err := store.OpenWithBufferPool(path, uint64(cfg.Store.BufferPoolBytes))
 		if err != nil {
-			return compactDoneMsg{ctx: ctx, origin: owner, continuation: c, runErr: err}
+			return compactDoneMsg{operationID: operationID, archiveDir: dir, archiveSession: id, ctx: ctx, origin: owner, continuation: c, runErr: err}
 		}
 		defer s.Close()
 		r.Session, r.SessionID = graph.NewSessionLog(graph.New(s, version, dir)), id
+		var measurements []string
+		var measurementErr error
+		if client, ok := r.Model.(*llm.Client); ok {
+			client.WithRequestObserver(func(v llm.RequestMeasurement) {
+				raw, _ := json.Marshal(v)
+				measurements = append(measurements, string(raw))
+				if e := r.Session.Append(context.WithoutCancel(ctx), id, "model_request", string(raw)); e != nil {
+					measurementErr = e
+				}
+			})
+		}
 		next, sum, _, err := r.Compact(ctx, c)
-		return compactDoneMsg{ctx: ctx, origin: owner, continuation: next, summary: sum, in: r.UsedIn, out: r.UsedOut, unknown: r.UsageUnknown, runErr: err}
+		return compactDoneMsg{operationID: operationID, archiveDir: dir, archiveSession: id, ctx: ctx, origin: owner, continuation: next, summary: sum, in: r.UsedIn, out: r.UsedOut, unknown: r.UsageUnknown, runErr: err, measurements: measurements, measurementErr: measurementErr, cache: r.ExportCompactionCache(), cacheKey: cacheKey}
 	}
 }
+
+// Lifecycle evidence belongs to the original archive, including cancellation.
+// A failed write never fabricates an end event or replaces the original context.
+func recordCompaction(dir, id, operation, kind, outcome string, failure error) error {
+	v := map[string]string{"operation_id": operation}
+	if outcome != "" {
+		v["outcome"] = outcome
+	}
+	if failure != nil {
+		v["error"] = failure.Error()
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return session.Append(dir, id, session.Event{Kind: kind, Text: string(raw)})
+}
+
 func (m *Model) onCompactDone(msg compactDoneMsg) tea.Cmd {
 	// Even a stale config result must release its originating busy token.
 	o := msg.origin
@@ -1205,6 +1342,14 @@ func (m *Model) onCompactDone(msg compactDoneMsg) tea.Cmd {
 		msg.runErr = msg.ctx.Err()
 	}
 	if c != nil && !msg.persisted {
+		c.compactCache, c.compactCacheKey = msg.cache, msg.cacheKey
+		for _, raw := range msg.measurements {
+			c.Runtime.observe(raw)
+		}
+		if msg.measurementErr != nil {
+			c.Runtime.Incomplete = true
+			m.alert("err", "Compaction measurement could not be recorded: "+msg.measurementErr.Error())
+		}
 		c.LastIn += msg.in
 		c.LastOut += msg.out
 		c.LastUnknown = c.LastUnknown || msg.unknown
@@ -1243,6 +1388,22 @@ func (m *Model) onCompactDone(msg compactDoneMsg) tea.Cmd {
 				msg.runErr = err
 				return msg
 			}
+		}
+	}
+	if msg.operationID != "" {
+		outcome := "unchanged"
+		switch {
+		case msg.ctx != nil && msg.ctx.Err() != nil:
+			outcome = "cancelled"
+		case target == nil:
+			outcome = "stale_origin"
+		case msg.runErr != nil:
+			outcome = "failed"
+		case msg.summary != "":
+			outcome = "applied"
+		}
+		if err := recordCompaction(msg.archiveDir, msg.archiveSession, msg.operationID, "compaction_finished", outcome, msg.runErr); err != nil {
+			msg.runErr = fmt.Errorf("compaction lifecycle could not be recorded; original UI context retained: %w", err)
 		}
 	}
 	if c != nil {
@@ -1346,9 +1507,8 @@ func isASCIIDigit(c byte) bool {
 	return c >= '0' && c <= '9'
 }
 
-// commentPrefill jumps to chat with /comment prefilled for ref.
+// Keep the originating viewer: line comments must resolve the capture being read.
 func (m *Model) commentPrefill(ref string) {
-	m.showChat()
 	m.Input.SetValue("/comment " + ref + " ")
 	m.Input.SetCursor(len(m.Input.Value()))
 	m.PickerHide = true
@@ -1430,7 +1590,8 @@ func (m *Model) commentChat(args []string) {
 				m.alert("err", err.Error())
 				return
 			}
-			if m.Chat.Running && r.Kind == "task" {
+			draftBound := r.Kind == "task" && lp[r.PI].P.ProjectRoot != "" && lp[r.PI].Approaches[r.AI].A.State == plan.ApproachDraft
+			if r.Kind == "task" && (m.Chat.Running || draftBound) {
 				taskID, taskAttempt = r.ID, r.Tries
 			}
 			f.Ref = r.Ref
@@ -1455,6 +1616,12 @@ func (m *Model) commentChat(args []string) {
 			return
 		}
 		f.Quote = q
+		f.Capture = m.activeCaptureNotice()
+	}
+	if f.Capture == "" && f.Ref != "" {
+		if ref, _, ok := m.activeFile(); ok && ref == f.Ref {
+			f.Capture = m.activeCaptureNotice()
+		}
 	}
 	if taskID != "" {
 		s, err := store.OpenWithBufferPool(m.StorePath, uint64(m.Cfg.Store.BufferPoolBytes))
@@ -1468,20 +1635,29 @@ func (m *Model) commentChat(args []string) {
 			m.alert("err", err.Error())
 			return
 		}
-		if len(m.Chat.SessionIDs) == 0 {
-			m.alert("err", "running task comment needs the actual run session")
-			return
+		sessionRef := m.Chat.ID
+		if len(m.Chat.SessionIDs) > 0 {
+			sessionRef = m.Chat.SessionIDs[len(m.Chat.SessionIDs)-1]
 		}
 		raw, _ := json.Marshal(f)
-		_, err = plan.AppendTaskComment(plan.WithProject(context.Background(), workspace.Path), s, taskID, taskAttempt, "user", m.Chat.SessionIDs[len(m.Chat.SessionIDs)-1], string(raw))
+		_, err = plan.AppendUserTaskFeedback(plan.WithProject(context.Background(), workspace.Path), s, taskID, taskAttempt, sessionRef, string(raw))
 		if err != nil {
 			m.alert("err", err.Error())
 			return
 		}
-		m.alert("info", "task comment recorded for the current attempt; delivered at its next request")
+		m.alert("info", "task feedback saved for the exact task attempt; delivery not yet confirmed")
+		if taskAttempt == 0 {
+			if m.Chat.Running && m.Chat.btw != nil {
+				m.btwChat([]string{buildPrompt("User feedback on the draft task", []Comment{f})})
+			} else {
+				m.Comment = append(m.Comment, f)
+				m.alert("info", "draft task feedback saved; queued for the next message")
+			}
+		}
 		return
 	}
 	m.Comment = append(m.Comment, f)
+	m.alert("info", "comment queued for the next message")
 }
 
 // gotoChat jumps the open file viewer to one line: /goto 135 puts
@@ -1531,6 +1707,10 @@ type chatRow struct {
 
 // workflowChat changes only the idle owning chat; browsing never selects scope.
 func (m *Model) workflowChat(args []string) {
+	if m.Tests.Busy != "" {
+		m.alert("info", "wait for the active test command or /stop it before changing workflow")
+		return
+	}
 	if m.Chat.Running || m.Wf.Busy != "" || m.compactBusy(false) || m.servingPending() {
 		m.alert("err", "select workflow when idle")
 		return
@@ -1559,8 +1739,19 @@ func (m *Model) workflowChat(args []string) {
 		m.alert("err", err.Error())
 		return
 	}
-	m.Chat.Context.Workflow = scope
-	m.Chat.Tools = "workflow"
-	m.Chat.Context.Invalidate()
+	if scope.ID != "" {
+		workspace, captureErr := workspaceFiles.Capture(m.Cfg.Tools.Bash, m.Cfg.PromptCatalog)
+		if captureErr == nil {
+			captureErr = plan.CheckProject(s, scope.Kind, scope.ID, workspace.Path)
+		}
+		if captureErr != nil {
+			m.alert("err", captureErr.Error())
+			return
+		}
+	}
+	if err := m.selectToolView("workflow", scope); err != nil {
+		m.alert("err", err.Error())
+		return
+	}
 	m.Chat.appendLine(lineSys, fmt.Sprintf("workflow: %s %s UUID=%q state=%q ancestors=%q children=%d", n.Kind, n.Ref, n.ID, n.State, n.Ancestors, n.Children))
 }

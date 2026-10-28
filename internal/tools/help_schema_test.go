@@ -13,7 +13,7 @@ import (
 	"github.com/vektah/gqlparser/v2/ast"
 	"specific-harness/internal/config"
 	api "specific-harness/internal/graph"
-	"specific-harness/internal/graph/generated"
+	generated "specific-harness/internal/graph/execution"
 	"specific-harness/internal/plan"
 	"specific-harness/internal/prompts"
 	"specific-harness/internal/session"
@@ -169,7 +169,7 @@ func TestHelpGraphQLTemplatesMatchExecutableSDL(t *testing.T) {
 	for _, root := range []*ast.Definition{schema.Query, schema.Mutation} {
 		for _, f := range root.Fields {
 			switch f.Name {
-			case "sessions", "session", "addMemory", "addSessionEvent":
+			case "sessions", "session", "addMemory", "addSessionEvent", "__schema", "__type":
 				continue // These host operations have no model-call template.
 			}
 			res, err := h.Execute(context.Background(), tool.Args{"topic": "schema.graphql." + f.Name})

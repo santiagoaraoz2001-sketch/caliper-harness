@@ -77,7 +77,7 @@ func TestComposerSpecialAndAltKeys(t *testing.T) {
 		t.Fatalf("Alt word shortcut changed: %q", m.Input.Value())
 	}
 	m = key(m, "ctrl+t")
-	if len(m.Tabs) != 2 || m.Active != 1 || m.Input.Value() != "oneX two" {
+	if len(m.Tabs) != 2 || m.Active != 1 || m.Input.Value() != "" {
 		t.Fatal("actual CtrlT lost tab ownership")
 	}
 	m = key(m, "ctrl+p")

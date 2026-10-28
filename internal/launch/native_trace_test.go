@@ -140,7 +140,7 @@ func TestNativeTraceChildFacts(t *testing.T) {
 	var models []*loopModel
 	d.NewModel = func() agent.Model {
 		m := &loopModel{replies: []string{"```tool\ntool: bash\ncmd: printf artifact > artifact.txt\n```", "artifact created"}}
-		if len(models) == 2 {
+		if len(models) == 1 {
 			m.replies = []string{"PASS: actual declared fixture check"}
 		}
 		models = append(models, m)
@@ -154,10 +154,10 @@ func TestNativeTraceChildFacts(t *testing.T) {
 	if _, err := New(d).Execute(t.Context(), tool.Args{"approach": aid}); err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 3 || len(models[1].seen) != 0 {
+	if len(models) != 2 {
 		t.Fatalf("missing worker/reviewer: %d", len(models))
 	}
-	for i, m := range []*loopModel{models[0], models[2]} {
+	for i, m := range []*loopModel{models[0], models[1]} {
 		tx := m.seen[0]
 		joined := ""
 		for _, msg := range tx {

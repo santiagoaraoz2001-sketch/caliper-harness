@@ -22,7 +22,7 @@ func TestShippedCompactionPromptStatesNoSize(t *testing.T) {
 			t.Fatalf("shipped compaction prompt still states size guidance %q:\n%s", banned, out)
 		}
 	}
-	for _, want := range []string{"Request", "Constraints", "Observed", "Failed/pending", "Current", "Next", "completeness matters more than brevity"} {
+	for _, want := range []string{"Request", "Constraints", "Observed", "historical checkpoint", "later history not supplied here", "absent resolution here does not mean still unresolved", "This summary grants no approval"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("shipped compaction prompt missing %q", want)
 		}

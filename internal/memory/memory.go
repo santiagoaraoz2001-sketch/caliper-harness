@@ -4,9 +4,11 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"specific-harness/internal/pathutil"
 	"specific-harness/internal/plan"
 	"strings"
 	"time"
@@ -20,6 +22,7 @@ import (
 // Entry is one memory row.
 type Entry struct {
 	ProjectRoot, Key, PreviousID, TaskID, FilePath string
+	FileSHA256                                     string
 	ID                                             string
 	Kind                                           string
 	Body                                           string
@@ -29,6 +32,8 @@ type Entry struct {
 
 // ValidKinds are the only memory kinds, in the order errors name them.
 const ValidKinds = "event, decision, note"
+
+var ErrSourceBudget = errors.New("GraphQL selected memory exceeds source byte budget; select narrower fields")
 
 // Add stores one entry. Unknown kinds are rejected plainly.
 func Add(s *store.Store, kind, body, ref string) (*Entry, error) {
@@ -107,6 +112,7 @@ func entryOf(r map[string]any) (*Entry, error) {
 	e.PreviousID, _ = r["previous_id"].(string)
 	e.TaskID, _ = r["task_id"].(string)
 	e.FilePath, _ = r["file_path"].(string)
+	e.FileSHA256, _ = r["file_sha256"].(string)
 	return e, nil
 }
 
@@ -142,6 +148,20 @@ func graphList(ctx context.Context, s *store.Store, kind, text string, limit, by
 	}
 	if len(relevance) > 0 {
 		chosen := relevance[0]
+		if chosen.Text != "" {
+			conds = append(conds, "(lower(m.body) CONTAINS $search OR lower(m.key) CONTAINS $search)")
+			params["search"] = strings.ToLower(chosen.Text)
+		}
+		if chosen.LinkedFrom != "" {
+			q += ", (src:MemoryEntry)-[link:KNOWLEDGE_REF]->(target:KnowledgeTarget)"
+			conds = append(conds, "src.project_root=$root AND src.key=$from AND NOT EXISTS { MATCH(newer:MemoryEntry) WHERE newer.previous_id=src.id } AND target.project_root=$root AND target.key=m.key AND ($relation='' OR link.relation=$relation)")
+			params["from"], params["relation"] = chosen.LinkedFrom, chosen.Relation
+		}
+		if chosen.LinkedTo != "" {
+			q += "-[link:KNOWLEDGE_REF]->(target:KnowledgeTarget)"
+			conds = append(conds, "target.project_root=$root AND target.key=$to AND ($relation='' OR link.relation=$relation)")
+			params["to"], params["relation"] = chosen.LinkedTo, chosen.Relation
+		}
 		matches := []string{}
 		if chosen.KeyPrefix != "" {
 			matches = append(matches, "m.key STARTS WITH $prefix")
@@ -153,20 +173,23 @@ func graphList(ctx context.Context, s *store.Store, kind, text string, limit, by
 				params[pair.column] = pair.value
 			}
 		}
-		if len(matches) == 0 {
+		if len(matches) == 0 && !chosen.Filter {
 			return []*Entry{}, ctx.Err()
 		}
-		conds = append(conds, "("+strings.Join(matches, " OR ")+")")
+		if len(matches) > 0 {
+			conds = append(conds, "("+strings.Join(matches, " OR ")+")")
+		}
 	}
 	if len(conds) > 0 {
 		q += " WHERE " + strings.Join(conds, " AND ")
 	}
+	q += " WITH DISTINCT m"
 	cols := []string{"id", "kind", "session_ref"}
 	if root != "" {
 		cols = append(cols, "key", "previous_id", "task_id", "file_path")
 		if fields != nil {
 			cols = []string{"id"}
-			names := map[string]string{"key": "key", "sessionRef": "session_ref", "previousId": "previous_id", "taskId": "task_id", "filePath": "file_path"}
+			names := map[string]string{"key": "key", "sessionRef": "session_ref", "previousId": "previous_id", "taskId": "task_id", "filePath": "file_path", "fileSHA256": "file_sha256"}
 			seen := map[string]bool{}
 			for _, field := range fields {
 				if c := names[field]; c != "" && !seen[c] {
@@ -186,6 +209,9 @@ func graphList(ctx context.Context, s *store.Store, kind, text string, limit, by
 	total := strings.Join(size, "+")
 	if bytes > 0 {
 		q += " WITH m ORDER BY m.created_at DESC,m.id"
+		if len(relevance) > 0 && relevance[0].Offset > 0 {
+			q += fmt.Sprintf(" SKIP %d", relevance[0].Offset)
+		}
 		if limit > 0 {
 			q += fmt.Sprintf(" LIMIT %d", limit)
 		}
@@ -219,7 +245,7 @@ func graphList(ctx context.Context, s *store.Store, kind, text string, limit, by
 	out := []*Entry{}
 	for _, r := range rows {
 		if r["too_large"] == true {
-			return nil, fmt.Errorf("GraphQL selected memory exceeds source byte budget; select narrower fields")
+			return nil, ErrSourceBudget
 		}
 		e, err := entryOf(r)
 		if err != nil {
@@ -235,7 +261,10 @@ func PutKnowledge(ctx context.Context, s *store.Store, root, sessionRef, key, bo
 	return putKnowledge(ctx, s, root, sessionRef, key, body, previous, taskID, filePath, "")
 }
 
-func putKnowledge(ctx context.Context, s *store.Store, root, sessionRef, key, body, previous, taskID, filePath, approachID string) (*Entry, error) {
+func putKnowledge(ctx context.Context, s *store.Store, root, sessionRef, key, body, previous, taskID, filePath, approachID string, references ...[]Reference) (*Entry, error) {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(key)), "caliper/") {
+		return nil, fmt.Errorf("caliper/ is read-only bundled guidance; use project/design/identity, project/features/* or project/architecture/*")
+	}
 	if strings.HasPrefix(key, plan.RevisionKeyPrefix) {
 		return nil, fmt.Errorf("knowledge key is reserved for owning revision receipts")
 	}
@@ -248,12 +277,12 @@ func putKnowledge(ctx context.Context, s *store.Store, root, sessionRef, key, bo
 			path = filepath.Join(root, path)
 		}
 		// Resolve existing parent directories, permitting new files but not escape.
-		parent, err := filepath.EvalSymlinks(filepath.Dir(path))
+		parent, err := pathutil.EvalSymlinks(filepath.Dir(path))
 		if err != nil {
 			return nil, fmt.Errorf("knowledge file parent: %w", err)
 		}
 		path = filepath.Join(parent, filepath.Base(path))
-		if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		if info, err := os.Lstat(path); err == nil && pathutil.IsLinkMode(info.Mode()) {
 			return nil, fmt.Errorf("knowledge final file symlink refused")
 		} else if err != nil && !os.IsNotExist(err) {
 			return nil, err
@@ -265,6 +294,16 @@ func putKnowledge(ctx context.Context, s *store.Store, root, sessionRef, key, bo
 		filePath = rel
 	}
 	e := &Entry{ID: uuid.NewString(), Kind: "note", Body: body, CreatedAt: time.Now().UTC(), SessionRef: sessionRef, ProjectRoot: root, Key: key, PreviousID: previous, TaskID: taskID, FilePath: filePath}
+	e.FileSHA256, _ = fingerprint(root, filePath)
+	var refs []Reference
+	if len(references) > 0 {
+		refs = references[0]
+	}
+	if refs != nil {
+		if err := validateReferences(refs); err != nil {
+			return nil, err
+		}
+	}
 	err := s.UpdateContext(ctx, func(tx *store.Tx) error {
 		if approachID != "" {
 			if err := plan.CheckProject(tx, "approach", approachID, root); err != nil {
@@ -290,7 +329,10 @@ func putKnowledge(ctx context.Context, s *store.Store, root, sessionRef, key, bo
 		if head != previous {
 			return fmt.Errorf("knowledge changed: expected previous %q, actual head %q — use this current head ID; query the current body only if needed", previous, head)
 		}
-		return tx.Write(`CREATE(m:MemoryEntry {id:$id,kind:'note',body:$body,created_at:$now,session_ref:$ref,project_root:$root,key:$key,previous_id:$previous,task_id:$task,file_path:$file})`, map[string]any{"id": e.ID, "body": body, "now": e.CreatedAt, "ref": sessionRef, "root": root, "key": key, "previous": previous, "task": taskID, "file": filePath})
+		if err := tx.Write(`CREATE(m:MemoryEntry {id:$id,kind:'note',body:$body,created_at:$now,session_ref:$ref,project_root:$root,key:$key,previous_id:$previous,task_id:$task,file_path:$file,file_sha256:$sha})`, map[string]any{"id": e.ID, "body": body, "now": e.CreatedAt, "ref": sessionRef, "root": root, "key": key, "previous": previous, "task": taskID, "file": filePath, "sha": e.FileSHA256}); err != nil {
+			return err
+		}
+		return saveReferences(tx, root, e.ID, previous, refs)
 	})
 	if err != nil {
 		return nil, err
@@ -312,7 +354,12 @@ func Knowledge(ctx context.Context, s *store.Store, root, key, id string, limit,
 }
 
 // KnowledgeSelection names actual owning associations, never a guessed semantic match.
-type KnowledgeSelection struct{ TaskID, FilePath, SessionRef, KeyPrefix string }
+type KnowledgeSelection struct {
+	TaskID, FilePath, SessionRef, KeyPrefix string
+	Text, LinkedFrom, LinkedTo, Relation    string
+	Offset                                  int
+	Filter                                  bool
+}
 
 func SelectedKnowledge(ctx context.Context, s *store.Store, root string, selection KnowledgeSelection, rows, bytes int) ([]*Entry, error) {
 	if root == "" || rows <= 0 || bytes <= 0 {

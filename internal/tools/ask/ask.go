@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/muesli/cancelreader"
 	"io"
@@ -209,12 +210,12 @@ func (p *Prompter) stdinAsk(ctx context.Context, qs []Question) ([]Answer, error
 	return out, nil
 }
 
-// parseOptions splits comma-separated options, trims, drops empties,
+// parseOptions splits newline-separated options, trims, drops empties,
 // appends NoneOfAbove. The tool refuses excess choices before asking.
 func parseOptions(s string) []string {
 	var out []string
-	for _, o := range strings.Split(s, ",") {
-		if o = strings.TrimSpace(o); o != "" {
+	for _, o := range strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n") {
+		if o = strings.TrimSpace(o); o != "" && !strings.EqualFold(o, NoneOfAbove) {
 			out = append(out, o)
 		}
 	}
@@ -224,42 +225,49 @@ func parseOptions(s string) []string {
 	return append(out, NoneOfAbove)
 }
 
-// questions builds up to 3 questions from slots; orphan options die.
-func questions(args tool.Args) []Question {
+// questions keeps each options slot with its question; malformed pairs ask nothing.
+func questions(args tool.Args) ([]Question, error) {
 	str := func(name string) string {
 		s, _ := args[name].(string)
-		return strings.TrimSpace(s)
+		return s
 	}
 	var qs []Question
-	if q := str("question"); q != "" {
-		qs = append(qs, Question{Text: q, Options: parseOptions(str("options"))})
-	}
-	for _, n := range []string{"2", "3"} {
-		if q := str("question" + n); q != "" {
-			qs = append(qs, Question{Text: q, Options: parseOptions(str("options" + n))})
+	for _, n := range []string{"", "2", "3"} {
+		question, options := str("question"+n), str("options"+n)
+		if strings.TrimSpace(question) == "" {
+			if n == "" {
+				return nil, fmt.Errorf("question must be nonblank; no question asked")
+			}
+			if strings.TrimSpace(options) != "" {
+				return nil, fmt.Errorf("options%s requires question%s; no question asked", n, n)
+			}
+			continue
 		}
+		qs = append(qs, Question{Text: question, Options: parseOptions(options)})
 	}
-	return qs
+	return qs, nil
 }
 
-// format renders answers back to the model, one line each.
-func format(as []Answer) string {
+// format preserves the displayed question and exact answer/comment together.
+// A cancelled batch contributes no drafts or partial answers to history.
+func format(qs []Question, as []Answer) (string, error) {
 	if len(as) == 0 {
-		return "unanswered"
+		return "unanswered", nil
 	}
-	lines := make([]string, 0, len(as))
+	if len(qs) != len(as) {
+		return "", fmt.Errorf("ask transport returned %d answers for %d questions; no answers committed", len(as), len(qs))
+	}
+	type receipt struct {
+		Question string `json:"question"`
+		Picked   string `json:"picked"`
+		Comment  string `json:"comment"`
+	}
+	answers := make([]receipt, len(as))
 	for i, a := range as {
-		pick := a.Picked
-		if strings.TrimSpace(pick) == "" {
-			pick = "no answer"
-		}
-		l := fmt.Sprintf("%d: %s", i+1, pick)
-		if c := a.Comment; strings.TrimSpace(c) != "" {
-			l += " — " + c
-		}
-		lines = append(lines, l)
+		answers[i] = receipt{Question: qs[i].Text, Picked: a.Picked, Comment: a.Comment}
 	}
-	return strings.Join(lines, "\n")
+	raw, err := json.Marshal(answers)
+	return string(raw), err
 }
 
 // New returns the ask definition bound to p.
@@ -282,7 +290,10 @@ func New(p *Prompter, catalogs ...*prompts.Catalog) tool.Definition {
 			if err := ctx.Err(); err != nil {
 				return tool.Result{}, err
 			}
-			qs := questions(args)
+			qs, err := questions(args)
+			if err != nil {
+				return tool.Result{}, err
+			}
 			for i, q := range qs {
 				if len(q.Options) > MaxOptions+1 { // includes the host's NoneOfAbove choice
 					return tool.Result{}, fmt.Errorf("question %d has %d options; at most %d model-authored options are allowed; no question asked", i+1, len(q.Options)-1, MaxOptions)
@@ -292,7 +303,11 @@ func New(p *Prompter, catalogs ...*prompts.Catalog) tool.Definition {
 			if err != nil {
 				return tool.Result{}, err
 			}
-			return tool.Result{Text: format(as)}, nil
+			if err := ctx.Err(); err != nil {
+				return tool.Result{}, err
+			}
+			text, err := format(qs, as)
+			return tool.Result{Text: text}, err
 		},
 	}
 }

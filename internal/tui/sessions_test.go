@@ -136,8 +136,10 @@ func TestSessionsEnterOpens(t *testing.T) {
 
 func TestSessionsEscLadder(t *testing.T) {
 	m := loadSessions(sessionsModel(t))
+	m.alertHidden = true // Unbound legacy archives have a separate truthful warning.
 	um, _ := m.Update(m.openSession("20260202-000000-bb")())
 	m = um.(Model)
+	m.alertHidden = true
 	m = key(m, "esc")
 	if m.Sessions.Detail != nil || !m.sessionsActive() {
 		t.Fatal("first esc must close the viewer, stay in list")

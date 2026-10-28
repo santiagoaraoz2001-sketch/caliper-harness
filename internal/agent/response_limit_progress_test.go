@@ -2,7 +2,6 @@ package agent_test
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,7 +15,7 @@ import (
 	"specific-harness/internal/tool"
 )
 
-func TestResponseLimitUsesExistingD1ProgressJudgmentBeforeContinuation(t *testing.T) {
+func TestResponseLimitContinuesWithoutD1ProgressJudgment(t *testing.T) {
 	requests, judgments := 0, 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		requests++
@@ -37,20 +36,11 @@ func TestResponseLimitUsesExistingD1ProgressJudgmentBeforeContinuation(t *testin
 				return decision.Verdict{Option: req.Options[0], Confidence: .99}, nil
 			}
 			judgments++
-			var input struct {
-				Checkpoint         agent.ProgressCheckpoint
-				UnfinishedResponse struct{ Provenance, Field, Text string }
-			}
-			if err := json.Unmarshal([]byte(req.Context), &input); err != nil {
-				t.Fatal(err)
-			}
-			if input.UnfinishedResponse.Field != "reasoning" || input.UnfinishedResponse.Text != "unfinished thought" || !strings.Contains(input.UnfinishedResponse.Provenance, "unverified partial") || input.Checkpoint.RunStep != 0 || len(req.Options) != 3 {
-				t.Fatalf("length invented a final or charged model work: %s", req.Context)
-			}
+			t.Error("physical output limit invoked logical progress judgment")
 			return decision.Verdict{Option: req.Options[len(req.Options)-1], Confidence: .99}, nil
 		}}
 	_, _, err := r.Run(t.Context(), "original objective")
-	if err != nil || r.Outcome.Status != outcome.Stopped || judgments != 1 || requests != 2 {
+	if err != nil || r.Outcome.Status != outcome.Completed || judgments != 0 || requests != 2 {
 		t.Fatalf("progress nudge interrupted literal continuation or claimed verification: %v %+v judgments=%d requests=%d", err, r.Outcome, judgments, requests)
 	}
 }

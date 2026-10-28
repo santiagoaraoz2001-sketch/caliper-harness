@@ -47,10 +47,13 @@ func validate(d Definition, raw map[string]string, native map[string]any) (Args,
 	if len(d.Params) == 0 {
 		names = d.Prompts.Text("tool.call.no_arguments")
 	}
-	for _, k := range unknown {
-		if native != nil {
-			repairs = append(repairs, d.Prompts.Format("repair.arguments.unknown_native", k, d.Name, names, d.Purpose))
-		} else {
+	if native != nil && len(unknown) > 0 {
+		for i := range unknown {
+			unknown[i] = strconv.Quote(unknown[i])
+		}
+		repairs = append(repairs, d.Prompts.Format("repair.arguments.unknown_native", strings.Join(unknown, ", "), d.Name, names))
+	} else {
+		for _, k := range unknown {
 			repairs = append(repairs, d.Prompts.Format("repair.arguments.unknown_text", d.Name, k, names, shapeHint(d)))
 		}
 	}

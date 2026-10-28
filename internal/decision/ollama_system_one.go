@@ -15,30 +15,13 @@ import (
 // D1 is a decision model, not a chat completion model. Explicit protocol
 // selection keeps existing Ollama chat judges backward compatible.
 func (c *Client) judgeOllamaSystemOne(ctx context.Context, r Request) (Verdict, error) {
-	criteria := make(map[string]string, len(r.Options))
-	for i, option := range r.Options {
-		criteria[strconv.Itoa(i)] = option
-	}
-	body, err := json.Marshal(map[string]any{
-		"model": c.model, "state": r.Context,
-		"questions": map[string]any{"decision": map[string]any{
-			"type": "choice", "instructions": r.Instructions, "criteria": criteria,
-		}},
-		"keep_alive": "60m",
-	})
+	body, err := c.systemOneRequest(r)
 	if err != nil {
 		return Verdict{}, err
 	}
-	if r.MaxBytes < 0 {
-		return Verdict{}, fmt.Errorf("judge request byte limit must not be negative")
-	}
-	if r.MaxBytes > 0 && len(body) > r.MaxBytes {
-		return Verdict{}, &ContextCapacityError{Message: fmt.Sprintf("judge complete request bytes %d exceed limit %d", len(body), r.MaxBytes), EncodedRequest: true}
-	}
-	// Ollama's local System One contract caps text/schema at 64 KiB. Counting
-	// the complete body is conservative; actual token admission stays with Ollama.
-	if len(body) > 64<<10 {
-		return Verdict{}, &ContextCapacityError{Message: "Ollama System One request exceeds 64 KiB", EncodedRequest: true}
+	criteria := make(map[string]string, len(r.Options))
+	for i, option := range r.Options {
+		criteria[strconv.Itoa(i)] = option
 	}
 	endpoint := strings.TrimSuffix(c.baseURL, "/v1") + "/v1/systemone"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
@@ -55,6 +38,9 @@ func (c *Client) judgeOllamaSystemOne(ctx context.Context, r Request) (Verdict, 
 		raw, err := io.ReadAll(io.LimitReader(response.Body, 512))
 		if err != nil {
 			return Verdict{}, err
+		}
+		if response.StatusCode == http.StatusBadRequest && nativeCapacityRefusal(raw) {
+			return Verdict{}, &ContextCapacityError{Message: "Ollama System One: " + excerpt(raw)}
 		}
 		return Verdict{}, fmt.Errorf("Ollama System One HTTP %d: %s", response.StatusCode, excerpt(raw))
 	}
@@ -107,5 +93,34 @@ func (c *Client) judgeOllamaSystemOne(ctx context.Context, r Request) (Verdict, 
 	}
 	// Provider confidence is a concentration score, not P(chosen option).
 	// Caliper's admission thresholds use the normalized chosen probability.
-	return Verdict{Pick: pick, Option: r.Options[pick], Confidence: confidence, Model: result.Model, Device: "unknown", Protocol: "ollama_system_one", ConfidenceSource: "native_probability"}, nil
+	return Verdict{Pick: pick, Option: r.Options[pick], Confidence: confidence, Model: result.Model, Device: "unknown", Protocol: "ollama_system_one", ConfidenceSource: "native_probability", Usage: optionalUsage(result.Usage)}, nil
+}
+
+// systemOneRequest is shared by dry admission and submission: escaping and
+// envelope overhead are counted identically, without a network request.
+func (c *Client) systemOneRequest(r Request) ([]byte, error) {
+	criteria := make(map[string]string, len(r.Options))
+	for i, option := range r.Options {
+		criteria[strconv.Itoa(i)] = option
+	}
+	body, err := json.Marshal(map[string]any{
+		"model": c.model, "state": r.Context,
+		"questions": map[string]any{"decision": map[string]any{
+			"type": "choice", "instructions": r.Instructions, "criteria": criteria,
+		}}, "keep_alive": "60m",
+	})
+	if err != nil {
+		return nil, err
+	}
+	if r.MaxBytes < 0 {
+		return nil, fmt.Errorf("judge request byte limit must not be negative")
+	}
+	limit := 64 << 10
+	if r.MaxBytes > 0 && r.MaxBytes < limit {
+		limit = r.MaxBytes
+	}
+	if len(body) > limit {
+		return nil, &ContextCapacityError{Message: fmt.Sprintf("Ollama System One complete request bytes %d exceed limit %d (64 KiB transport maximum)", len(body), limit), EncodedRequest: true}
+	}
+	return body, nil
 }

@@ -36,7 +36,7 @@ func catalogTools(t *testing.T, pc *prompts.Catalog) (*tool.Registry, config.Con
 	}
 	reg.Register(judge.New(judge.Deps{}, pc))
 	reg.Register(recall.New(recall.Deps{}, pc))
-	g, err := graph.New(api.New(nil, "test", "sessions"), cfg.Tools.GraphQL, "/private/tmp", "test", "test-store", pc)
+	g, err := graph.New(api.New(nil, "test", "sessions"), cfg.Tools.GraphQL, t.TempDir(), "test", "test-store", pc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,11 @@ func catalogTools(t *testing.T, pc *prompts.Catalog) (*tool.Registry, config.Con
 // actual help executor in a disposable copy, not reconstructed from new YAML.
 // Approved question-led preparation prose was subsequently refreshed from these
 // same owning renderers; untouched entries and all parity assertions remain.
+// R2 refreshes only ask/edit/GraphQL schema and help after their contract repairs.
 func TestPromptCatalogDefaultToolAndHelpParity(t *testing.T) {
+	// Compare canonical prose independently of the developer's Python Store
+	// redirector. Path detection has separate Windows alias tests.
+	t.Setenv("PATH", t.TempDir())
 	bytes, err := os.ReadFile("testdata/prompt-defaults.json")
 	if err != nil {
 		t.Fatal(err)
@@ -226,7 +230,7 @@ func TestPromptCatalogSelectedGuidanceKeepsFactualRefusals(t *testing.T) {
 			t.Fatalf("search guidance capture=%t: %v", capture, err)
 		}
 	}
-	g, err := graph.New(api.New(nil, "test", "sessions"), cfg.Tools.GraphQL, "/private/tmp", "test", "store", pc)
+	g, err := graph.New(api.New(nil, "test", "sessions"), cfg.Tools.GraphQL, t.TempDir(), "test", "store", pc)
 	if err != nil {
 		t.Fatal(err)
 	}

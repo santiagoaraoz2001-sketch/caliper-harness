@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"specific-harness/internal/pathutil"
 )
 
 // UserDataDir is independent of both the installed version and the working
@@ -47,7 +48,7 @@ func WorkspaceDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cwd, err = filepath.EvalSymlinks(cwd)
+	cwd, err = pathutil.EvalSymlinks(cwd)
 	if err != nil {
 		return "", err
 	}

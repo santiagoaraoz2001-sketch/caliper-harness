@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"specific-harness/internal/testfs"
 	"strconv"
 	"strings"
 	"testing"
@@ -49,7 +50,7 @@ func TestDiscoveryAbsoluteGrepLocatorReadsCanonicalSource(t *testing.T) {
 	}
 	w := &Workspace{Path: root, Caps: cfg.Tools.Bash}
 	read, err := invokeDefinitions(t, w.Definitions(), "read", map[string]string{"path": groups[0].Path, "offset": strconv.Itoa(groups[0].Lines[0].Line), "limit": "1"})
-	if err != nil || !strings.HasPrefix(read.Text, "sub/source.go sha256="+digest([]byte(raw))) || !strings.Contains(read.Text, "\nvar Needle = 1\n") || !strings.Contains(read.Text, "shown_range=2-2") {
+	if err != nil || !strings.HasPrefix(read.Text, filepath.Join("sub", "source.go")+" sha256="+digest([]byte(raw))) || !strings.Contains(read.Text, "\nvar Needle = 1\n") || !strings.Contains(read.Text, "shown_range=2-2") {
 		t.Fatalf("returned grep locator cannot be read as canonical source: %+v %v", read, err)
 	}
 }
@@ -181,20 +182,24 @@ func TestDiscoveryPhysicalAliasesEscapesAndFinalSymlinks(t *testing.T) {
 		}
 	}
 	aliasRoot := filepath.Join(t.TempDir(), "workspace-alias")
-	for link, target := range map[string]string{aliasRoot: root, filepath.Join(root, "alias"): filepath.Join(root, "sub"), filepath.Join(root, "escape"): outside, filepath.Join(root, "file-link"): filepath.Join(root, "sub", "source.go"), filepath.Join(root, "dir-link"): filepath.Join(root, "sub")} {
-		if err := os.Symlink(target, link); err != nil {
+	for link, target := range map[string]string{aliasRoot: root, filepath.Join(root, "alias"): filepath.Join(root, "sub"), filepath.Join(root, "escape"): outside, filepath.Join(root, "dir-link"): filepath.Join(root, "sub")} {
+		if err := testfs.Symlink(target, link); err != nil {
 			t.Fatal(err)
 		}
 	}
+	fileLink := testfs.FileSymlink(t, filepath.Join(root, "sub", "source.go"), filepath.Join(root, "file-link"))
 	w := &Workspace{Path: aliasRoot, Caps: config.Defaults().Tools.Bash}
 	defs := w.Definitions()
 	for _, path := range []string{"alias/source.go", filepath.Join(root, "alias", "source.go"), filepath.Join(aliasRoot, "sub", "source.go")} {
 		result, err := invokeDefinitions(t, defs, "read", map[string]string{"path": path})
-		if err != nil || !strings.HasPrefix(result.Text, "sub/source.go sha256="+digest(raw)) {
+		if err != nil || !strings.HasPrefix(result.Text, filepath.Join("sub", "source.go")+" sha256="+digest(raw)) {
 			t.Fatalf("physical aliases do not share a canonical source locator: %+v %v", result, err)
 		}
 	}
 	for _, path := range []string{filepath.Join(outside, "source.go"), filepath.Join(root, "escape", "source.go"), "../source.go", filepath.Join(root, "file-link"), filepath.Join(root, "dir-link")} {
+		if path == filepath.Join(root, "file-link") && !fileLink {
+			continue
+		}
 		result, err := invokeDefinitions(t, defs, "read", map[string]string{"path": path})
 		if err == nil || result.Text != "" || result.Changed {
 			t.Errorf("ordinary absolute discovery crossed scope/symlink boundary %s: %+v %v", path, result, err)

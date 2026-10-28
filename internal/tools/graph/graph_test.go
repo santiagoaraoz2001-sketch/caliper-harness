@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"specific-harness/internal/config"
 	api "specific-harness/internal/graph"
 	"specific-harness/internal/plan"
 	"specific-harness/internal/prompts"
 	"specific-harness/internal/store"
+	"specific-harness/internal/testfs"
 	"specific-harness/internal/tool"
 	"strings"
 	"testing"
@@ -154,7 +154,7 @@ func TestRegisteredGraphQLVariablesPartialAndCapture(t *testing.T) {
 		t.Fatal(e)
 	}
 	alias := filepath.Join(t.TempDir(), "alias")
-	if e = os.Symlink(root, alias); e != nil {
+	if e = testfs.Symlink(root, alias); e != nil {
 		t.Fatal(e)
 	}
 	def, e := New(api.New(s, "test", t.TempDir()), config.Defaults().Tools.GraphQL, alias, "actual-session", s.Identity())
@@ -243,49 +243,20 @@ func TestRegisteredGraphQLAdvertisedDiscoveryDocuments(t *testing.T) {
 		t.Fatalf("no actual ID: %s", created.Text)
 	}
 	query := `query { plans { id state } }`
-	if !strings.Contains(def.Purpose, `help(topic="schema.graphql")`) || !strings.Contains(def.Purpose, `help(topic="schema.graphql.appendKnowledge")`) || !strings.Contains(prompts.Builtin().Text("help.graphql"), query) || !strings.Contains(prompts.Builtin().Text("help.graphql"), `__type(name:"FreshTaskInput")`) {
-		t.Fatal("missing reachable compact schema or detailed plan/introspection discovery")
-	}
-	// Execute the exact first focused-help GraphQL document, including its aliases.
-	_, docs, ok := strings.Cut(prompts.Builtin().Text("help.graphql"), "```graphql\n")
-	if !ok {
-		t.Fatal("missing focused introspection document")
-	}
-	introspection, _, ok := strings.Cut(docs, "```")
-	if !ok {
-		t.Fatal("unterminated focused introspection document")
+	if !strings.Contains(def.Purpose, `help(topic="schema.graphql")`) || !strings.Contains(def.Purpose, `help(topic="schema.graphql.appendKnowledge")`) || !strings.Contains(prompts.Builtin().Text("help.graphql.lifecycle"), query) {
+		t.Fatal("missing reachable compact schema or plan discovery")
 	}
 	result := invoke(query)
-	if !strings.Contains(result.Text, envelope.Data.CreatePlan.ID) || !strings.Contains(result.Text, `"state":"draft"`) {
-		t.Fatalf("project read did not return real node: %s", result.Text)
+	if !strings.Contains(result.Text, envelope.Data.CreatePlan.ID) || !strings.Contains(result.Text, `"state":"draft"`) || result.StateChanged || result.Changed {
+		t.Fatalf("project read lost real node or invented effects: %+v", result)
 	}
-	result = invoke(introspection)
-	var types struct {
-		Data struct {
-			Type struct {
-				InputFields []struct {
-					Name string
-					Type struct {
-						Kind   string
-						OfType struct{ Kind, Name string }
-					}
-				}
-			} `json:"input"`
+	if !created.StateChanged || created.Changed {
+		t.Fatalf("graph effect did not preserve non-filesystem provenance: %+v", created)
+	}
+	for _, query := range []string{`{__type(name:"FreshTaskInput"){inputFields{name}}}`, `{alias:__schema{queryType{fields{name}}}}`} {
+		result, err := def.Execute(t.Context(), tool.Args{"query": query})
+		if err == nil || !strings.Contains(result.Text, "schema.graphql") || result.StateChanged {
+			t.Fatalf("model introspection bypassed scoped discovery: %+v %v", result, err)
 		}
-	}
-	if err := json.Unmarshal([]byte(result.Text), &types); err != nil {
-		t.Fatal(err)
-	}
-	found := map[string]bool{}
-	for _, field := range types.Data.Type.InputFields {
-		found[field.Name] = field.Type.Kind == "NON_NULL" && field.Type.OfType.Kind == "SCALAR" && field.Type.OfType.Name == "String"
-	}
-	for _, name := range []string{"planTitle", "planGoal", "approachTitle", "taskTitle", "taskPrompt", "current", "target", "sketch", "acceptance", "tests", "verify", "checkCommand", "acceptanceCommand"} {
-		if !found[name] {
-			t.Fatalf("advertised introspection missing required fresh-task input %s: %s", name, result.Text)
-		}
-	}
-	if len(found) != 13 {
-		t.Fatalf("unexpected fresh-task fields: %s", result.Text)
 	}
 }

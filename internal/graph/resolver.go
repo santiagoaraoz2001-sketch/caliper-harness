@@ -1,8 +1,7 @@
 package graph
 
-// Owned by hand (gqlgen.yml: preserve_resolver). Regen never touches this
-// file: the Resolver struct keeps its fields, and schema changes surface
-// as compiler errors here, not silent stub rewrites.
+// Handwritten domain resolvers implement the typed execution interfaces.
+// The schema-driven adapter owns field selection and GraphQL marshalling.
 
 import (
 	"context"
@@ -14,7 +13,7 @@ import (
 
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/vektah/gqlparser/v2/ast"
-	"specific-harness/internal/graph/generated"
+	"specific-harness/internal/graph/execution"
 	"specific-harness/internal/graph/model"
 	"specific-harness/internal/memory"
 	"specific-harness/internal/outcome"
@@ -23,7 +22,7 @@ import (
 	"specific-harness/internal/store"
 )
 
-// Resolver wires the generated schema to the store. Resolvers stay thin:
+// Resolver wires the executable schema to the store. Resolvers stay thin:
 // every statement lives in the owning package (memory, session), never here.
 type Resolver struct {
 	store       *store.Store
@@ -544,7 +543,7 @@ func (r *Resolver) mapApproach(ctx context.Context, a *plan.Approach, set ast.Se
 	if err != nil {
 		return nil, err
 	}
-	out := &model.Approach{ID: a.ID, Title: a.Title, State: a.State, NeedsReady: a.NeedsReady, CreatedAt: a.CreatedAt.Format(time.RFC3339), Next: next, Tasks: []*model.Task{}}
+	out := &model.Approach{ID: a.ID, Title: a.Title, Display: plan.DisplayStructured(a.Title), State: a.State, NeedsReady: a.NeedsReady, CreatedAt: a.CreatedAt.Format(time.RFC3339), Next: next, Tasks: []*model.Task{}}
 	children, mult := childSelection(ctx, set, "Approach", "tasks")
 	qualified := false
 	for _, f := range selected(ctx, set, "Approach") {
@@ -623,11 +622,11 @@ func toModel(e *memory.Entry) *model.MemoryEntry {
 	}
 }
 
-// Mutation returns generated.MutationResolver implementation.
-func (r *Resolver) Mutation() generated.MutationResolver { return &mutationResolver{r} }
+// Mutation returns execution.MutationResolver implementation.
+func (r *Resolver) Mutation() execution.MutationResolver { return &mutationResolver{r} }
 
-// Query returns generated.QueryResolver implementation.
-func (r *Resolver) Query() generated.QueryResolver { return &queryResolver{r} }
+// Query returns execution.QueryResolver implementation.
+func (r *Resolver) Query() execution.QueryResolver { return &queryResolver{r} }
 
 type (
 	mutationResolver struct{ *Resolver }
@@ -646,7 +645,7 @@ func (r *mutationResolver) BindPlanProject(ctx context.Context, id string) (*mod
 	applied(ctx, p.ID)
 	return r.planModel(ctx, p.ID, "", "", rootSelection(ctx), true)
 }
-func (r *mutationResolver) AppendKnowledge(ctx context.Context, key, body, expectedPreviousID string, taskID, filePath *string) (*model.Knowledge, error) {
+func (r *mutationResolver) AppendKnowledge(ctx context.Context, key, body, expectedPreviousID string, taskID, filePath *string, references []*model.KnowledgeReferenceInput) (*model.Knowledge, error) {
 	s, err := scope(ctx)
 	if err != nil {
 		return nil, err
@@ -658,7 +657,18 @@ func (r *mutationResolver) AppendKnowledge(ctx context.Context, key, body, expec
 	if filePath != nil {
 		file = *filePath
 	}
-	e, err := memory.PutKnowledge(ctx, r.store, s.root, s.sessionRef, key, body, expectedPreviousID, task, file)
+	var refs []memory.Reference
+	if references != nil {
+		refs = make([]memory.Reference, 0, len(references))
+		for _, ref := range references {
+			section := ""
+			if ref.Section != nil {
+				section = *ref.Section
+			}
+			refs = append(refs, memory.Reference{Key: ref.Key, Relation: ref.Relation, Section: section, SourceSection: stringValue(ref.SourceSection), Label: stringValue(ref.Label)})
+		}
+	}
+	e, err := memory.PutKnowledgeReferences(ctx, r.store, s.root, s.sessionRef, key, body, expectedPreviousID, task, file, refs)
 	if err != nil {
 		return nil, transactionError(ctx, err)
 	}
@@ -695,9 +705,9 @@ func (r *Resolver) savedKnowledge(ctx context.Context, id string) (*model.Knowle
 	return entries[0], nil
 }
 func (r *mutationResolver) PutKnowledge(ctx context.Context, key, body, expectedPreviousID string, taskID, filePath *string) (*model.Knowledge, error) {
-	return r.AppendKnowledge(ctx, key, body, expectedPreviousID, taskID, filePath)
+	return r.AppendKnowledge(ctx, key, body, expectedPreviousID, taskID, filePath, nil)
 }
-func (r *queryResolver) Knowledge(ctx context.Context, key, id *string, limit *int) ([]*model.Knowledge, error) {
+func (r *queryResolver) Knowledge(ctx context.Context, key, id *string, limit *int, text, section *string, offset *int, linkedFrom, linkedTo, relation *string) ([]*model.Knowledge, error) {
 	k, i := "", ""
 	if key != nil {
 		k = *key
@@ -712,7 +722,11 @@ func (r *queryResolver) Knowledge(ctx context.Context, key, id *string, limit *i
 			return nil, fmt.Errorf("knowledge limit must be positive")
 		}
 	}
-	return r.knowledge(ctx, k, i, n, false)
+	filter := memory.KnowledgeSelection{Text: stringValue(text), LinkedFrom: stringValue(linkedFrom), LinkedTo: stringValue(linkedTo), Relation: stringValue(relation)}
+	if offset != nil {
+		filter.Offset = *offset
+	}
+	return r.knowledgePage(ctx, k, i, n, filter, stringValue(section))
 }
 func (r *queryResolver) Notices(ctx context.Context, approachID string, limit *int) ([]*model.Knowledge, error) {
 	n := 0
@@ -737,13 +751,8 @@ func (r *Resolver) knowledge(ctx context.Context, key, id string, n int, mutatio
 	if bytes <= 0 || n <= 0 {
 		return nil, fmt.Errorf("GraphQL knowledge source budget exhausted")
 	}
-	body := false
-	for _, f := range selected(ctx, rootSelection(ctx), "Knowledge") {
-		if f.Name == "body" {
-			body = true
-		}
-	}
-	fields := selectedNames(selected(ctx, rootSelection(ctx), "Knowledge"))
+	want, fields := knowledgeFields(ctx)
+	body := want["body"] || want["sections"]
 	var entries []*memory.Entry
 	if len(approachID) > 0 {
 		entries, err = memory.Notices(ctx, r.store, s.root, approachID[0], n, bytes, body, fields)
@@ -753,21 +762,7 @@ func (r *Resolver) knowledge(ctx context.Context, key, id string, n int, mutatio
 	if err != nil {
 		return nil, err
 	}
-	count := len(entries)
-	if mutation && count > 0 {
-		count--
-	}
-	if err = charge(ctx, count); err != nil {
-		return nil, err
-	}
-	out := []*model.Knowledge{}
-	for _, e := range entries {
-		if err = charge(ctx, 0, e.ID, e.Key, e.Body, e.SessionRef, e.PreviousID, e.TaskID, e.FilePath); err != nil {
-			return nil, err
-		}
-		out = append(out, &model.Knowledge{ID: e.ID, Key: e.Key, Body: e.Body, CreatedAt: e.CreatedAt.Format(time.RFC3339), SessionRef: e.SessionRef, PreviousID: e.PreviousID, TaskID: e.TaskID, FilePath: e.FilePath})
-	}
-	return out, nil
+	return r.knowledgeModels(ctx, entries, mutation, "", "")
 }
 
 func (r *mutationResolver) AddTaskComment(ctx context.Context, taskID string, expectedAttempt int, text string) (*model.TaskComment, error) {

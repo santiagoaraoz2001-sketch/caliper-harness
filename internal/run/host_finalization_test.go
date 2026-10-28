@@ -163,7 +163,7 @@ func TestHostConfiguredCheckSettlementAndRevision(t *testing.T) {
 				want, markers, host, approvals = outcome.Stopped, "", 0, 0
 			case "unset":
 				cfg.Coding.CheckCommand = ""
-				want, markers, host, approvals = outcome.Stopped, "", 0, 0
+				want, markers, host, approvals = outcome.Completed, "", 0, 0
 			}
 			if strings.Contains(scenario, "model check") || scenario == "model passed" {
 				if scenario != "invalid model check" {
@@ -204,7 +204,10 @@ func TestHostConfiguredCheckSettlementAndRevision(t *testing.T) {
 			}
 			final, _, runErr := r.Run(ctx, "ordinary final check control")
 			b, _ := os.ReadFile("marker")
-			qualified := want == outcome.Completed
+			qualified := want == outcome.Completed && scenario != "unset"
+			if scenario == "unset" && (r.Continuation.Coding.Passed() || r.Continuation.Assignment != nil || !strings.Contains(r.Evidence, "correctness/test count unverified")) {
+				t.Fatal("inspection invented qualified work", r.Evidence)
+			}
 			if qualified {
 				want = outcome.Stopped // No scripted parent transitions.
 				assertQualifiedTaskWithOpenParents(t, r, owned)

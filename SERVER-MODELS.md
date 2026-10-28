@@ -32,6 +32,49 @@ Edit or Remove changes the saved connection, not the checkpoint files. Reusable 
 
 `/status` reports current conversation activity, reported generated tokens, recorded coding requests, tool calls, model identities and the latest observed connection state. Request throughput includes prefill and transport, and excludes time spent executing tools. Counts cover retained recorded coding runs; judge requests, title generation and manual compaction are excluded. Missing usage stays unknown or partial; resumed history without measurements is labelled accordingly. Use `/manage` for configuration and lifecycle actions.
 
+## Continuing at output limits
+
+For `rulith` requests advertising structured tools, Caliper renders the original conversation
+through the existing `/apply-template` API and streams native `/completion`
+output. A clean output-limit receipt continues the same rendered prompt plus
+the exact unfinished UTF-8 prefix. It does not ask the user to continue, inject
+a smaller-work instruction, or execute incomplete calls. No server modification
+is needed. The server retokenizes the retained bytes; this is not a guarantee
+of identical sampled token IDs or RNG state. Cancellation and broken transfers
+remain separate outcomes and never authorize partial effects.
+
+The current native decoder supports Qwen XML and JSON `tool_call` frames, with
+ordinary prose and `think` reasoning boundaries. Fully balanced, unescaped XML
+control sequences inside argument values are inherently ambiguous in that wire
+format; isolated marker strings and JSON-escaped strings are covered by tests.
+Other native formats require their own qualification. Plain Chat, Judge,
+compaction, empty-tool requests and explicit text compatibility retain their
+existing parsed chat transport. The MLX worker retains its existing token-prefix
+contract; generic OpenAI/Ollama compatibility alone does not prove this same
+continuation capability. A full context window is handled separately from an
+ordinary per-response output boundary.
+
+
+## Test design and execution
+
+`/tests` manages project suites and executes their commands through the existing
+Bash authorization and receipt owners. It does not launch another coding model
+or add a test reviewer. Its design/refine action prepares a visible Chat draft;
+the selected coding model runs only when that draft is submitted. The project
+`testing.guidance` switch controls the draft's optional knowledge references,
+not required verification or model selection.
+
+Test prerequisites belong to the actual command environment. A reachable coding
+server does not establish that Go, Node, a browser or another test dependency is
+available. Structured reports support `go-test-json`, declared-stage
+`caliper-test-report-v1`, and `caliper-test-report-v2` with per-stage prerequisites
+and expected observations. The host checks exact declared path/executable
+presence, never runtime health or manual confirmation. Missing or unknown stage
+prerequisites prevent qualification while the configured check still runs;
+optional suite-level prerequisites retain their preflight behavior.
+Commands without a report format retain unknown coverage even when they exit
+zero. See the [report contract](https://github.com/santiagoaraoz2001-sketch/caliper-harness/blob/v0.2.3/docs/testing-report-contract.md) for configuration,
+evidence limits and the separation between standalone results and Chat/PAT checks.
 
 ## Ollama D1 decision model
 
@@ -58,3 +101,7 @@ at 64 KiB and any smaller caller byte budget. Token/context admission belongs
 to Ollama; `decision.max_input_tokens` is not enforced by this endpoint.
 Catalog availability does not prove successful inference or GPU residency.
 Rulith can continue serving the coding model on its separate endpoint.
+
+### Domain guidance token admission
+
+Domain articles start near 1,000 tokens and may expand to 2,000 native-counted tokens per enriched retrieval, including preferences and navigation. Rulith uses its native `/tokenize` without generation. MLX/Ollama/generic adapters explicitly lack that capability and use a disclosed conservative UTF-8-byte estimate capped at 2,000 bytes for the complete domain envelope, including links and the accounting-basis label. This keeps compact guidance available without claiming exact token counts or universal tokenizer guarantees. Unknown runtime, missing counter, malformed native response, timeout and cancellation remain failures, never fallback triggers. Ordinary project facts and PAT retain their own limits; exact counting and native benefit on other backends remain separate gates. See [domain guidance](https://github.com/santiagoaraoz2001-sketch/caliper-harness/blob/v0.2.3/docs/domain-guidance.md) for scope, selected-body delivery and multi-hop authoring.

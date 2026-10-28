@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"specific-harness/internal/session"
 	"strings"
 	"sync"
 	"testing"
@@ -69,7 +70,7 @@ func TestBtwIdleRejected(t *testing.T) {
 func TestBtwQueuesWhileRunning(t *testing.T) {
 	m := New(testCfg(), "test")
 	m.Chat.Running = true
-	m.Chat.btw = &btwBox{}
+	m.Chat.btw = &btwBox{owner: session.NewID(), archive: t.TempDir()}
 	m = submit(m, "/btw watch the loop")
 	if got := m.Chat.btw.pop(); got != "watch the loop" {
 		t.Errorf("queued=%q, want note", got)
@@ -86,7 +87,7 @@ func TestBtwQueuesWhileRunning(t *testing.T) {
 func TestBtwBareUsage(t *testing.T) {
 	m := New(testCfg(), "test")
 	m.Chat.Running = true
-	m.Chat.btw = &btwBox{}
+	m.Chat.btw = &btwBox{owner: session.NewID(), archive: t.TempDir()}
 	m = submit(m, "/btw")
 	if len(m.Alerts) != 1 || m.Alerts[0].Kind != "err" || !strings.Contains(m.Alerts[0].Text, "usage") {
 		t.Errorf("alerts=%+v, want usage err", m.Alerts)
@@ -97,12 +98,12 @@ func TestBtwBareUsage(t *testing.T) {
 // run and a sys line says so.
 func TestDrainBtwCarries(t *testing.T) {
 	m := New(testCfg(), "test")
-	m.Chat.btw = &btwBox{notes: []string{"a", "b"}}
+	m.Chat.btw = &btwBox{notes: []session.UserNote{{Text: "a"}, {Text: "b"}}}
 	m.drainBtw()
 	if m.Chat.btw != nil {
 		t.Error("box must clear after drain")
 	}
-	if len(m.Chat.carry) != 2 || m.Chat.carry[0] != "a" || m.Chat.carry[1] != "b" {
+	if len(m.Chat.carry) != 2 || m.Chat.carry[0].Text != "a" || m.Chat.carry[1].Text != "b" {
 		t.Errorf("carry=%v, want [a b]", m.Chat.carry)
 	}
 	if len(m.Chat.Lines) != 1 || m.Chat.Lines[0].Kind != lineSys || !strings.Contains(m.Chat.Lines[0].Text, "carried 2") {
@@ -114,9 +115,9 @@ func TestDrainBtwCarries(t *testing.T) {
 // next run instead of dropping them.
 func TestBtwCarrySurvivesNew(t *testing.T) {
 	m := New(testCfg(), "test")
-	m.Chat.carry = []string{"straggler"}
+	m.Chat.carry = []session.UserNote{{Text: "straggler"}}
 	m = submit(m, "/new")
-	if len(m.Chat.carry) != 1 || m.Chat.carry[0] != "straggler" {
+	if len(m.Chat.carry) != 1 || m.Chat.carry[0].Text != "straggler" {
 		t.Errorf("carry=%v, want [straggler]", m.Chat.carry)
 	}
 }

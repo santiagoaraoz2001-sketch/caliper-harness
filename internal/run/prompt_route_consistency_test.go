@@ -45,7 +45,7 @@ func TestEmittedPlanningRoleMatchesActualAssignmentRoutes(t *testing.T) {
 					names[definition.Function.Name] = true
 				}
 				if mode == "ordinary" {
-					if !names["write"] || names["task_start"] || !strings.Contains(system, "no PAT is required") || strings.Contains(system, "PLANNING ORCHESTRATOR:") {
+					if !names["write"] || names["task_start"] || strings.Contains(system, "Once PAT is selected") || strings.Contains(system, "PLANNING ORCHESTRATOR:") {
 						t.Errorf("ordinary tools/role disagree: %v %s", names, system)
 					}
 				} else {
@@ -58,7 +58,7 @@ func TestEmittedPlanningRoleMatchesActualAssignmentRoutes(t *testing.T) {
 					if names["task_start"] != (mode == "advanced") || names["ready_task"] != (mode == "advanced") || names["write"] || names["edit"] || names["bash"] || names["check"] || !names["read"] || !names["find_file"] || !names["graphql"] {
 						t.Errorf("actual selected tool route changed: %s %v", mode, names)
 					}
-					if mode == "guided" && (!names["plan"] || !strings.Contains(system, "Answer the latest plan question") || !strings.Contains(system, "Draft all Task briefs for this Approach") || strings.Contains(system, `plan(invoke="EXECUTE")`)) {
+					if mode == "guided" && (!names["plan"] || !strings.Contains(system, "Answer the latest host-published plan question") || !strings.Contains(system, "Draft all Task briefs for this Approach") || strings.Contains(system, `plan(invoke="EXECUTE")`)) {
 						t.Errorf("guided planning lost current-question focus or Approach drafting before claim: %v %s", names, system)
 					}
 				}

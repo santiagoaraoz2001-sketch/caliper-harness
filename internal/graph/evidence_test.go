@@ -336,7 +336,7 @@ func TestEvidenceTaskAttemptPagingScopeAndStalePass(t *testing.T) {
 		query := fmt.Sprintf(`{ taskEvidence(taskId:%q,record:%d,phase:%q,offset:0,limit:1,callId:"unexecuted-call") { projectRoot historical groups { reference offset callIds records { kind workspace message { content toolCallId toolCalls { id name arguments } } } } } }`, task.ID, selection.index, selection.phase)
 		second = evidenceData(t, a, query)
 		want := fmt.Sprintf("task:%s:%d:%s:2", task.ID, selection.index, selection.phase)
-		if !strings.Contains(second, "ACTUAL_FAILURE") || !strings.Contains(second, want) || !strings.Contains(second, "unexecuted-call") || !strings.Contains(second, worker) || !strings.Contains(second, a.CapturedProject()) || strings.Contains(second, "thinking") || strings.Contains(second, "large") {
+		if !strings.Contains(second, "ACTUAL_FAILURE") || !strings.Contains(second, want) || !strings.Contains(second, "unexecuted-call") || !containsJSONValue(second, worker) || !containsJSONValue(second, a.CapturedProject()) || strings.Contains(second, "thinking") || strings.Contains(second, "large") {
 			t.Fatalf("large planned events could not narrow to actual calls/results: %s", second)
 		}
 	}
@@ -362,4 +362,9 @@ func TestEvidenceTaskAttemptPagingScopeAndStalePass(t *testing.T) {
 		t.Fatal("metadata-only task read ignored corrupt later source")
 	}
 	t.Logf("task selected old PASS remains historical: %s; selected large reviewer native failure: %s", first, second)
+}
+
+func containsJSONValue(raw, value string) bool {
+	encoded, _ := json.Marshal(value)
+	return strings.Contains(raw, string(encoded))
 }

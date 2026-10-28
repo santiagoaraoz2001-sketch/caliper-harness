@@ -166,8 +166,8 @@ func TestAdaptiveSettingsLabelsAndCompactAncestry(t *testing.T) {
 			}
 		}
 	}
-	fields := []SettingField{{Label: strings.Repeat("界", 20)}}
-	if got := settingLabelWidth(fields, 76); got != 40 {
+	fields := []surfaceRow{{Label: strings.Repeat("界", 20), Value: "visible"}}
+	if got := surfaceLabelWidth(fields, 76); got != 40 {
 		t.Fatalf("Unicode label width uses bytes instead of cells: %d", got)
 	}
 }

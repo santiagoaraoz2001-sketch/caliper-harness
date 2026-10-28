@@ -60,6 +60,10 @@ func TestNormalFinalRepairUsesExistingLoopConfirmation(t *testing.T) {
 			}
 			_, _, err := r.Run(t.Context(), "actual request")
 			want, wantLoops := 9, 2
+			wantStatus, wantDone := outcome.Stopped, 0
+			if mode == "coherent fallback" {
+				want, wantLoops, wantStatus, wantDone = 1, 0, outcome.Completed, 1
+			}
 			if mode == "judge error" {
 				failures := 0
 				for i, kind := range sink.kinds {
@@ -71,7 +75,7 @@ func TestNormalFinalRepairUsesExistingLoopConfirmation(t *testing.T) {
 					t.Fatalf("actual failed progress advice not preserved: failures=%d loops=%d", failures, loops)
 				}
 			}
-			if err != nil || r.Outcome.Status != outcome.Stopped || len(m.seen) != want || loops != wantLoops || strings.Contains(r.Outcome.Reason, "judged") {
+			if err != nil || r.Outcome.Status != wantStatus || len(m.seen) != want || loops != wantLoops || strings.Contains(r.Outcome.Reason, "judged") {
 				t.Fatalf("advice became stop before explicit budget: err=%v outcome=%+v replies=%d loops=%d", err, r.Outcome, len(m.seen), loops)
 			}
 
@@ -89,7 +93,7 @@ func TestNormalFinalRepairUsesExistingLoopConfirmation(t *testing.T) {
 					done++
 				}
 			}
-			if replies != want || advice < want-1 || done != 0 {
+			if replies != want || advice < want-1 || done != wantDone {
 				t.Fatalf("lost raw final/repair or fabricated done: %d %d %d", replies, advice, done)
 			}
 		})

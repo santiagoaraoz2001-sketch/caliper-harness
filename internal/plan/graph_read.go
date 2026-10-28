@@ -22,6 +22,9 @@ func GraphRows(ctx context.Context, s *store.Store, kind, id, parent, state stri
 			selected[c]++
 		}
 	}
+	if kind == "approach" && contains(fields, "display") {
+		selected["title"]++
+	}
 	if kind == "task" && contains(fields, "qualified") {
 		for _, c := range []string{"check_command", "acceptance_command", "execution", "verification", "check_projection"} {
 			selected[c]++

@@ -210,7 +210,7 @@ func TestEscDismissesAlert(t *testing.T) {
 	m := submit(New(testCfg(), "test"), "/bogus")
 	m = submit(m, "/nope")
 	m = key(m, "esc")
-	if len(m.Alerts) != 1 || !strings.Contains(m.Alerts[0].Text, "bogus") {
+	if len(m.Alerts) != 2 || !m.alertHidden || !strings.Contains(m.Alerts[0].Text, "bogus") {
 		t.Errorf("alerts=%+v", m.Alerts)
 	}
 }

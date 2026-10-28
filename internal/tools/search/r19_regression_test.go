@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"specific-harness/internal/tool"
 	"strings"
 	"testing"
@@ -13,6 +14,9 @@ import (
 
 func r19Write(t *testing.T, dir, name, body string) string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		name = strings.ReplaceAll(name, ":", "–")
+	}
 	p := filepath.Join(dir, name)
 	if err := os.WriteFile(p, []byte(body), 0600); err != nil {
 		t.Fatal(err)
@@ -127,6 +131,9 @@ func TestR19RelativeGlobContextGroupsCaseAndLiteral(t *testing.T) {
 func TestR19NonUTF8FilenameAndDecoderRefusal(t *testing.T) {
 	requireRG(t)
 	t.Run("native-filename", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows converts filename strings to UTF-16; raw non-UTF8 filenames cannot be represented. Decoder controls still run.")
+		}
 		dir := t.TempDir()
 		name := "bad" + string([]byte{255}) + ".go"
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("HIT\n"), 0600); illegalFilename(err) {
@@ -271,7 +278,11 @@ func TestR19ScopedFindPathReusedAsExactGlob(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	for _, name := range []string{"internal/tui", "space: root"} {
+	spacedRoot := "space: root"
+	if runtime.GOOS == "windows" {
+		spacedRoot = "space; root"
+	}
+	for _, name := range []string{"internal/tui", spacedRoot} {
 		if e := os.MkdirAll(filepath.Join(cwd, name, "nested"), 0700); e != nil {
 			t.Fatal(e)
 		}
@@ -300,10 +311,10 @@ func TestR19ScopedFindPathReusedAsExactGlob(t *testing.T) {
 		}
 		return d.Execute(context.Background(), a)
 	}
-	for _, root := range []string{"internal/tui", filepath.Join(cwd, "internal/tui"), "space: root", filepath.Join(cwd, "space: root")} {
+	for _, root := range []string{"internal/tui", filepath.Join(cwd, "internal/tui"), spacedRoot, filepath.Join(cwd, spacedRoot)} {
 		t.Run(root, func(t *testing.T) {
 			f, e := call("find", map[string]any{"pattern": "settings.go", "path": root})
-			if e != nil || f.Truncated || f.Text != strings.TrimPrefix(filepath.Join(root, "settings.go"), cwd+string(filepath.Separator)) {
+			if e != nil || f.Truncated || f.Text != filepath.ToSlash(strings.TrimPrefix(filepath.Join(root, "settings.go"), cwd+string(filepath.Separator))) {
 				t.Fatal(f, e)
 			}
 			g, e := call("grep", map[string]any{"pattern": "syncDerived", "path": root, "glob": f.Text, "literal": true, "limit": 1, "context": 1})
@@ -335,7 +346,7 @@ func TestR19ScopedFindPathReusedAsExactGlob(t *testing.T) {
 			} {
 				t.Run(query.path, func(t *testing.T) {
 					g, e := call("grep", map[string]any{"pattern": "syncDerived", "path": query.path, "glob": f.Text, "literal": true, "context": 1, "limit": 1})
-					if e != nil || !g.Truncated || !strings.Contains(grepLocators(t, g.Text), query.emitted+":2:syncDerived") || !strings.Contains(grepLocators(t, g.Text), "after") || strings.Contains(grepLocators(t, g.Text), ":4:syncDerived") {
+					if e != nil || !g.Truncated || !strings.Contains(grepLocators(t, g.Text), filepath.ToSlash(query.emitted)+":2:syncDerived") || !strings.Contains(grepLocators(t, g.Text), "after") || strings.Contains(grepLocators(t, g.Text), ":4:syncDerived") {
 						t.Fatal("raw Find glob cross matrix", g, e)
 					}
 				})

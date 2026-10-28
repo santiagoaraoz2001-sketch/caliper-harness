@@ -31,6 +31,7 @@ import (
 	"specific-harness/internal/tool"
 	"specific-harness/internal/tools"
 	"specific-harness/internal/tools/ask"
+	"specific-harness/internal/tools/bash"
 	"specific-harness/internal/tools/files"
 	"specific-harness/internal/tui"
 	"specific-harness/internal/update"
@@ -266,7 +267,15 @@ func runTUI(args cliArgs) {
 		m.OpenSetup()
 	}
 	boot.line("ok", "Workspace", "Opening Caliper Harness")
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	inputOptions, closeInput, inputErr := tui.ConsoleInput()
+	if inputErr != nil {
+		fmt.Fprintf(os.Stderr, "error: prepare console input: %v\n", inputErr)
+		return
+	}
+	defer closeInput()
+	p := tea.NewProgram(m, append(inputOptions, tea.WithAltScreen(), tea.WithMouseCellMotion())...)
+	stopConsoleSize := tui.ObserveConsoleSize(p)
+	defer stopConsoleSize()
 	m.Shared.Prog = p
 	final, runErr := p.Run()
 	cleanup := m
@@ -457,8 +466,11 @@ func runAgentParsed(args cliArgs) {
 	fmt.Fprintf(os.Stderr, "session: %s\n", id)
 	window := resolveWindow(cfg)
 	sessLog := graph.NewSessionLog(graph.New(s, version, cfg.Sessions.Path))
+	services := &bash.ServiceOwner{}
+	defer services.Close()
 	r, notes, err := run.New(run.Deps{
-		Tools: toolView, Cfg: cfg, Server: server, Model: model, MaxSteps: maxSteps, Window: window,
+		Services: services,
+		Tools:    toolView, Cfg: cfg, Server: server, Model: model, MaxSteps: maxSteps, Window: window,
 		Store: s, Session: sessLog, SessionID: id,
 		AskYesNo: func(ctx context.Context, prompt string) bool { return auth.Ask(ctx, input, os.Stderr, prompt) },
 		In:       input, Out: os.Stderr, ReplyOut: os.Stdout,
@@ -474,6 +486,10 @@ func runAgentParsed(args cliArgs) {
 		fmt.Fprintln(os.Stderr, n)
 	}
 	_, _, runErr := r.Run(ctx, prompt)
+	serviceErr := services.Close()
+	if serviceErr != nil {
+		fmt.Fprintf(os.Stderr, "service cleanup failed: %v\n", serviceErr)
+	}
 	if r.UsageUnknown {
 		fmt.Fprintf(os.Stderr, "warning: model server does not report token usage — context features disabled\n")
 	} else {
@@ -488,6 +504,9 @@ func runAgentParsed(args cliArgs) {
 	if code := r.Outcome.ExitCode(); code != 0 {
 		fmt.Fprintf(os.Stderr, "run %s: %s\n", r.Outcome.Status, r.Outcome.Reason)
 		os.Exit(code)
+	}
+	if serviceErr != nil {
+		os.Exit(1)
 	}
 }
 

@@ -98,7 +98,7 @@ func TestLiveMeasurementMutationBoundaries(t *testing.T) {
 				r.Compaction.Trigger = 90
 				model.usages[1].In = 9500
 			} else {
-				model.replies = []string{echoBlock(strings.Repeat("x", 5000)), echoBlock("b"), "SUMMARY", "FINAL"}
+				model.replies = []string{echoBlock(strings.Repeat("x", 5000)), echoBlock("b"), "Observed source read; verification pending.", "FINAL"}
 				model.usages = []llm.Usage{{In: 20, Out: 5, Reported: true}, {In: 1450, Out: 5, Reported: true}, {In: 20, Out: 5, Reported: true}, {In: 100, Out: 5, Reported: true}}
 				r = compactRunner(model, sink, testTemplateDir(t))
 				r.ModelKey = "fixture"
@@ -117,7 +117,7 @@ func TestLiveMeasurementMutationBoundaries(t *testing.T) {
 			}
 			found := false
 			for _, k := range sink.kinds {
-				found = found || k == mutation
+				found = found || k == mutation || mutation == "btw" && k == "btw_committed"
 			}
 			if !found {
 				t.Fatal("control did not exercise actual mutation", mutation, sink.kinds)

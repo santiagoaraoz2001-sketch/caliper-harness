@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"specific-harness/internal/agent"
+	"specific-harness/internal/checkreport"
 	"specific-harness/internal/config"
 	"specific-harness/internal/decision"
 	"specific-harness/internal/hw"
@@ -30,17 +31,23 @@ import (
 // Deps wires a launch: state, factories, steps, templates, parent window,
 // plus the execution and retry policies.
 type Deps struct {
-	Prompts           *prompts.Catalog
-	Behavior          string // loaded/capped once per builder, shared by workers and reviewers
-	BehaviorNote      string // caller-visible truncation note; not model instructions
-	WorkspaceExcludes []string
-	Workspace         string // captured physical cwd for Bash and check receipts
-	Store             *store.Store
-	NewModel          func() agent.Model
-	NewRegistry       func() *tool.Registry
-	MaxSteps          int
-	MaxRunSeconds     int
-	TemplatesDir      string
+	CheckReport         checkreport.Contract
+	Prompts             *prompts.Catalog
+	Behavior            string // loaded/capped once per builder, shared by workers and reviewers
+	BehaviorNote        string // caller-visible truncation note; not model instructions
+	WorkspaceExcludes   []string
+	Workspace           string // captured physical cwd for Bash and check receipts
+	Store               *store.Store
+	NewModel            func() agent.Model
+	NewRegistry         func() *tool.Registry
+	NewKnowledge        func(sessionRef string, readOnly bool) (tool.Definition, error)
+	ProjectContext      func(context.Context, *session.Continuation, string) error
+	KnowledgeLimits     config.GraphQLConfig
+	MaxSteps            int
+	MaxRunSeconds       int
+	CheckTimeoutSeconds int
+	TemplatesDir        string
+	SessionsDir         string // existing raw session archive; bounded task records keep phase refs
 	// ParentWindow is the resolved parent window; subagent window 0 inherits it.
 	ParentWindow int
 	Sub          config.SubagentsConfig
@@ -49,6 +56,7 @@ type Deps struct {
 	// its unsure-prompt. A nil Judge refuses every launch.
 	ManualReadiness bool // explicit decision opt-out uses human approval, never a fabricated judge verdict
 	Judge           func(context.Context, decision.Request) (decision.Verdict, error)
+	JudgePreflight  func(decision.Request) error
 	Threshold       float64
 	In              io.Reader
 	Out             io.Writer
@@ -68,12 +76,14 @@ type Deps struct {
 	Prune agent.Prune
 	// AuthMode gates model-initiated fan-out (see approveLaunch).
 	// Approve asks the user; nil withholds approval headlessly.
-	AuthMode        string
-	Approve         func(ctx context.Context, prompt string) bool
-	Ask             func(ctx context.Context, prompt string) bool // coherence uncertainty, even in YOLO
-	ReviewGate      func(agent.Exec) agent.Exec
-	ApproveContract func(context.Context, string, string) error
-	OnTaskSettled   func(context.Context, *plan.Task) error
+	AuthMode          string
+	Approve           func(ctx context.Context, prompt string) bool
+	Ask               func(ctx context.Context, prompt string) bool // coherence uncertainty, even in YOLO
+	ReviewGate        func(agent.Exec) agent.Exec
+	ApproveContract   func(context.Context, string, string) error
+	ConfirmReadiness  func(context.Context, string, string, string, string) (bool, error)
+	ConfigureReviewer func(*agent.Runner) // assigned parent is blocked; one live queue consumer
+	OnTaskSettled     func(context.Context, *plan.Task) error
 }
 
 // Result is one finished subagent run. Err is task failure, never launch
@@ -99,6 +109,7 @@ type Result struct {
 	Skipped bool
 	Err     error
 	brief   *plan.Task
+	coding  *session.CodingState // current owning worker only; never reconstructed authority
 }
 
 // Launch runs every task in a ready approach and collects outputs in task
@@ -372,7 +383,7 @@ func RunTask(ctx context.Context, d Deps, t *plan.Task, window int) Result {
 		return r
 	}
 	prompt, err := d.Prompts.Render("templates.subagent", map[string]string{
-		"PlanGoal": goal, "ApproachTitle": strategy,
+		"PlanGoal": plan.DisplayStructured(goal), "ApproachTitle": plan.DisplayStructured(strategy),
 		"Title": t.Title, "Prompt": t.Prompt, "Current": t.Current,
 		"Target": t.Target, "Sketch": t.Sketch, "Acceptance": t.Acceptance,
 		"Tests": t.Tests, "Verify": t.Verify, "Workspace": d.Workspace, "CheckCommand": t.CheckCommand, "AcceptanceCommand": t.AcceptanceCommand,
@@ -401,39 +412,59 @@ func RunTask(ctx context.Context, d Deps, t *plan.Task, window int) Result {
 			r.Attempts, r.AttemptLog = current.Attempts, current.AttemptLog
 			r.brief = current
 			sub.SessionID, sub.Session = current.ID, reviewSink{d: d, r: &r, phase: "execution_pending", err: &recordingErr}
+			owner, err := plan.CaptureDispatchedExecution(plan.WithExecutionReport(plan.WithProject(ctx, d.Workspace), d.CheckReport), d.Store, current)
+			if err != nil || owner.Goal != goal || owner.Strategy != strategy {
+				if err == nil {
+					err = fmt.Errorf("worker parent requirements changed before execution")
+				}
+				r.Err, r.Outcome.Reason = err, err.Error()
+				return r
+			}
+			r.AttemptLog = owner.Task.AttemptLog
+			r.brief.AttemptLog = owner.Task.AttemptLog
+			sub.CheckReport = owner.Report.Clone()
+			bindProjectContext(sub, d, owner)
+			if current.CheckCommand != "" {
+				bash, ok := sub.Registry.Lookup("bash")
+				if !ok {
+					r.Err = fmt.Errorf("worker needs registered Bash for its declared check")
+					r.Outcome.Reason = r.Err.Error()
+					return r
+				}
+				sub.Continuation.Coding = codingFromCheck(d, &r, current)
+				sub.Workspace, sub.CheckCommand = sub.Continuation.Coding.Workspace, current.CheckCommand
+				sub.CodingRequired = true
+				check := sub.CheckDefinition(bash)
+				sub.Registry.Register(check)
+				sub.RetainHostCheck(check)
+			}
+			if d.NewKnowledge != nil {
+				knowledge, err := d.NewKnowledge(current.ID, false)
+				if err != nil {
+					r.Err, r.Outcome.Reason = err, err.Error()
+					return r
+				}
+				sub.Registry.Register(knowledge)
+			}
 			admit := func(ctx context.Context) error {
 				if recordingErr != nil {
 					return fmt.Errorf("worker durable recording failed: %w", recordingErr)
 				}
-				if err := plan.PausePendingRevision(plan.WithProject(ctx, d.Workspace), d.Store, current.ID, current.Attempts); err != nil {
-					return err
-				}
-				actual, err := plan.GetTask(d.Store, current.ID)
-				if err != nil {
-					return err
-				}
-				if actual.State != plan.TaskRunning || actual.Attempts != current.Attempts || !actual.SameBrief(current) {
-					return fmt.Errorf("worker task/brief/attempt changed before execution")
-				}
-				currentGoal, currentStrategy, err := parentRequirements(d, actual)
-				if err != nil {
-					return err
-				}
-				if goal != currentGoal || strategy != currentStrategy {
-					return fmt.Errorf("worker parent requirements changed before execution")
-				}
-				return ctx.Err()
+				return owner.Admit(plan.WithProject(ctx, d.Workspace), d.Store)
 			}
 			sub.Exec = childGate(d, func(ctx context.Context, def tool.Definition, args tool.Args) (tool.Result, error) {
 				if err := admit(ctx); err != nil {
 					return tool.Result{}, err
 				}
-				return agent.Direct(ctx, def, args)
+				return sub.CodingExec(agent.Direct)(ctx, def, args)
 			})
 			bindRoleComments(sub, d, current)
 			// Only a genuine owning worker claim installs task instructions. Role
 			// probes and restored historical prose cannot confer this authority.
 			prompt += "\n" + d.Prompts.Text("system.task.handoff")
+			if d.NewKnowledge != nil && !sub.CodingRequired {
+				prompt += "\n" + d.Prompts.Text("system.coding.knowledge")
+			}
 			sub.TaskSystem = prompt
 			request = d.Prompts.Text("system.task.worker_request")
 		} else {
@@ -447,6 +478,20 @@ func RunTask(ctx context.Context, d Deps, t *plan.Task, window int) Result {
 	execution := sub.Outcome
 	r.Output, r.Transcript, r.Outcome, r.Err = out, transcript, execution, err
 	r.ExecutionRequest, r.ExecutionEvidence = prompt, sub.Evidence
+	r.coding = sub.Continuation.Coding
+	if r.coding != nil && r.coding.Receipt != nil {
+		// Failed and interrupted worker checks are evidence too. Record the
+		// actual partial episode before settlement, without minting a pass.
+		if check, saveErr := recordCurrentCheck(d, &r, r.brief, r.coding); saveErr != nil {
+			r.Err = errors.Join(r.Err, saveErr)
+			r.Outcome = outcome.Outcome{Status: outcome.Failed, Reason: "worker check recording failed: " + saveErr.Error()}
+		} else if check == outcome.Rejected && r.Outcome.Status == outcome.Failed {
+			// A settled failing command is known verification failure, even when
+			// the worker Runner stopped before independent review. A check pass
+			// alone never grants final task verification.
+			r.Verification = check
+		}
+	}
 	if recordingErr != nil {
 		r.Err = errors.Join(r.Err, recordingErr)
 		r.Outcome = outcome.Outcome{Status: outcome.Failed, Reason: "worker durable recording failed: " + recordingErr.Error()}
@@ -471,10 +516,13 @@ func childGate(d Deps, next agent.Exec) agent.Exec {
 // task-bound persistence and per-call authorization before running it.
 func roleRunner(d Deps, window int) *agent.Runner {
 	r := &agent.Runner{Prompts: d.Prompts,
-		WorkspaceExcludes: d.WorkspaceExcludes,
-		Model:             d.NewModel(), Registry: d.NewRegistry(), Exec: agent.Direct,
+		CheckReport:         d.CheckReport.Clone(),
+		CheckTimeoutSeconds: d.CheckTimeoutSeconds,
+		ProjectContext:      d.ProjectContext,
+		WorkspaceExcludes:   d.WorkspaceExcludes,
+		Model:               d.NewModel(), Registry: d.NewRegistry(), Exec: agent.Direct,
 		MaxSteps: d.MaxSteps, MaxRunSeconds: d.MaxRunSeconds, Out: io.Discard, MaxTokens: window,
-		Judge: d.Judge, Threshold: d.Threshold, ManualDecisions: d.ManualReadiness,
+		Judge: d.Judge, JudgePreflight: d.JudgePreflight, Threshold: d.Threshold, ManualDecisions: d.ManualReadiness,
 		LoopRepeat: d.LoopRepeat, LoopStall: d.LoopStall,
 		ThinkingLoop: d.ThinkingLoop,
 		Compaction:   d.Compaction, TemplatesDir: d.TemplatesDir,
@@ -485,6 +533,17 @@ func roleRunner(d Deps, window int) *agent.Runner {
 		r.Ask = d.Ask
 	}
 	return r
+}
+
+func bindProjectContext(r *agent.Runner, d Deps, owner *plan.ExecutionContract) {
+	if d.ProjectContext != nil {
+		r.ProjectContext = func(ctx context.Context, c *session.Continuation, _ string) error {
+			if err := owner.Admit(plan.WithProject(ctx, d.Workspace), d.Store); err != nil {
+				return err
+			}
+			return d.ProjectContext(ctx, c, owner.Task.ID)
+		}
+	}
 }
 func runSubagent(ctx context.Context, d Deps, prompt string, window int) (string, []llm.Message, outcome.Outcome, error) {
 	sub := roleRunner(d, window)
@@ -525,6 +584,9 @@ func verifyPass(ctx context.Context, d Deps, results []Result, indices []int, wi
 			if len(supplied) > i {
 				coding = supplied[i]
 				check, err = recordCurrentCheck(d, r, t, coding)
+			} else if r.coding != nil {
+				coding = r.coding
+				check, err = recordCurrentCheck(d, r, t, coding)
 			} else {
 				check, err = runCheck(ctx, d, r, t)
 				coding = codingFromCheck(d, r, t)
@@ -559,11 +621,11 @@ func verifyPass(ctx context.Context, d Deps, results []Result, indices []int, wi
 					return
 				}
 				prompt, err := d.Prompts.Render("templates.review", map[string]string{
-					"PlanGoal": goal, "ApproachTitle": strategy,
+					"PlanGoal": plan.DisplayStructured(goal), "ApproachTitle": plan.DisplayStructured(strategy),
 					"Title": brief.Title, "Prompt": brief.Verify, "Current": r.Output,
 					"TaskPrompt": brief.Prompt, "TaskCurrent": brief.Current, "Target": brief.Target,
 					"Sketch": brief.Sketch, "Tests": brief.Tests, "Acceptance": brief.Acceptance,
-					"Workspace": d.Workspace, "CheckCommand": brief.CheckCommand, "AcceptanceCommand": brief.AcceptanceCommand,
+					"Workspace": coding.Workspace, "CheckCommand": brief.CheckCommand, "AcceptanceCommand": brief.AcceptanceCommand,
 					"ExecutionRequest": r.ExecutionRequest, "ExecutionEvidence": r.ExecutionEvidence,
 					"CheckReceipt":     string(checkFacts),
 					"FileObservations": reviewFileObservations(r.Transcript, d.Prompts),
@@ -606,6 +668,7 @@ func verifyPass(ctx context.Context, d Deps, results []Result, indices []int, wi
 				return
 			}
 			record.ReviewerEvents = pending.ReviewerEvents
+			record.ReviewerSession = pending.ReviewerSession
 			reviewReason := r.VerificationReason
 			current, saveErr := recordCurrentCheck(d, r, t, coding)
 			if saveErr != nil {
@@ -827,7 +890,7 @@ func runOne(ctx context.Context, d Deps, t *plan.Task, window, retries int, dela
 			if err = approveTaskContracts(ctx, d, t.ID); err != nil {
 				return heldTask(t, err)
 			}
-			claimed, err := plan.ClaimTaskContractContext(plan.WithProject(ctx, d.Workspace), d.Store, t.ID, snapshot, "")
+			claimed, err := plan.ClaimTaskContractContext(plan.WithExecutionReport(plan.WithProject(ctx, d.Workspace), d.CheckReport), d.Store, t.ID, snapshot, "")
 			if err != nil {
 				return heldTask(t, err)
 			}
@@ -853,7 +916,9 @@ func runOne(ctx context.Context, d Deps, t *plan.Task, window, retries int, dela
 		t = current
 		r := RunTask(ctx, d, t, window)
 		r.Attempts = base + n
-		r.Verification = t.Verification
+		if r.Verification != outcome.Rejected {
+			r.Verification = t.Verification
+		}
 		errorText := ""
 		if r.Err != nil {
 			errorText = r.Err.Error()
@@ -863,12 +928,12 @@ func runOne(ctx context.Context, d Deps, t *plan.Task, window, retries int, dela
 			r.Err = err
 			return r
 		}
-		if err := appendReview(&r, attemptRecord{Attempt: r.Attempts, Kind: "execution", Verification: r.Verification, Outcome: r.Outcome, Output: r.Output, Error: errorText, Transcript: r.Transcript, ExecutionEvents: pending.ExecutionEvents}); err != nil {
+		if err := appendReview(&r, attemptRecord{Attempt: r.Attempts, Kind: "execution", Verification: r.Verification, Outcome: r.Outcome, Output: r.Output, Error: errorText, Transcript: r.Transcript, ExecutionEvents: pending.ExecutionEvents, ExecutionSession: pending.ExecutionSession}); err != nil {
 			r.Err = err
 			return r
 		}
 		t.Result, t.Review, t.Attempts, t.AttemptLog = r.Output, r.Review, r.Attempts, r.AttemptLog
-		if r.Outcome.Status != outcome.Failed || n > retries {
+		if r.Outcome.Status != outcome.Failed || r.Verification == outcome.Rejected || n > retries {
 			return r
 		}
 		if err := settle(d.Store, &r, ctx); err != nil {

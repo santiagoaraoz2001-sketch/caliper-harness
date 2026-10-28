@@ -13,6 +13,7 @@ import (
 
 	"specific-harness/internal/agent"
 	"specific-harness/internal/config"
+	"specific-harness/internal/launch"
 	"specific-harness/internal/llm"
 	"specific-harness/internal/session"
 	"specific-harness/internal/store"
@@ -35,6 +36,7 @@ func TestPreparationRecoveryFreshSessionScope(t *testing.T) {
 	bindDecisionFixture(t, &cfg, nil)
 	requests, second := 0, false
 	var active *agent.Runner
+	var originalRefusal llm.Message
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		var body struct {
 			Messages []llm.Message
@@ -45,14 +47,48 @@ func TestPreparationRecoveryFreshSessionScope(t *testing.T) {
 			return
 		}
 		if second {
+			// A fresh session may publish its authenticated current question, but
+			// cannot revive superseded preparation advice. Derive the expected
+			// header from graph facts and the actual request registry, not the
+			// production publication/retirement predicate.
+			node, err := launch.ScopeNode(s, active.Continuation.Workflow)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			def, ok := active.Registry.Lookup("plan")
+			if !ok {
+				t.Error("resumed current planning question missing")
+				return
+			}
+			header := active.Prompts.Format("system.workflow.scope_header", node.Kind, node.Ref, node.ID, node.State, node.Ancestors, node.Children, strings.Join(active.Registry.Names(), ", "))
+			want := session.Entry{Kind: "schema", PreparationScope: s.Identity() + "\n" + dir, Message: llm.Message{Role: "user", Content: header + "\n" + def.Schema()}}
 			own := 0
 			for _, e := range active.Continuation.Entries {
-				if e.PreparationScope == active.Assigned.Store+"\n"+active.Workspace {
+				if e.PreparationScope == want.PreparationScope {
 					own++
+					if !reflect.DeepEqual(e, want) {
+						t.Errorf("resumed owned entry is not the exact authenticated current schema: %+v", e)
+					}
 				}
 			}
-			if own != 0 {
-				t.Errorf("Continue rebuilt same-project/store advice across session IDs: %d", own)
+			if own != 1 {
+				t.Errorf("resumed current schema count=%d, want exactly one and no obsolete advice", own)
+			}
+			wireSchema, wireRefusal := 0, 0
+			for _, message := range body.Messages {
+				if reflect.DeepEqual(message, want.Message) {
+					wireSchema++
+				}
+				if reflect.DeepEqual(message, originalRefusal) {
+					wireRefusal++
+				}
+				if strings.Contains(message.Content, active.Prompts.Text("continuation.preparation.current_frame")) {
+					t.Error("fresh-session request revived obsolete preparation advice")
+				}
+			}
+			if wireSchema != 1 || wireRefusal != 1 {
+				t.Errorf("resumed wire lost or duplicated exact schema/refusal: schema=%d refusal=%d", wireSchema, wireRefusal)
 			}
 			if requests == 0 {
 				currentSchema, refusal, intent, selected := false, false, false, false
@@ -106,6 +142,14 @@ func TestPreparationRecoveryFreshSessionScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := active.Continuation.Snapshot()
+	for _, entry := range c.Entries {
+		if entry.Message.Role == "tool" && entry.Message.ToolCallID == "scopefalse" {
+			originalRefusal = entry.Message
+		}
+	}
+	if originalRefusal.Role != "tool" || !strings.Contains(originalRefusal.Content, "plan_title") {
+		t.Fatal("first session did not record the actual preparation refusal")
+	}
 	c.AddGuidance("legacy preparation guidance", nil)
 	c.AddGuidance("different store advice", nil)
 	c.Entries[len(c.Entries)-1].PreparationScope = "/different/store\n" + active.Workspace
@@ -119,14 +163,17 @@ func TestPreparationRecoveryFreshSessionScope(t *testing.T) {
 	if requests != 2 {
 		t.Fatalf("resume requests%d", requests)
 	}
+	if !reflect.DeepEqual(active.Continuation.Workflow, c.Workflow) {
+		t.Fatal("resume changed selected workflow identity")
+	}
 	for _, e := range c.Entries {
-		if e.PreparationScope != "" && e.PreparationScope != active.Assigned.Store+"\n"+active.Workspace {
+		if e.Message.Content == "legacy preparation guidance" || e.PreparationScope != "" && e.PreparationScope != active.Assigned.Store+"\n"+active.Workspace {
 			found := false
 			for _, retained := range active.Continuation.Entries {
 				found = found || reflect.DeepEqual(e, retained)
 			}
 			if !found {
-				t.Fatal("foreign owner/project provenance mutated")
+				t.Fatal("legacy or foreign owner/project provenance mutated")
 			}
 		}
 	}

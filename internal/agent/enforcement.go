@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,7 +11,6 @@ import (
 	"specific-harness/internal/outcome"
 	"specific-harness/internal/session"
 	"specific-harness/internal/tool"
-	"strings"
 	"time"
 )
 
@@ -120,34 +118,14 @@ func (r *Runner) currentProgress(facts any) ProgressCheckpoint {
 	}
 	p.RunStep, p.StepLimit, p.RunLimitSeconds, p.ElapsedSeconds = r.enforcement.runStep, r.MaxSteps, r.MaxRunSeconds, r.enforcement.elapsedSeconds
 	if note := r.enforcement.discovery; note != nil {
-		s := &SourceCheckpoint{Tool: note.Tool, Range: "unknown", FileSHA256: "unknown", ReceiptSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(note.Result.Text)))}
-		s.Path, _ = note.Args["path"].(string)
-		if note.Error == "" && !note.Result.Failed && !note.Result.Blocked && (note.Tool == "read" || note.Tool == "read_outside") {
-			header, _, _ := strings.Cut(note.Result.Text, "\n")
-			for _, field := range strings.Fields(header) {
-				if value, ok := strings.CutPrefix(field, "sha256="); ok {
-					if decoded, err := hex.DecodeString(value); err == nil && len(decoded) == sha256.Size {
-						s.FileSHA256 = value
-					}
-				}
-			}
-			if index := strings.LastIndex(note.Result.Text, "\n["); index >= 0 {
-				footer := note.Result.Text[index:]
-				if strings.HasSuffix(footer, "metadata not source lines]") {
-					for _, field := range strings.Split(footer, "; ") {
-						if value, ok := strings.CutPrefix(strings.TrimPrefix(strings.TrimSpace(field), "["), "shown_range="); ok {
-							s.Range = value
-						}
-					}
-				}
-			}
-		}
-		p.RecentSource = s
+		point, _ := sourceReceipt(note)
+		p.RecentSource = &point
 	}
 	return p
 }
 
 type observed struct {
+	Inspection       bool   // Successful host-known read-only operation; not inferred from model prose.
 	PlanningQuestion string // successful guided draft's next question, not an instruction from the model
 	CallID           string
 	ObservedAt       time.Time
@@ -162,6 +140,7 @@ type enforcement struct {
 	discovery             *observed
 	facts                 [32]byte
 	digest                [32]byte
+	comments              [32]byte
 	repair                string
 	presentation          string // current model-facing directive; full repair remains judge evidence
 	knowledgePresentation string
@@ -251,7 +230,7 @@ func (r *Runner) TaskStartDefinition() tool.Definition {
 		text := fmt.Sprintf("claimed task %s attempt%d; direct main execution admitted, check %q", value.TaskID, value.Attempt, command)
 		// refreshWorkflow installs the frozen brief at system role before the
 		// next request. Keep this receipt about the actual claim, not a second brief.
-		return tool.Result{Text: text}, nil
+		return tool.Result{Text: text, Focus: &tool.WorkflowScope{Store: value.Store, Kind: "task", ID: value.TaskID}}, nil
 	}}
 }
 func executionTool(name string) bool {
@@ -293,6 +272,10 @@ func (r *Runner) assignmentExec(next Exec) Exec {
 					copied[k] = v
 				}
 				note := &observed{Tool: d.Name, Args: copied, Result: result, ObservedAt: time.Now().UTC()}
+				switch d.Name {
+				case "read", "read_outside", "find_outside", "find", "find_file", "find_dir", "grep", "help":
+					note.Inspection = true
+				}
 				if d.Name == "graphql" {
 					encoded, _ := json.Marshal(args)
 					note.Args = tool.Args{"operation_sha256": fmt.Sprintf("%x", sha256.Sum256(encoded))}
@@ -303,6 +286,7 @@ func (r *Runner) assignmentExec(next Exec) Exec {
 						NextQuestion string          `json:"next_question"`
 					}
 					decoded := json.Unmarshal([]byte(result.Text), &envelope) == nil
+					note.Inspection = decoded && len(envelope.Errors) == 0 && (len(envelope.Effects) == 0 || string(envelope.Effects) == "[]" || string(envelope.Effects) == "null")
 					if d.Label == "plan" && decoded && len(envelope.Errors) == 0 && !envelope.DataOmitted && err == nil && !result.Failed && !result.Blocked && !result.Truncated {
 						note.PlanningQuestion = envelope.NextQuestion
 					}
@@ -344,15 +328,29 @@ func (r *Runner) enforce(ctx context.Context, final bool, provisional string, lo
 	if err != nil {
 		return "", err
 	}
+	commentTexts := make([]string, 0, len(packet.DeliveredUserComments))
+	for _, comment := range packet.DeliveredUserComments {
+		commentTexts = append(commentTexts, comment.Text)
+	}
+	commentRaw, err := json.Marshal(struct {
+		User    []string
+		Task    []outcome.TaskComment
+		Answers []session.Entry
+	}{commentTexts, packet.DeliveredTaskComments, packet.AnsweredQuestions})
+	if err != nil {
+		return "", err
+	}
+	commentDigest := sha256.Sum256(commentRaw)
+	newComments := len(commentTexts)+len(packet.DeliveredTaskComments)+len(packet.AnsweredQuestions) > 0 && commentDigest != r.enforcement.comments
 	// Successful drafting already supplies the next question. Successful work
 	// under a claim is supervised by the existing progress watcher. Neither
 	// needs a second bookkeeping judgment after every call. Finals, failures,
 	// changed questions and delivered comments retain this enforcement path.
 	// Older unexecuted calls remain evidence, but only the current refusal can
 	// override a newer successful receipt.
-	if note := r.enforcement.latest; !final && note != nil && note.Error == "" && !note.Result.Failed && !note.Result.Blocked && !note.Result.Truncated && (note.Result.ExitCode == nil || *note.Result.ExitCode == 0) && packet.PreflightRefusal == "" && len(packet.DeliveredUserComments) == 0 && len(packet.DeliveredTaskComments) == 0 {
-		guided := !r.assignedClaim && note.PlanningQuestion != "" && note.PlanningQuestion == packet.Checkpoint.NextAction
-		if guided || r.assignedClaim && r.settlement == nil {
+	if note := r.enforcement.latest; !final && note != nil && note.Error == "" && !note.Result.Failed && !note.Result.Blocked && (note.Result.ExitCode == nil || *note.Result.ExitCode == 0) && packet.PreflightRefusal == "" && !newComments {
+		guided := !packet.CurrentClaim && note.PlanningQuestion != "" && note.PlanningQuestion == packet.Checkpoint.NextAction
+		if guided || note.Inspection && note.PlanningQuestion == "" || r.assignedClaim && r.settlement == nil {
 			return "", nil
 		}
 	}
@@ -407,6 +405,7 @@ func (r *Runner) enforce(ctx context.Context, final bool, provisional string, lo
 		if err := log("judgment-error", fmt.Sprintf("source=pat-product-enforcer error=%q", err)); err != nil {
 			return "", err
 		}
+		r.enforcement.comments = commentDigest
 		r.enforcement.digest = digest // The same evidence is not judged again.
 		return "", nil
 	}
@@ -430,6 +429,7 @@ func (r *Runner) enforce(ctx context.Context, final bool, provisional string, lo
 	if saved != nil {
 		return "", saved
 	}
+	r.enforcement.comments = commentDigest
 	r.enforcement.digest = digest
 	if v.Confidence < advisoryConfidence {
 		return "", nil // A failed advisory judgment cannot change work or publish advice.

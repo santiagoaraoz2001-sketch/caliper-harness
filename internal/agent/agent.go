@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"specific-harness/internal/checkreport"
 	"specific-harness/internal/decision"
 	"specific-harness/internal/llm"
 	"specific-harness/internal/outcome"
@@ -68,21 +69,28 @@ type Runner struct {
 	workflows              map[string]outcome.Report
 	Model                  Model
 	Registry               *tool.Registry
+	OnRegistryChange       func([]string) // actual current projection; observational only
 	WorkflowView           func(*session.WorkflowScope) (*tool.Registry, string, error)
+	ProjectContext         func(context.Context, *session.Continuation, string) error // live task ID, never restored identity; completed-response boundary only
 	PlanningCompletion     func(*session.WorkflowScope) (*outcome.Report, error)
 	pendingFocus           *session.WorkflowScope
 	workflowHeader         string
-	preparationQuestion    string
 	Exec                   Exec
 	MaxSteps               int
 	MaxRunSeconds          int
 	CodingRequired         bool
-	Workspace              string
-	CheckCommand           string
-	hostCheckDefinition    tool.Definition // factory-owned; independent of the model-visible projection
-	codingErr              error
-	fileEvidence           fileEvidence
-	Out                    io.Writer // assistant text streams here as it arrives
+	// CodingOnEffects makes ordinary conversation verification depend on actual
+	// project effects or an explicit check, never an unfinished historical task.
+	CodingOnEffects     bool
+	turnEffects         bool
+	Workspace           string
+	CheckCommand        string
+	CheckReport         checkreport.Contract
+	CheckTimeoutSeconds int             // existing configured shell cap, for complete verification stages
+	hostCheckDefinition tool.Definition // factory-owned; independent of the model-visible projection
+	codingErr           error
+	fileEvidence        fileEvidence
+	Out                 io.Writer // assistant text streams here as it arrives
 	// OnToken receives assistant deltas as they stream. Nil = off.
 	// The model must satisfy Streamer, else the loop uses Chat.
 	OnToken func(string)
@@ -101,8 +109,10 @@ type Runner struct {
 	UsedOut      int
 	UsageUnknown bool
 	// Judge resolves enabled guards and admission; thinking/compaction refuse if missing.
-	Judge           JudgeFunc
-	ManualDecisions bool // decision opt-out requests human admission through Ask
+	Judge               JudgeFunc
+	JudgePreflight      func(decision.Request) error // Local transport admission; no inference.
+	compactionCandidate *compactionCandidate
+	ManualDecisions     bool // decision opt-out requests human admission through Ask
 	// Threshold belongs to factual admission; advisory supervision uses the owner's 0.5 floor.
 	Threshold float64
 	Ask       func(ctx context.Context, prompt string) bool
@@ -126,8 +136,9 @@ type Runner struct {
 	BehaviorNote string // disclosed through the ordinary session note channel
 	// TaskSystem is supplied by the owning worker or reviewer role. It is a
 	// separate protected system entry, never restored as assignment authority.
-	TaskSystem string
-	Reviewing  bool // Set by the owning independent-review path, never inferred from prompt prose.
+	TaskSystem    string
+	Reviewing     bool   // Set by the owning independent-review path, never inferred from prompt prose.
+	reviewRequest string // exact fresh host review prompt, never a restored human intent
 	// FinalFeedback repairs a normal final in this same run; empty accepts it.
 	FinalFeedback func(string) string
 	// WorkspaceExcludes contains exact harness-owned state paths.
@@ -143,7 +154,9 @@ type Runner struct {
 	ModelKey     string
 	// Btw pops queued user notes at a model boundary ("" = none).
 	// Called from the run goroutine; must be goroutine-safe.
-	Btw func() string
+	Btw            func() string
+	BtwNote        func() (session.UserNote, bool)
+	BtwAcknowledge func(context.Context, session.UserNote) error
 	// GenerationInterrupt registers only the current model request's cancellation.
 	// A queued /btw must never cancel a running effect or the owning Run context.
 	GenerationInterrupt func(context.CancelFunc)
@@ -151,6 +164,7 @@ type Runner struct {
 	TaskComments        func(context.Context) ([]outcome.TaskComment, error)
 	CommentReceipt      func(context.Context, outcome.TaskComment) error
 	CommentAppend       func(context.Context, string) error
+	CommentAppendNote   func(context.Context, session.UserNote) error
 }
 
 // JudgeFunc asks the decision model one question.
@@ -187,6 +201,7 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 		defer cancel()
 	}
 	r.pendingFocus = nil
+	r.turnEffects = false
 	r.assignedClaim = false
 	r.claimPreparationEnd = 0
 	r.settlement = nil
@@ -248,51 +263,25 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 	if out == nil {
 		out = io.Discard
 	}
-	var sessErr error
+	ledger := &turnLedger{runner: r, ctx: ctx}
 	var watch *watcher
 	if r.Judge != nil {
-		watch = &watcher{}
+		watch = &watcher{historyBudget: max(r.ThinkingLoop.MaxInputBytes, r.ThinkingLoop.SampleBytes)}
 	}
 	r.progressWatch = watch
-	log := func(kind, text string) {
-		if r.Session == nil || sessErr != nil {
-			return
-		}
-		// Cancellation stops work, not the local settlement receipt. Keep the
-		// store lease until its partial-result/cancelled events have been recorded.
-		logCtx := ctx
-		if ctx.Err() != nil {
-			logCtx = context.WithoutCancel(ctx)
-		}
-		if err := r.Session.Append(logCtx, r.SessionID, kind, text); err != nil {
-			sessErr = err
-		}
-	}
+	log, contextEvent, measurePrompt := ledger.Record, ledger.Context, ledger.Measure
 	boundExec := exec
 	exec = func(ctx context.Context, def tool.Definition, args tool.Args) (tool.Result, error) {
 		if def.Bound {
 			raw, _ := json.Marshal(args)
 			log("bound_call", def.Name+" "+string(raw))
-			if r.Session == nil || sessErr != nil {
-				return tool.Result{}, fmt.Errorf("bound call requires a durable receipt: %v", sessErr)
+			if r.Session == nil || ledger.Err != nil {
+				return tool.Result{}, fmt.Errorf("bound call requires a durable receipt: %v", ledger.Err)
 			}
 		}
 		return boundExec(ctx, def, args)
 	}
-	// Publish only the reading; full continuation/history remains a settlement receipt.
-	contextEvent := func(reading session.Continuation) {
-		raw, _ := json.Marshal(session.Continuation{Prompt: reading.Prompt,
-			Measured: reading.Measured, ModelKey: reading.ModelKey})
-		log("context", string(raw))
-	}
-	measurePrompt := func(usage llm.Usage) {
-		r.Continuation.Measured = usage.Reported
-		if usage.Reported {
-			r.Continuation.Prompt = usage.In
-		}
-		contextEvent(r.Continuation)
-	}
-	if err := r.refreshWorkflow(); err != nil {
+	if err := r.refreshWorkflow(ctx); err != nil {
 		r.Outcome = outcome.Outcome{Status: outcome.Failed, Reason: err.Error()}
 		return "", nil, err
 	}
@@ -302,7 +291,6 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 		r.Outcome = outcome.Outcome{Status: outcome.Failed, Reason: definitionErr.Error()}
 		return "", nil, definitionErr
 	}
-	transcript := r.Continuation.Messages()
 	if r.Behavior != "" {
 		log("behavior", r.Behavior)
 	}
@@ -317,36 +305,24 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 	if r.Memories != "" {
 		log("recall", r.Memories)
 	}
-	add := func(kind, role, text string, unread bool) {
-		if kind == "guidance" {
-			var round *session.TaskRound
-			if r.assignedClaim && r.settlement == nil {
-				round = session.RoundFor(r.Continuation.Assignment, "")
-			}
-			r.Continuation.AddGuidance(text, round)
-		} else {
-			r.Continuation.Add(kind, role, text, unread)
-		}
-		transcript = r.Continuation.Messages()
-	}
+	add := ledger.Add
 	deliverGuidance := func(raw, presentation string, prepare bool, otherAdvice string) error {
 		if raw != "" {
 			log("enforcement", raw) // Preserve the original event before scoped publication.
 		}
-		if sessErr != nil {
-			return sessErr
+		if ledger.Err != nil {
+			return ledger.Err
 		}
 		delivered, err := r.publishPreparationGuidance(ctx, presentation, prepare, otherAdvice)
 		if err != nil {
 			return err
 		}
 		if delivered {
-			transcript = r.Continuation.Messages()
 			contextEvent(r.Continuation)
 		} else if presentation != "" {
 			add("guidance", "user", presentation, false)
 		}
-		return sessErr
+		return ledger.Err
 	}
 	decisionGuidance := func(raw string) error {
 		if r.Assigned == nil || raw == "" {
@@ -360,7 +336,7 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 	}
 	reviewDiscovery := func() error {
 		r.progressCheckpoint(usedSteps, startedAt)
-		advice, err := r.reviewDiscovery(ctx, watch, func(k, t string) error { log(k, t); return sessErr })
+		advice, err := r.reviewDiscovery(ctx, watch, func(k, t string) error { log(k, t); return ledger.Err })
 		if err != nil {
 			return err
 		}
@@ -368,6 +344,32 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 			add("guidance", "user", advice, false)
 		}
 		return nil
+	}
+	observeProgress := func(sig string, productive bool) string {
+		if watch == nil {
+			return ""
+		}
+		if r.enforcement.current != nil {
+			watch.discoveryReceipt(r.enforcement.current, r.LoopStall)
+		}
+		return watch.observe(sig, r.bookkeepingProgress(ctx, productive), r.LoopRepeat, r.LoopStall)
+	}
+	settleProgress := func(trip, refusal string) error {
+		if trip != "" {
+			r.progressCheckpoint(usedSteps, startedAt)
+			advice, err := r.confirmLoop(ctx, watch, trip, func(k, text string) error { log(k, text); return ledger.Err }, refusal)
+			if err != nil {
+				return err
+			}
+			if advice != "" {
+				add("guidance", "user", advice, false)
+			}
+			watch.reset()
+			if r.LoopStall > 0 {
+				watch.discoveryCalls %= r.LoopStall
+			}
+		}
+		return reviewDiscovery()
 	}
 	thinkingStop := false
 	normalFinal := false
@@ -382,9 +384,9 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 			reason = context.Canceled.Error()
 		}
 
-		if status == outcome.Completed && sessErr != nil {
+		if status == outcome.Completed && ledger.Err != nil {
 			status = outcome.Failed
-			reason = sessErr.Error()
+			reason = ledger.Err.Error()
 		}
 		if status == outcome.Completed {
 			unresolvedStatus := outcome.Failed
@@ -405,15 +407,15 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 				reason = "required workflow unresolved: " + strings.Join(unresolved, "; ")
 			}
 		}
-		if normalFinal && status == outcome.Completed && err == nil && sessErr == nil && ctx.Err() == nil && r.FinalFeedback != nil {
+		if normalFinal && status == outcome.Completed && err == nil && ledger.Err == nil && ctx.Err() == nil && r.FinalFeedback != nil {
 			if feedback := r.FinalFeedback(text); feedback != "" {
 				if r.withinStepBudget(usedSteps) {
 					log("evidence", feedback)
-					if sessErr == nil {
+					if ledger.Err == nil {
 						add("evidence", "user", feedback, false)
-						return text, transcript, repairFinal
+						return text, ledger.Messages(), repairFinal
 					}
-					status, reason, err = outcome.Failed, sessErr.Error(), sessErr
+					status, reason, err = outcome.Failed, ledger.Err.Error(), ledger.Err
 				} else {
 					status, reason = outcome.Stopped, "review verdict pending; step budget exhausted"
 				}
@@ -422,7 +424,7 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 		planningPending := r.PlanningActive() && (!r.assignedClaim || r.settlement != nil && r.settlement.Qualified)
 		planningFinal := normalFinal && status == outcome.Completed && r.Assigned != nil && planningPending
 		planningQualified := false
-		if status == outcome.Completed && planningPending {
+		if status == outcome.Completed && planningPending && (r.assignedClaim || len(r.workflows) > 0) {
 			if len(r.workflows) == 0 || r.PlanningCompletion == nil {
 				status, reason = outcome.Stopped, "planned work has no current qualified execution receipt"
 			} else if report, e := r.PlanningCompletion(r.PlanningScope()); e != nil {
@@ -433,16 +435,16 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 				planningQualified = true
 			}
 		}
-		planningFinal = planningFinal && !planningQualified
+		planningFinal = planningFinal && !planningQualified && (r.assignedClaim || len(r.workflows) > 0)
 		validatedHandoff := false
-		if status == outcome.Completed && r.CodingRequired && (!r.PlanningActive() || r.assignedClaim && (r.settlement == nil || !r.settlement.Qualified)) {
+		if status == outcome.Completed && r.CodingObligation() && (!r.PlanningActive() || r.assignedClaim && (r.settlement == nil || !r.settlement.Qualified)) {
 			c := r.Continuation.Coding
 			if (!r.PlanningActive() || r.assignedClaim) && strings.TrimSpace(text) != "" && strings.TrimSpace(r.CheckCommand) != "" &&
-				r.Session != nil && sessErr == nil && r.codingErr == nil && ctx.Err() == nil &&
+				r.Session != nil && ledger.Err == nil && r.codingErr == nil && ctx.Err() == nil &&
 				r.withinStepBudget(usedSteps) && c != nil && !c.Passed() &&
 				(checkTask != c.TaskID || checkTaskAttempt != c.Attempt || checkAttempt != c.Revision) {
 				usedSteps++ // Host work consumes the same remaining step budget.
-				obs, hostErr := r.hostCheck(ctx, exec, func(kind, text string) error { log(kind, text); return sessErr })
+				obs, hostErr := r.hostCheck(ctx, exec, func(kind, text string) error { log(kind, text); return ledger.Err })
 				if obs != "" {
 					add("evidence", "user", "Host verification episode (harness-triggered):\n"+obs, false)
 				}
@@ -468,7 +470,7 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 			if status != outcome.Completed {
 				settleCtx = context.WithoutCancel(ctx)
 			}
-			settlement, settleErr := r.Assigned.Settle(settleCtx, outcome.Outcome{Status: status, Reason: reason}, text, prompt, r.completionEvidence(), transcript, r.Continuation.Coding)
+			settlement, settleErr := r.Assigned.Settle(settleCtx, outcome.Outcome{Status: status, Reason: reason}, text, prompt, r.completionEvidence(), ledger.Messages(), r.Continuation.Coding)
 			if settleErr != nil {
 				status, reason, err = outcome.Failed, settleErr.Error(), errors.Join(err, settleErr)
 			} else {
@@ -478,29 +480,28 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 				newSettlement := receipt != lastSettlementReceipt
 				if newSettlement {
 					log("evidence", receipt)
-					if sessErr == nil {
+					if ledger.Err == nil {
 						add("evidence", "user", receipt, false)
 						lastSettlementReceipt = receipt
 					}
 				}
-				if settlement.Qualified && status == outcome.Completed && ctx.Err() == nil && sessErr == nil && settlement.TaskID == a.TaskID && settlement.Attempt == a.Attempt {
+				if settlement.Qualified && status == outcome.Completed && ctx.Err() == nil && ledger.Err == nil && settlement.TaskID == a.TaskID && settlement.Attempt == a.Attempt {
 					revision := r.Continuation.Revision
 					if cleanupErr := r.retireTaskGuidance(ctx, session.RoundFor(a, "")); cleanupErr != nil {
 						status, reason, err = outcome.Failed, cleanupErr.Error(), errors.Join(err, cleanupErr)
 					} else {
-						transcript = r.Continuation.Messages()
 						if r.Continuation.Revision != revision {
 							contextEvent(r.Continuation)
 						}
 					}
 				}
 				validatedHandoff = newSettlement && settlement.Qualified && normalFinal && status == outcome.Completed
-				if newSettlement && normalFinal && settlement.rejected() && err == nil && ctx.Err() == nil && sessErr == nil && r.codingErr == nil && r.withinStepBudget(usedSteps) {
+				if newSettlement && normalFinal && settlement.rejected() && err == nil && ctx.Err() == nil && ledger.Err == nil && r.codingErr == nil && r.withinStepBudget(usedSteps) {
 					feedback := fmt.Sprintf("REMEDIATE task=%s attempt=%d state=%s check=%s verification=%s:\n%s\n", settlement.TaskID, settlement.Attempt, settlement.State, settlement.Check, settlement.Verification, settlement.Feedback) + r.Prompts.Text("continuation.remediate")
 					log("evidence", feedback)
-					if sessErr == nil {
+					if ledger.Err == nil {
 						add("evidence", "user", feedback, false)
-						return text, transcript, repairFinal
+						return text, ledger.Messages(), repairFinal
 					}
 				}
 				if status == outcome.Completed && !settlement.Qualified {
@@ -508,8 +509,8 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 				}
 			}
 		}
-		if normalFinal && err == nil && !planningQualified && sessErr == nil && r.codingErr == nil && ctx.Err() == nil && (status == outcome.Completed || r.Assigned != nil && planningPending) {
-			repair, e := r.enforce(ctx, true, text, func(k, t string) error { log(k, t); return sessErr })
+		if normalFinal && err == nil && !planningQualified && ledger.Err == nil && r.codingErr == nil && ctx.Err() == nil && (status == outcome.Completed || r.Assigned != nil && planningPending) {
+			repair, e := r.enforce(ctx, true, text, func(k, t string) error { log(k, t); return ledger.Err })
 			if e != nil {
 				status, reason, err = outcome.Failed, e.Error(), errors.Join(err, e)
 			}
@@ -518,33 +519,33 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 			}
 			if repair != "" && r.withinStepBudget(usedSteps) && e == nil {
 				if guidanceErr := decisionGuidance(repair); guidanceErr == nil {
-					return text, transcript, repairFinal
+					return text, ledger.Messages(), repairFinal
 				} else {
 					status, reason, err = outcome.Failed, guidanceErr.Error(), errors.Join(err, guidanceErr)
 				}
 			}
 		}
-		if validatedHandoff && status == outcome.Completed && err == nil && sessErr == nil && r.codingErr == nil && ctx.Err() == nil && r.withinStepBudget(usedSteps) {
-			if sendback := r.styleSendback(ctx, text, func(k, t string) error { log(k, t); return sessErr }); sendback != "" && sessErr == nil {
+		if validatedHandoff && status == outcome.Completed && err == nil && ledger.Err == nil && r.codingErr == nil && ctx.Err() == nil && r.withinStepBudget(usedSteps) {
+			if sendback := r.styleSendback(ctx, text, func(k, t string) error { log(k, t); return ledger.Err }); sendback != "" && ledger.Err == nil {
 				add("evidence", "user", sendback, false)
-				return text, transcript, repairFinal
+				return text, ledger.Messages(), repairFinal
 			}
 			s := r.settlement
 			progress := fmt.Sprintf("VALIDATED task=%s attempt=%d by owning current check and independent review.", s.TaskID, s.Attempt) + r.Prompts.Text("continuation.validated")
 			log("evidence", progress)
-			if sessErr == nil {
+			if ledger.Err == nil {
 				add("evidence", "user", progress, false)
-				return text, transcript, repairFinal
+				return text, ledger.Messages(), repairFinal
 			}
 		}
 		if validatedHandoff && status == outcome.Completed && r.PlanningActive() && !r.withinStepBudget(usedSteps) {
 			status, reason = outcome.Stopped, "verified task; parent handoff pending; step budget exhausted"
 		}
-		if planningFinal && err == nil && sessErr == nil && r.codingErr == nil && ctx.Err() == nil {
+		if planningFinal && err == nil && ledger.Err == nil && r.codingErr == nil && ctx.Err() == nil {
 			if r.withinStepBudget(usedSteps) {
 				request := r.Prompts.Text("continuation.no_claim_final")
 				if guidanceErr := deliverGuidance(request, request, true, ""); guidanceErr == nil {
-					return text, transcript, repairFinal
+					return text, ledger.Messages(), repairFinal
 				} else {
 					status, reason, err = outcome.Failed, guidanceErr.Error(), errors.Join(err, guidanceErr)
 				}
@@ -570,21 +571,21 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 				log("failed", reason)
 			}
 		}
-		if sessErr != nil {
+		if ledger.Err != nil {
 			if err == nil {
-				err = sessErr
-			} else if !errors.Is(err, sessErr) {
-				err = errors.Join(err, sessErr)
+				err = ledger.Err
+			} else if !errors.Is(err, ledger.Err) {
+				err = errors.Join(err, ledger.Err)
 			}
 			if status == outcome.Completed || (thinkingStop && status == outcome.Stopped && context.Cause(ctx) == nil) {
 				status = outcome.Failed
-				reason = "session recording failed: " + sessErr.Error()
+				reason = "session recording failed: " + ledger.Err.Error()
 			}
 		}
 		r.Outcome = outcome.Outcome{Status: status, Reason: reason}
 		if status == outcome.Completed || status == outcome.Stopped && r.settlement != nil && r.settlement.Qualified {
 			contract := "no declared chat check; correctness/test count unverified"
-			if r.CodingRequired {
+			if r.CodingObligation() {
 				contract = "declared check passed; coverage/test count unknown"
 			}
 			if len(r.workflows) > 0 {
@@ -597,12 +598,17 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 			r.Evidence += r.completionEvidence()
 			fmt.Fprintln(out, r.Evidence)
 			log("evidence", r.Evidence)
-			if sessErr != nil && err == nil {
-				err = sessErr
-				r.Outcome = outcome.Outcome{Status: outcome.Failed, Reason: "evidence recording failed: " + sessErr.Error()}
+			if ledger.Err != nil && err == nil {
+				err = ledger.Err
+				r.Outcome = outcome.Outcome{Status: outcome.Failed, Reason: "evidence recording failed: " + ledger.Err.Error()}
 			}
 		}
 		if status != outcome.Completed {
+			if normalFinal && r.Evidence == "" {
+				r.Evidence = fmt.Sprintf("Harness outcome: %s. %s. Model completion claims are unverified.", status, reason) + r.completionEvidence()
+				fmt.Fprintln(out, r.Evidence)
+				log("evidence", r.Evidence)
+			}
 			n := len(r.Continuation.Entries)
 			if n == 0 || r.Continuation.Entries[n-1].Kind != "failure" || !strings.Contains(r.Continuation.Entries[n-1].Message.Content, reason) {
 				add("failure", "user", "Harness outcome: "+reason, false)
@@ -611,11 +617,10 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 		if r.Evidence != "" {
 			add("evidence", "user", r.Evidence, false)
 		}
-		if r.CodingRequired {
+		if r.CodingObligation() && r.Continuation.Coding != nil {
 			r.Continuation.Coding.Closed = r.Outcome.Status == outcome.Completed
 		}
-		r.Continuation = r.Continuation.Snapshot()
-		encoded, snapshotErr := r.Continuation.Encode()
+		encoded, snapshotErr := r.Continuation.Snapshot().Encode()
 		if snapshotErr == nil {
 			log("continuation", encoded)
 		} else {
@@ -623,42 +628,114 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 			fmt.Fprintln(out, msg)
 			r.Continuation.Add("failure", "user", msg, false)
 			log("error", msg)
-			sessErr = errors.Join(sessErr, snapshotErr)
+			ledger.Err = errors.Join(ledger.Err, snapshotErr)
 		}
-		if sessErr != nil {
-			err = errors.Join(err, sessErr)
+		if ledger.Err != nil {
+			err = errors.Join(err, ledger.Err)
 			if r.Outcome.Status == outcome.Completed || (thinkingStop && r.Outcome.Status == outcome.Stopped && context.Cause(ctx) == nil) {
-				r.Outcome = outcome.Outcome{Status: outcome.Failed, Reason: "continuation recording failed: " + sessErr.Error()}
+				r.Outcome = outcome.Outcome{Status: outcome.Failed, Reason: "continuation recording failed: " + ledger.Err.Error()}
 			}
 		}
-		if r.CodingRequired && r.Outcome.Status != outcome.Completed {
+		if r.CodingObligation() && r.Continuation.Coding != nil && r.Outcome.Status != outcome.Completed {
 			r.Continuation.Coding.Closed = false
 		}
-		return text, transcript, err
+		messages := ledger.Messages()
+		r.Continuation = r.Continuation.Snapshot()
+		return text, messages, err
 	}
 	deliverBtw := func() error {
-		if r.Btw == nil {
+		if r.Btw == nil && r.BtwNote == nil && len(r.Continuation.PendingNotes) == 0 {
 			return nil
 		}
-		for note := r.Btw(); note != ""; note = r.Btw() {
-			log("btw", note)
-			if sessErr != nil {
-				return sessErr
+		next := func() (session.UserNote, bool) {
+			if len(r.Continuation.PendingNotes) > 0 {
+				return r.Continuation.PendingNotes[0], true
 			}
-			if r.assignedClaim && r.CommentAppend != nil {
-				if err := r.CommentAppend(ctx, note); err != nil {
-					add("note", "user", "Undelivered user comment: "+note, false)
+			if r.BtwNote != nil {
+				if note, ok := r.BtwNote(); ok {
+					r.Continuation.PendingNotes = append(r.Continuation.PendingNotes, note)
+					return note, true
+				}
+			}
+			if r.Btw != nil {
+				if text := r.Btw(); text != "" {
+					return session.UserNote{Text: text}, true
+				}
+			}
+			return session.UserNote{}, false
+		}
+		for envelope, ok := next(); ok; envelope, ok = next() {
+			if len(r.Continuation.PendingNotes) > 0 && (envelope.ID == "" || envelope.SessionID == "" || strings.TrimSpace(envelope.Text) == "") {
+				return fmt.Errorf("invalid durable user note envelope")
+			}
+			note := envelope.Text
+			// The queue has relinquished this text. Preserve it before any I/O
+			// so even a failed capture append cannot discard the user's intent.
+			at := len(r.Continuation.Entries)
+			if envelope.ID != "" {
+				for i, entry := range r.Continuation.Entries {
+					if entry.UserNoteID == envelope.ID {
+						at = i
+						break
+					}
+				}
+			}
+			if at == len(r.Continuation.Entries) {
+				add("note", "user", "Undelivered user comment: "+note, false)
+				r.Continuation.Entries[at].UserNoteID = envelope.ID
+			}
+			log("btw_received", note)
+			if ledger.Err != nil {
+				return ledger.Err
+			}
+			if r.assignedClaim || r.Reviewing {
+				var err error
+				if envelope.ID != "" && r.CommentAppendNote != nil {
+					err = r.CommentAppendNote(ctx, envelope)
+				} else if r.CommentAppend != nil {
+					err = r.CommentAppend(ctx, note)
+				}
+				if err != nil {
 					return err
 				}
 			}
-			add("note", "user", "USER COMMENT: "+note, false)
+			r.Continuation.Entries[at].Message.Content = "USER COMMENT: " + note
 			if r.assignedClaim {
-				r.Continuation.Entries[len(r.Continuation.Entries)-1].Round = session.RoundFor(r.Continuation.Assignment, "")
+				r.Continuation.Entries[at].Round = session.RoundFor(r.Continuation.Assignment, "")
 			}
 			r.Continuation.Invalidate()
+			encoded, encodeErr := r.Continuation.Snapshot().Encode()
+			if encodeErr != nil {
+				return encodeErr
+			}
+			log("continuation", encoded)
 			contextEvent(r.Continuation)
+			if ledger.Err != nil {
+				return ledger.Err
+			}
+			if envelope.ID != "" {
+				if r.BtwAcknowledge == nil {
+					return fmt.Errorf("durable user note needs its owning acknowledgement sink")
+				}
+				if err := r.BtwAcknowledge(context.WithoutCancel(ctx), envelope); err != nil {
+					return err
+				}
+				// The callback already acknowledges the original archive. Only
+				// a different current archive needs its own recovery receipt for
+				// the pending note in the continuation persisted above.
+				if envelope.SessionID != r.SessionID {
+					raw, _ := json.Marshal(envelope)
+					log("btw_ack", string(raw))
+					if ledger.Err != nil {
+						return ledger.Err
+					}
+				}
+				r.Continuation.PendingNotes = r.Continuation.PendingNotes[1:]
+			}
+			// This acknowledges durable placement, not subsequent model uptake.
+			log("btw_committed", note)
 		}
-		return sessErr
+		return ledger.Err
 	}
 	deferredBoundaryAdvice := ""
 	deferCompaction := false // A declined length-boundary summary must still yield a worker turn.
@@ -679,21 +756,7 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 		}
 		return next, summary, ran, err
 	}
-	publishCompact := func(next session.Continuation, summary string) error {
-		encoded, err := next.Snapshot().Encode()
-		if err != nil {
-			return err
-		}
-		log("compact", summary)
-		log("continuation", encoded)
-		contextEvent(next)
-		if sessErr != nil {
-			return sessErr
-		}
-		r.Continuation = next
-		transcript = next.Messages()
-		return nil
-	}
+	publishCompact := ledger.Compact
 steps:
 	for step := 1; r.withinStepBudget(step - 1); step++ {
 		usedSteps = step
@@ -713,13 +776,13 @@ steps:
 			deferredBoundaryAdvice = ""
 		}
 		r.progressCheckpoint(usedSteps, startedAt)
-		if repair, e := r.enforce(ctx, false, "", func(k, t string) error { log(k, t); return sessErr }); e != nil {
+		if repair, e := r.enforce(ctx, false, "", func(k, t string) error { log(k, t); return ledger.Err }); e != nil {
 			return finish(outcome.Failed, e.Error(), "", e)
 		} else if e := decisionGuidance(repair); e != nil {
 			return finish(outcome.Failed, e.Error(), "", e)
 		}
-		if r.Assigned != nil && sessErr != nil {
-			return finish(outcome.Failed, sessErr.Error(), "", sessErr)
+		if r.Assigned != nil && ledger.Err != nil {
+			return finish(outcome.Failed, ledger.Err.Error(), "", ledger.Err)
 		}
 
 		if r.TaskComments != nil {
@@ -748,7 +811,7 @@ steps:
 					err = fmt.Errorf("task comment delivery needs a durable sink")
 				} else {
 					log("task_comment", string(raw))
-					err = sessErr
+					err = ledger.Err
 				}
 				if err != nil {
 					return finish(outcome.Failed, err.Error(), "", err)
@@ -761,9 +824,22 @@ steps:
 				contextEvent(r.Continuation)
 			}
 		}
-		if err := r.refreshWorkflow(); err != nil {
+		if err := r.refreshWorkflow(ctx); err != nil {
 			return finish(outcome.Failed, err.Error(), "", err)
 		}
+		if r.ProjectContext != nil {
+			taskID := ""
+			if a := r.Continuation.Assignment; a != nil && r.ClaimedTaskScope(&session.WorkflowScope{Store: a.Store, Kind: "task", ID: a.TaskID}) {
+				if err := r.Assigned.Admit(ctx); err != nil {
+					return finish(outcome.Failed, err.Error(), "", err)
+				}
+				taskID = a.TaskID
+			}
+			if err := r.ProjectContext(ctx, &r.Continuation, taskID); err != nil {
+				return finish(outcome.Failed, err.Error(), "", err)
+			}
+		}
+	maintainContext:
 		defs, definitionErr = r.definitions()
 		if definitionErr != nil {
 			return finish(outcome.Failed, definitionErr.Error(), "", definitionErr)
@@ -775,7 +851,6 @@ steps:
 		}
 		revision := r.Continuation.Revision
 		basis, report := pruning.apply(r, &r.Continuation)
-		transcript = r.Continuation.Messages()
 		if report != "" {
 			kind := "pressure"
 			if revision != r.Continuation.Revision {
@@ -796,9 +871,9 @@ steps:
 				msg := fmt.Sprintf("stopped: %v", err)
 				fmt.Fprintln(out, msg)
 				if errors.Is(err, compactionRecordFailure) {
-					return finish(outcome.Failed, msg, msg, errors.Join(err, sessErr))
+					return finish(outcome.Failed, msg, msg, errors.Join(err, ledger.Err))
 				}
-				return finish(outcome.Stopped, msg, msg, sessErr)
+				return finish(outcome.Stopped, msg, msg, ledger.Err)
 			}
 			if ran {
 				if err := publishCompact(nt, sum); err != nil {
@@ -814,12 +889,25 @@ steps:
 			}
 		}
 		deferCompaction = false
+		// Maintenance may remove an older plan receipt. Rebuild through the
+		// existing schema owner, then admit the actual packet before dispatch.
+		if r.ensurePlanningPublication() {
+			contextEvent(r.Continuation)
+			goto maintainContext
+		}
+		r.planningPlacement(defs) // Authenticate against final retained messages.
+		if err := r.accountDefinitions(defs); err != nil {
+			return finish(outcome.Failed, err.Error(), "", err)
+		}
+		basis = max(basis, r.Continuation.Estimate())
 		if overBudget(basis, r.MaxTokens, true) {
 			msg := fmt.Sprintf("stopped: content estimate %d tokens reached budget %d (backend token occupancy unmeasured) — the task needs a bigger window or breaking down", basis, r.MaxTokens)
 			fmt.Fprintln(out, msg)
-			return finish(outcome.Stopped, msg, msg, sessErr)
+			return finish(outcome.Stopped, msg, msg, ledger.Err)
 		}
+		transcript := ledger.Messages()
 		requestChars := contentSize(transcript) + r.Continuation.SchemaBytes
+		consumption := r.Continuation.Consumption()
 		var native llm.Reply
 		var reply string
 		var u llm.Usage
@@ -832,14 +920,12 @@ steps:
 				if prefix != nil {
 					requestCtx = llm.WithResponseContinuation(requestCtx, *prefix)
 					requestChars = contentSize(transcript) + r.Continuation.SchemaBytes
-					for _, raw := range prefix.Prefix.RawChunks {
-						requestChars += len(raw)
-					}
+					requestChars += prefix.Prefix.ResponseBytes()
 				}
 				if r.GenerationInterrupt != nil {
 					r.GenerationInterrupt(func() { cancelGeneration(userCommentInterrupt) })
 				}
-				observedCtx, setupErr := r.thinkingContext(requestCtx, func(kind, text string) error { log(kind, text); return sessErr }, func(advice string) { deferredBoundaryAdvice = advice })
+				observedCtx, setupErr := r.thinkingContext(requestCtx, func(kind, text string) error { log(kind, text); return ledger.Err }, func(advice string) { deferredBoundaryAdvice = advice })
 				if setupErr == nil {
 					native, err = m.ChatTools(observedCtx, transcript, defs, r.OnToken)
 				} else {
@@ -852,7 +938,7 @@ steps:
 				cancelGeneration(nil)
 				if errors.Is(cause, userCommentInterrupt) && ctx.Err() == nil {
 					r.recordUsage(native.Usage)
-					if err := r.keepSteered(native, func(kind, text string) error { log(kind, text); return sessErr }); err != nil {
+					if err := r.keepSteered(native, func(kind, text string) error { log(kind, text); return ledger.Err }); err != nil {
 						return finish(outcome.Failed, err.Error(), "", err)
 					}
 					if err := deliverBtw(); err != nil {
@@ -868,29 +954,18 @@ steps:
 				// unfinished response must continue or cannot retain a prefix.
 				measurePrompt(native.Usage)
 				if native.Prefix == nil {
-					continuationFailure = "unfinished response cannot continue: runtime did not return literal token-prefix state; use the owned MLX worker with continuation support"
+					continuationFailure = "unfinished response cannot continue: runtime did not return literal token-prefix state; request a smaller response or use a runtime with continuation support"
 					break
 				}
 				r.recordUsage(native.Usage)
-				if _, archiveErr := r.keepPartial(native, err, func(kind, text string) error { log(kind, text); return sessErr }); archiveErr != nil {
+				if _, archiveErr := r.keepPartial(native, err, func(kind, text string) error { log(kind, text); return ledger.Err }); archiveErr != nil {
 					return finish(outcome.Failed, archiveErr.Error(), "", archiveErr)
 				}
 				r.progressCheckpoint(step-1, startedAt)
-				// A length terminal burned a full output budget with no settled
-				// receipt: count it toward the consecutive-unproductive-turn
-				// stuck trigger so repeated thinking burns get judged advice.
-				if watch != nil {
-					watch.consecutiveFailures++
-				}
-				advice, judgeErr := r.reviewDiscovery(ctx, watch, func(kind, text string) error { log(kind, text); return sessErr }, native.Message)
-				if judgeErr != nil {
-					return finish(outcome.Failed, judgeErr.Error(), "", judgeErr)
-				}
-				if advice != "" {
-					deferredBoundaryAdvice = advice // Delivered only at the next fresh response boundary.
-					log("note", "response-limit progress advice recorded; delivery waits for a fresh response or context compaction; current unfinished prefix is unchanged")
-				}
-				nextInput := basis + len(native.Prefix.Tokens)
+				// A physical output boundary is not a failed logical turn. Resume
+				// its prefix without spending another model call on progress advice.
+				// Existing discovery/loop checks run at completed response boundaries.
+				nextInput := basis + native.Prefix.GeneratedTokenCount()
 				if native.Usage.Reported {
 					nextInput = native.Usage.In + native.Usage.Out
 				}
@@ -900,7 +975,7 @@ steps:
 					for index := range r.Continuation.Entries {
 						r.Continuation.Entries[index].Unread = false
 					}
-					if keepErr := r.retainUnfinished(native, func(k, v string) error { log(k, v); return sessErr }); keepErr != nil {
+					if keepErr := r.retainUnfinished(native, func(k, v string) error { log(k, v); return ledger.Err }); keepErr != nil {
 						return finish(outcome.Failed, keepErr.Error(), "", keepErr)
 					}
 					r.Continuation.BasisTokens, r.Continuation.BasisChars = nextInput, contentSize(r.Continuation.Messages())+r.Continuation.SchemaBytes
@@ -943,8 +1018,8 @@ steps:
 				copy := native
 				prefix = &copy
 				log("note", "output limit reached; continuing the same unfinished native response prefix")
-				if sessErr != nil {
-					return finish(outcome.Failed, sessErr.Error(), "", sessErr)
+				if ledger.Err != nil {
+					return finish(outcome.Failed, ledger.Err.Error(), "", ledger.Err)
 				}
 			}
 			reply = native.Message.Content
@@ -952,9 +1027,23 @@ steps:
 		} else {
 			reply, _, u, err = r.chat(ctx, transcript)
 		}
+		if err == nil && native.RawNative != "" {
+			// Native raw transport owns generation continuity; the registry owns
+			// parsing and admission. No unfinished frame reaches this boundary.
+			var parsed llm.Message
+			parsed, err = r.Registry.ParseNativeResponse(native.RawNative, native.NativeInitialState, r.SessionID+fmt.Sprintf("-step-%d", step))
+			if err == nil {
+				native.Message = parsed
+			}
+			reply = native.Message.Content
+			native.ThinkingOnly = err == nil && native.FinishReason == "stop" && strings.TrimSpace(reply) == "" && len(native.Message.ToolCalls) == 0 && (native.Message.Reasoning != "" || native.Message.ReasoningContent != "" || native.Message.Thinking != "")
+			if err == nil && reply != "" && r.OnToken != nil {
+				r.OnToken(strings.TrimPrefix(reply, native.RawContentStreamed))
+			}
+		}
 		var framing *llm.ToolFramingError
 		if errors.As(err, &framing) && ctx.Err() == nil && !native.OutputLimit {
-			fixed, selected, recoveryErr := r.recoverFraming(ctx, native, framing, func(k, v string) error { log(k, v); return sessErr })
+			fixed, selected, recoveryErr := r.recoverFraming(ctx, native, framing, func(k, v string) error { log(k, v); return ledger.Err })
 			if recoveryErr != nil {
 				if ctx.Err() != nil {
 					return finish(outcome.Cancelled, ctx.Err().Error(), "", ctx.Err())
@@ -972,15 +1061,15 @@ steps:
 				feedback := r.Prompts.Format("repair.framing.unrepaired", framing.Reason, framing.Draft)
 				log("tool-framing-feedback", feedback)
 				add("failure", "user", feedback, false)
-				if sessErr != nil {
-					return finish(outcome.Failed, sessErr.Error(), "", sessErr)
+				if ledger.Err != nil {
+					return finish(outcome.Failed, ledger.Err.Error(), "", ledger.Err)
 				}
 				r.recordUsage(u)
 				measurePrompt(u)
 				if watch != nil {
 					if trip := watch.observe("tool-framing:"+framing.Draft, false, r.LoopRepeat, r.LoopStall); trip != "" {
 						r.progressCheckpoint(step, startedAt)
-						advice, adviceErr := r.confirmLoop(ctx, watch, trip, func(k, v string) error { log(k, v); return sessErr }, feedback)
+						advice, adviceErr := r.confirmLoop(ctx, watch, trip, func(k, v string) error { log(k, v); return ledger.Err }, feedback)
 						if adviceErr != nil {
 							return finish(outcome.Failed, adviceErr.Error(), "", adviceErr)
 						}
@@ -990,7 +1079,6 @@ steps:
 						watch.reset()
 					}
 				}
-				transcript = r.Continuation.Messages()
 				continue
 			}
 		}
@@ -1009,9 +1097,9 @@ steps:
 			var archiveErr error
 			if _, isNative := r.Model.(ToolModel); isNative {
 				var note string
-				note, archiveErr = r.keepPartial(native, err, func(kind, text string) error { log(kind, text); return sessErr })
+				note, archiveErr = r.keepPartial(native, err, func(kind, text string) error { log(kind, text); return ledger.Err })
 				if archiveErr == nil {
-					archiveErr = r.retainUnfinished(native, func(kind, text string) error { log(kind, text); return sessErr })
+					archiveErr = r.retainUnfinished(native, func(kind, text string) error { log(kind, text); return ledger.Err })
 					if archiveErr == nil {
 						note += "; received thought/text retained for resume; incomplete calls remain unexecuted drafts"
 					}
@@ -1044,8 +1132,8 @@ steps:
 			fmt.Fprintln(out, failure)
 			add("failure", "user", failure, false)
 			log("error", failure)
-			if sessErr != nil {
-				return finish(outcome.Failed, failure, partial, fmt.Errorf("model failure: %w; session recording also failed: %w", err, sessErr))
+			if ledger.Err != nil {
+				return finish(outcome.Failed, failure, partial, fmt.Errorf("model failure: %w; session recording also failed: %w", err, ledger.Err))
 			}
 			if errors.Is(err, thinkingLoopStop) && archiveErr == nil {
 				thinkingStop = true
@@ -1061,41 +1149,44 @@ steps:
 			r.UsageUnknown = true
 		}
 		measurePrompt(u)
-		for i := range r.Continuation.Entries {
-			r.Continuation.Entries[i].Unread = false
+		if consumption.Count > 0 && ctx.Err() == nil {
+			raw, _ := json.Marshal(consumption)
+			log("consumed", string(raw))
+			if ledger.Err != nil {
+				return finish(outcome.Failed, "request consumption recording failed", "", ledger.Err)
+			}
+			r.Continuation.Consume(consumption)
 		}
 		if native.ThinkingOnly && native.FinishReason == "stop" && strings.TrimSpace(reply) == "" && len(native.Message.ToolCalls) == 0 &&
 			(native.Message.Thinking != "" || native.Message.Reasoning != "" || native.Message.ReasoningContent != "") {
-			if keepErr := r.keepThinking(native, func(kind, text string) error { log(kind, text); return sessErr }); keepErr != nil {
+			if keepErr := r.keepThinking(native, func(kind, text string) error { log(kind, text); return ledger.Err }); keepErr != nil {
 				return finish(outcome.Failed, keepErr.Error(), "", keepErr)
 			}
 			log("note", "model completed thinking only; continuing from retained context")
-			if sessErr != nil {
-				return finish(outcome.Failed, sessErr.Error(), "", sessErr)
+			if ledger.Err != nil {
+				return finish(outcome.Failed, ledger.Err.Error(), "", ledger.Err)
 			}
-			transcript = r.Continuation.Messages()
 			continue
 		}
 		if len(native.Message.ToolCalls) > 0 {
+			if native.RawNative != "" {
+				if archiveErr := r.archiveCompletedNative(native, func(kind, text string) error { log(kind, text); return ledger.Err }); archiveErr != nil {
+					return finish(outcome.Failed, archiveErr.Error(), "", archiveErr)
+				}
+			}
 			if watch != nil {
 				watch.completedDiscovery(native.Message, r.LoopStall, r.ThinkingLoop.SampleBytes)
 			}
 			trip, refused := "", ""
 			observe := func(sig string, productive bool, refusal string) string {
-				if watch != nil {
-					if r.enforcement.current != nil {
-						watch.discoveryReceipt(r.enforcement.current, r.LoopStall)
-					}
-					if desc := watch.observe(sig, r.bookkeepingProgress(ctx, productive), r.LoopRepeat, r.LoopStall); desc != "" {
-						trip, refused = desc, refusal
-					}
+				if desc := observeProgress(sig, productive); desc != "" {
+					trip, refused = desc, refusal
 				}
 				return "" // Complete the correlated array before progress judgment.
 			}
-			obs, stopped, nativeErr := r.nativeStep(ctx, native.Message, exec, func(kind, text string) error { log(kind, text); return sessErr }, r.remainingSteps(step-1), observe)
+			obs, stopped, nativeErr := r.nativeStep(ctx, native.Message, exec, func(kind, text string) error { log(kind, text); return ledger.Err }, r.remainingSteps(step-1), observe)
 			step += r.nativeCharges - 1
 			usedSteps = step
-			transcript = r.Continuation.Messages()
 			if nativeErr != nil {
 				raw, _ := json.Marshal(native.Message)
 				log("partial", string(raw))
@@ -1107,21 +1198,7 @@ steps:
 			if stopped != "" {
 				return finish(outcome.Stopped, stopped, stopped, nil)
 			}
-			if trip != "" {
-				r.progressCheckpoint(usedSteps, startedAt)
-				advice, err := r.confirmLoop(ctx, watch, trip, func(k, t string) error { log(k, t); return sessErr }, refused)
-				if err != nil {
-					return finish(outcome.Failed, err.Error(), obs, err)
-				}
-				if advice != "" {
-					add("guidance", "user", advice, false)
-				}
-				watch.reset()
-				if r.LoopStall > 0 {
-					watch.discoveryCalls %= r.LoopStall
-				}
-			}
-			if err := reviewDiscovery(); err != nil {
+			if err := settleProgress(trip, refused); err != nil {
 				return finish(outcome.Failed, err.Error(), obs, err)
 			}
 			continue
@@ -1129,11 +1206,10 @@ steps:
 		fmt.Fprintln(out, reply)
 		add("reply", "assistant", reply, false)
 		if _, ok := r.Model.(ToolModel); ok {
-			if err := r.keepCompleted(native, func(kind, text string) error { log(kind, text); return sessErr }); err != nil {
+			if err := r.keepCompleted(native, func(kind, text string) error { log(kind, text); return ledger.Err }); err != nil {
 				r.Continuation.Entries = r.Continuation.Entries[:len(r.Continuation.Entries)-1]
 				return finish(outcome.Failed, err.Error(), reply, err)
 			}
-			transcript = r.Continuation.Messages()
 		} else {
 			log("reply", reply)
 		}
@@ -1154,17 +1230,17 @@ steps:
 		}
 		if !found {
 			if strings.TrimSpace(reply) == "" {
-				return finish(outcome.Stopped, "model returned no final answer", reply, sessErr)
+				return finish(outcome.Stopped, "model returned no final answer", reply, ledger.Err)
 			}
 			normalFinal = true
 			previousSettlement := lastSettlementReceipt
-			text, msgs, e := finish(outcome.Completed, "", reply, sessErr)
+			text, msgs, e := finish(outcome.Completed, "", reply, ledger.Err)
 			if errors.Is(e, repairFinal) {
 				if watch != nil {
 					if lastSettlementReceipt != previousSettlement && r.settlement != nil && r.settlement.Qualified {
 						watch.reset() // A newly qualified owning handoff is actual progress.
 					} else if desc := watch.observe("", r.bookkeepingProgress(ctx, false), r.LoopRepeat, r.LoopStall); desc != "" {
-						advice, err := r.confirmLoop(ctx, watch, desc, func(k, t string) error { log(k, t); return sessErr }, "")
+						advice, err := r.confirmLoop(ctx, watch, desc, func(k, t string) error { log(k, t); return ledger.Err }, "")
 						if err != nil {
 							return finish(outcome.Failed, err.Error(), text, err)
 						}
@@ -1192,46 +1268,31 @@ steps:
 			kind = "schema"
 		} else if !productive {
 			kind = "failure"
+		} else if call.Name == "ask" {
+			kind = "answer"
+			log("ask_answer", obs)
 		}
 		add(kind, "user", obs, true)
-		if err := r.settleFocus(func(kind, text string) error { log(kind, text); return sessErr }); err != nil {
+		if err := r.settleFocus(func(kind, text string) error { log(kind, text); return ledger.Err }); err != nil {
 			return finish(outcome.Failed, err.Error(), obs, err)
 		}
 		if err := ctx.Err(); err != nil {
 			return finish(outcome.Cancelled, err.Error(), obs, err)
 		}
-		if sessErr == nil && kind != "schema" {
+		if ledger.Err == nil && kind != "schema" {
 			if sig == "" && !productive && r.enforcement.current == nil {
 				r.preparationDisposition = "no calls ran; no IDs were returned by this reply: " + obs
 			} else if preparationTool(call.Name) {
 				r.preparationDisposition = "Preparation call settled:\n" + r.preparationReceipt(call.Name, "text", obs, sig != "" || r.enforcement.current != nil)
 			}
 		}
-		if watch != nil {
-			if r.enforcement.current != nil {
-				watch.discoveryReceipt(r.enforcement.current, r.LoopStall)
-			}
-			if desc := watch.observe(sig, r.bookkeepingProgress(ctx, productive), r.LoopRepeat, r.LoopStall); desc != "" {
-				advice, err := r.confirmLoop(ctx, watch, desc, func(k, t string) error { log(k, t); return sessErr }, "")
-				if err != nil {
-					return finish(outcome.Failed, err.Error(), obs, err)
-				}
-				if advice != "" {
-					add("guidance", "user", advice, false)
-				}
-				watch.reset()
-				if r.LoopStall > 0 {
-					watch.discoveryCalls %= r.LoopStall
-				}
-			}
-		}
-		if err := reviewDiscovery(); err != nil {
+		if err := settleProgress(observeProgress(sig, productive), ""); err != nil {
 			return finish(outcome.Failed, err.Error(), obs, err)
 		}
 	}
 	msg := fmt.Sprintf("stopped after %d steps without a final answer — the task may need breaking down", r.MaxSteps)
 	fmt.Fprintln(out, msg)
-	return finish(outcome.Stopped, msg, msg, sessErr)
+	return finish(outcome.Stopped, msg, msg, ledger.Err)
 }
 
 // chat runs one exchange, streaming when OnToken is set and the

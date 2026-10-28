@@ -47,7 +47,7 @@ func TestApprovedViewLimitsActualOwners(t *testing.T) {
 	read := m.openFile("f0")
 	setApprovedLimit(&m, "UI", "MaxFileViewLines", 5)
 	opened := read().(filesOpenedMsg)
-	if len(opened.lines) != 4 || opened.lines[2] != "three" || !strings.Contains(opened.lines[3], "capped") {
+	if len(opened.lines) != 3 || opened.lines[2] != "three" || !strings.Contains(opened.notice, "omitted") {
 		t.Fatalf("configured captured read=%q", opened.lines)
 	}
 	m = decisionsModel(t)

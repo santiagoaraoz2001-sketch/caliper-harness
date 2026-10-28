@@ -20,6 +20,20 @@ import (
 	"specific-harness/internal/tool"
 )
 
+func ownedAttemptRecords(t *testing.T, records []attemptRecord, kind string, attempt, count int) []attemptRecord {
+	t.Helper()
+	var found []attemptRecord
+	for _, record := range records {
+		if record.Kind == kind && record.Attempt == attempt {
+			found = append(found, record)
+		}
+	}
+	if len(found) != count {
+		t.Fatalf("%s attempt%d: got%d records, want%d", kind, attempt, len(found), count)
+	}
+	return found
+}
+
 type outcomeModel struct {
 	reply, review  string
 	reviewErr      error
@@ -158,11 +172,15 @@ func TestOutcomeReviewMatrixAndReopen(t *testing.T) {
 			if err := json.Unmarshal([]byte(task.AttemptLog), &records); err != nil {
 				t.Fatal(err)
 			}
-			if len(records) != 3 || records[0].Kind != "execution" || records[1].Kind != "check" || records[1].ExitCode == nil || *records[1].ExitCode != 0 || records[2].Kind != "review" || len(records[0].Transcript) < 3 {
+			execution := ownedAttemptRecords(t, records, "execution", 1, 1)[0]
+			check := ownedAttemptRecords(t, records, "check", 1, 1)[0]
+			review := ownedAttemptRecords(t, records, "review", 1, 1)[0]
+			ownedAttemptRecords(t, records, "execution_contract", 1, 1)
+			if len(records) != 4 || check.ExitCode == nil || *check.ExitCode != 0 || len(execution.Transcript) < 3 {
 				t.Fatalf("actual attempt evidence=%+v", records)
 			}
-			if tc.reviewErr != nil && (!strings.Contains(records[2].Error, tc.reviewErr.Error()) || !strings.Contains(records[2].Output, tc.review)) {
-				t.Errorf("review partial/cause lost: %+v", records[1])
+			if tc.reviewErr != nil && (!strings.Contains(review.Error, tc.reviewErr.Error()) || !strings.Contains(review.Output, tc.review)) {
+				t.Errorf("review partial/cause lost: %+v", review)
 			}
 			a, _ := plan.GetApproach(s, aid)
 			if (a.State == plan.ApproachComplete) != qualified {
@@ -198,7 +216,11 @@ func TestOutcomeRequiredReviewResumePolicy(t *testing.T) {
 	}
 	var records []attemptRecord
 	_ = json.Unmarshal([]byte(task.AttemptLog), &records)
-	if len(records) != 5 || records[0].Verification != outcome.Unverified {
+	execution := ownedAttemptRecords(t, records, "execution", 1, 1)[0]
+	ownedAttemptRecords(t, records, "check", 1, 2)
+	ownedAttemptRecords(t, records, "review", 1, 2)
+	ownedAttemptRecords(t, records, "execution_contract", 1, 1)
+	if len(records) != 6 || execution.Verification != outcome.Unverified {
 		t.Errorf("admission/previous review overwritten: %+v", records)
 	}
 }
@@ -272,6 +294,7 @@ func TestOutcomeStoppedRequiresExplicitRequeue(t *testing.T) {
 	if err := Pause(s, aid); err != nil {
 		t.Fatal(err)
 	}
+	d.MaxSteps = 2 // The second run needs one response plus its host verification episode.
 	m.reply = "actual second execution"
 	m.review = "PASS: explicit requeue component"
 	if _, err := Resume(context.Background(), d, aid); err != nil {
@@ -284,13 +307,19 @@ func TestOutcomeStoppedRequiresExplicitRequeue(t *testing.T) {
 	}
 	var records []attemptRecord
 	_ = json.Unmarshal([]byte(task.AttemptLog), &records)
+	first := ownedAttemptRecords(t, records, "execution", 1, 1)[0]
+	ownedAttemptRecords(t, records, "execution", 2, 1)
+	ownedAttemptRecords(t, records, "check", 2, 1)
+	ownedAttemptRecords(t, records, "review", 2, 1)
+	ownedAttemptRecords(t, records, "execution_contract", 1, 1)
+	ownedAttemptRecords(t, records, "execution_contract", 2, 1)
 	originalReply := false
-	if len(records) > 0 {
-		for _, message := range records[0].Transcript {
+	{
+		for _, message := range first.Transcript {
 			originalReply = originalReply || message.Role == "assistant" && strings.Contains(message.Content, "tool: absent")
 		}
 	}
-	if len(records) != 4 || records[2].Kind != "check" || records[3].Kind != "review" || records[0].Outcome.Status != outcome.Stopped || !originalReply {
+	if len(records) != 6 || first.Outcome.Status != outcome.Stopped || !originalReply {
 		t.Fatalf("original stopped trace discarded: %+v", records)
 	}
 }
@@ -359,7 +388,11 @@ func TestOutcomeActualWorkflowRefusalReachesParent(t *testing.T) {
 			}
 			parent := &agent.Runner{Model: &loopModel{replies: []string{"```tool\ntool: " + surface + "\napproach: " + aid + "\n```", "Everything succeeded."}}, Registry: reg, MaxSteps: 2, Exec: agent.Direct}
 			raw, _, err := parent.Run(context.Background(), "component parent invocation")
-			if err != nil || raw != "Everything succeeded." || parent.Outcome.ExitCode() != 1 {
+			wantExit := 1
+			if surface == "workflow_status" {
+				wantExit = 0
+			}
+			if err != nil || raw != "Everything succeeded." || parent.Outcome.ExitCode() != wantExit {
 				t.Fatalf("refusal masked: raw=%q outcome=%+v err=%v", raw, parent.Outcome, err)
 			}
 		})
@@ -381,7 +414,7 @@ func TestOutcomeRequiredBlankMalformedAndStoppedReviews(t *testing.T) {
 			d := depsFor(s, m)
 			declareFixtureCheck(t, s, aid, ids, "printf CHECK_RECEIPT")
 			d.Wf.VerifyFollowup = true
-			d.MaxSteps = 1
+			d.MaxSteps = 2 // Reach reviewer after one worker response plus host check; reviewer remains bounded.
 			beforeTask, err := plan.GetTask(s, ids[0])
 			if err != nil {
 				t.Fatal(err)
@@ -481,7 +514,12 @@ func TestOutcomeExplicitLegacyReworkRetainsPriorArtifacts(t *testing.T) {
 	if err := json.Unmarshal([]byte(task.AttemptLog), &records); err != nil {
 		t.Fatal(err)
 	}
-	if len(records) != 4 || records[2].Kind != "check" || records[3].Kind != "review" || records[0].Kind != "prior_state" || records[0].Outcome.Status != outcome.Unknown || records[0].Output != "legacy raw artifact" || records[0].Review != "legacy raw review" || records[1].Attempt != 3 || task.Attempts != 3 || !task.Qualified() {
+	prior := ownedAttemptRecords(t, records, "prior_state", 2, 1)[0]
+	ownedAttemptRecords(t, records, "execution", 3, 1)
+	ownedAttemptRecords(t, records, "check", 3, 1)
+	ownedAttemptRecords(t, records, "review", 3, 1)
+	ownedAttemptRecords(t, records, "execution_contract", 3, 1)
+	if len(records) != 5 || prior.Outcome.Status != outcome.Unknown || prior.Output != "legacy raw artifact" || prior.Review != "legacy raw review" || task.Attempts != 3 || !task.Qualified() {
 		t.Fatalf("prior facts invented/lost: task=%+v records=%+v", task, records)
 	}
 }

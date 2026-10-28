@@ -69,7 +69,7 @@ func TestGuidedCoverageOneApproachTwoArticlesCloses(t *testing.T) {
 		t.Fatalf("approval omitted coverage: %s %v", brief, err)
 	}
 	f.call(tool.Args{"title": "first fix", "objective": "first change"})
-	if !strings.Contains(f.definition().Purpose, "repair both shared-owner defects") || !strings.Contains(f.definition().Purpose, "second change") {
+	if strings.Contains(f.definition().Purpose, "repair both shared-owner defects") || !strings.Contains(f.definition().Purpose, `approach(id:"`+aid+`"){title}`) || !strings.Contains(f.definition().Purpose, "Approach.title") {
 		t.Fatal("task question omitted actual Approach scope")
 	}
 	first := draftPipelineTask(t, f)

@@ -68,11 +68,12 @@ type WorkflowScope struct {
 type CreatedNode struct{ Kind, ID, State string }
 
 type Result struct {
-	ReadyNode  *CreatedNode   `json:"-"` // actual Ready receipt, not creation or execution authority
-	Created    *CreatedNode   `json:"-"`
-	Focus      *WorkflowScope `json:"-"` // actual successful focus, committed after durable settlement
-	Changed    bool           // actual file publication, including effects followed by errors
-	FileEffect *FileEffect    `json:"-"` // never inferred from arguments or result prose
+	StateChanged bool           `json:",omitempty"` // Actual committed graph effects; never filesystem invalidation.
+	ReadyNode    *CreatedNode   `json:"-"`          // actual Ready receipt, not creation or execution authority
+	Created      *CreatedNode   `json:"-"`
+	Focus        *WorkflowScope `json:"-"` // actual successful focus, committed after durable settlement
+	Changed      bool           // actual file publication, including effects followed by errors
+	FileEffect   *FileEffect    `json:"-"` // never inferred from arguments or result prose
 	// Workflow carries an owning-state snapshot, including refused attempts.
 	// ExitCode is an actual settled Bash exit; nil means no complete exit receipt.
 	ExitCode  *int
@@ -92,8 +93,8 @@ type Result struct {
 
 // Definition describes and implements one tool.
 type Definition struct {
-	// Advertisement is a stable wire declaration; current Params still validate calls.
-	Advertisement *Definition
+	// GraphQLFields is a host-owned help projection; nil means the normal model API.
+	GraphQLFields []string
 
 	Opening       bool                                                  // harmless entry/document navigation; unsupported arguments may be disclosed and ignored
 	NormalizeArgs func(context.Context, Args) (Args, error)             // owning path resolution before authorization; no lifecycle authority
@@ -133,6 +134,18 @@ func (r *Registry) Register(d Definition) {
 	}
 	if _, dup := r.tools[d.Name]; dup {
 		panic(fmt.Sprintf("tool: duplicate registration %q", d.Name))
+	}
+	r.tools[d.Name] = d
+}
+
+// Replace changes an existing host-owned definition without losing aliases,
+// dynamic help closures or role restrictions. It cannot register a new tool.
+func (r *Registry) Replace(d Definition) {
+	if _, ok := r.tools[d.Name]; !ok {
+		panic(fmt.Sprintf("tool: replacement %q is not registered", d.Name))
+	}
+	if d.Prompts == nil {
+		d.Prompts = r.Prompts
 	}
 	r.tools[d.Name] = d
 }

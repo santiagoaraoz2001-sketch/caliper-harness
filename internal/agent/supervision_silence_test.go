@@ -22,7 +22,7 @@ func TestSupervisionProgressSilenceAndConfidenceFloor(t *testing.T) {
 	}{
 		{"continue confident", 0, .99, false}, {"continue uncertain", 0, .499, false},
 		{"act failed confidence", 1, .499, false}, {"reconsider failed confidence", 2, .499, false},
-		{"act exact floor", 1, .5, true}, {"reconsider above floor", 2, .6, true},
+		{"unsupported repair exact floor", 1, .5, false}, {"reconsider above floor", 2, .6, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			model := &scriptModel{replies: []string{echoBlock("same"), echoBlock("same"), echoBlock("same"), "final answer"}}
@@ -158,7 +158,7 @@ func TestSupervisionBookkeepingRunnerDoesNotPublishSilentVerdict(t *testing.T) {
 				r.enforcement.repair, r.enforcement.presentation, r.enforcement.prepare = "old repair", "old directive", true
 			}}
 			_, _, err := r.Run(t.Context(), "inspect current work")
-			if err != nil || len(model.seen) != 2 || r.Outcome.Status != outcome.Stopped || judgments != 1 || len(effects) != 2 {
+			if err != nil || len(model.seen) != 2 || r.Outcome.Status != outcome.Stopped || judgments != 0 || len(effects) != 2 {
 				t.Fatalf("control run did not reach the second request: %v %+v requests=%d judgments=%d effects=%d", err, r.Outcome, len(model.seen), judgments, len(effects))
 			}
 			for _, entry := range r.Continuation.Entries {

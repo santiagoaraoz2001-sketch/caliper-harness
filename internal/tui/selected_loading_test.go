@@ -41,15 +41,14 @@ func TestServeLoadingLabelFollowsExactRowIdentity(t *testing.T) {
 			}
 			for i, r := range m.Serve.Rows {
 				if r.IsModel {
-					got := strings.Contains(ansi.Strip(serveModelRow(m, i, r, 190)), "[loading/releasing]")
+					got := strings.Contains(ansi.Strip(m.serveModelItem(r).Value), "[loading/releasing]")
 					if got != (i == owner) {
 						t.Errorf("model row %d busy=%t, owner=%d", i, got, owner)
 					}
 				} else {
-					for _, line := range lines {
-						if strings.Contains(line, strings.TrimPrefix(r.Ep.URL, "http://")) && strings.Contains(line, "ollama  ") && strings.Contains(line, "[loading/releasing]") != (i == owner) {
-							t.Errorf("server row %d has wrong busy tag: %s", i, ansi.Strip(line))
-						}
+					line := m.serveServerItem(r).Value
+					if strings.Contains(line, "[loading/releasing]") != (i == owner) {
+						t.Errorf("server row %d has wrong busy tag: %s", i, line)
 					}
 				}
 				if serveKeyOf(r) != keys[i] || m.Serve.Sel != owner || m.Serve.Loading != keys[owner] {

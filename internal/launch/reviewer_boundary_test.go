@@ -34,9 +34,10 @@ func TestReviewerRepairsVerdictWithoutRestartingWork(t *testing.T) {
 	}
 }
 
-// check invokes Bash internally, so both routes must observe actual changes.
+// Free-form commands are refused before effects. The frozen check still runs
+// its authorized script, whose project mutations must stop qualification.
 func TestReviewerShellMutationCannotQualify(t *testing.T) {
-	for _, mode := range []string{"bash", "check"} {
+	for _, mode := range []string{"bash", "forged check", "check"} {
 		t.Run(mode, func(t *testing.T) {
 			reviews := 0
 			reviewing := false
@@ -55,9 +56,12 @@ func TestReviewerShellMutationCannotQualify(t *testing.T) {
 					if mode == "bash" {
 						return "```tool\ntool: bash\ncmd: printf MUTATED > source.js\n```", nil
 					}
+					if mode == "forged check" {
+						return "```tool\ntool: check\ncmd: printf MUTATED > source.js\nacceptance_cmd: printf FIXTURE_ACCEPTANCE\n```", nil
+					}
 					return "```tool\ntool: check\ncmd: printf FIXTURE_SUITE\nacceptance_cmd: printf FIXTURE_ACCEPTANCE\n```", nil
 				}
-				return "PASS: attempted qualification after mutation", nil
+				return "UNVERIFIED: required additional probe is unavailable; no further execution claimed", nil
 			})
 			d, aid, _, root := roleHandoffFixture(t, 1, model)
 			if err := os.WriteFile(filepath.Join(root, "source.js"), []byte("original"), 0600); err != nil {
@@ -93,7 +97,11 @@ func TestReviewerShellMutationCannotQualify(t *testing.T) {
 			}
 			results, err := Launch(t.Context(), d, aid)
 			content, readErr := os.ReadFile(filepath.Join(root, "source.js"))
-			if err != nil || readErr != nil || string(content) != "MUTATED" || len(results) != 1 || results[0].Qualified() || !strings.Contains(results[0].VerificationReason, "reviewer shell modified") {
+			wantContent, wantReviews := "original", 2
+			if mode == "check" {
+				wantContent, wantReviews = "MUTATED", 1
+			}
+			if err != nil || readErr != nil || string(content) != wantContent || len(results) != 1 || results[0].Qualified() || reviews != wantReviews || mode == "check" && !strings.Contains(results[0].VerificationReason, "reviewer shell modified") {
 				t.Fatalf("mutation escaped reviewer: reviews%d content%q results%+v err%v/%v", reviews, content, results, err, readErr)
 			}
 		})

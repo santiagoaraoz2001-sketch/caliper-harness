@@ -119,7 +119,11 @@ func TestGraphAcceptanceCommandPreflightAndProjection(t *testing.T) {
 	if e != nil || !task.SameBrief(claimed) || claimed.Attempts != 1 || claimed.Checked() || claimed.Qualified() {
 		t.Fatalf("claim changed brief or invented verification: %+v %v", claimed, e)
 	}
-	out, err = api.ExecBounded(context.Background(), `{__type(name:"FreshTaskInput"){inputFields{name type{kind name ofType{name}}}} task(id:"`+task.ID+`"){acceptanceCommand}}`, "", nil, config.Defaults().Tools.GraphQL)
+	host, err := api.Scoped(api.CapturedProject(), "host-introspection", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err = host.Exec(context.Background(), `{__type(name:"FreshTaskInput"){inputFields{name type{kind name ofType{name}}}} task(id:"`+task.ID+`"){acceptanceCommand}}`, "", nil)
 	if err != nil || !strings.Contains(string(out), `"name":"acceptanceCommand"`) || !strings.Contains(string(out), `"kind":"NON_NULL"`) {
 		t.Fatalf("public input/query missing: %s %v", out, err)
 	}

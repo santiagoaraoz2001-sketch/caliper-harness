@@ -278,8 +278,19 @@ func TestConsistencyPlanningNextActionTracksEachAnsweredQuestion(t *testing.T) {
 		if facts.Preparation != current.Schema() {
 			t.Errorf("current question lost after %v:\nactual %s\nwant   %s", answer, facts.Preparation, current.Schema())
 		}
-		if len(current.Params) == 1 && current.Params[0].Name == "strategy" && (strings.Contains(facts.Preparation, "COMPLETE") || strings.Contains(facts.Preparation, "EXECUTE")) {
-			t.Error("strategy question prematurely directs readiness/execution")
+		if _, goalAnswered := answer["outcome"]; goalAnswered {
+			want := []string{"strategy", "coverage", "guidance"}
+			if len(current.Params) != len(want) {
+				t.Fatalf("strategy question fields: %+v", current.Params)
+			}
+			for i, name := range want {
+				if current.Params[i].Name != name || current.Params[i].Required != (name == "strategy") {
+					t.Fatalf("strategy field %s lost required/optional semantics: %+v", name, current.Params[i])
+				}
+			}
+			if strings.Contains(facts.Preparation, "COMPLETE") || strings.Contains(facts.Preparation, "EXECUTE") {
+				t.Error("strategy question prematurely directs readiness/execution")
+			}
 		}
 	}
 	if f.judgments != 1 {

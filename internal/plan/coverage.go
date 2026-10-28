@@ -12,8 +12,9 @@ type ArticleRef struct {
 	Text  string `json:"article"`
 }
 type ApproachBrief struct {
-	Coverage []ArticleRef `json:"coverage"`
-	Strategy string       `json:"strategy"`
+	Coverage []ArticleRef   `json:"coverage"`
+	Strategy string         `json:"strategy"`
+	Guidance *[]GuidanceRef `json:"guidance,omitempty"`
 }
 
 // GoalArticles recognizes the existing guided document, retaining freeform goals.

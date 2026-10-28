@@ -14,6 +14,25 @@ type ApprovalEvent struct {
 	Kind, Mode, Scope, ID, Snapshot, Brief string
 	Store, Workspace, Session              string
 	Approved                               bool
+	Cancelled                              bool
+}
+
+// ConfirmReadiness records the exact inspected snapshot without granting any
+// execution authority. Cancellation and receipt failure cannot look approved.
+func (g *Gate) ConfirmReadiness(ctx context.Context, id, snapshot, brief, prompt string) (bool, error) {
+	if snapshot == "" || g.Record == nil {
+		return false, fmt.Errorf("readiness needs an exact snapshot and durable approval sink")
+	}
+	approved := g.Confirm(ctx, prompt)
+	cancelled := ctx.Err() != nil
+	if cancelled {
+		approved = false
+	}
+	event := ApprovalEvent{Kind: "readiness", Mode: g.Mode, Scope: "approach", ID: id, Snapshot: snapshot, Brief: brief, Approved: approved, Cancelled: cancelled}
+	if err := g.Record(context.WithoutCancel(ctx), event); err != nil {
+		return false, fmt.Errorf("readiness decision recording failed: %w", err)
+	}
+	return approved, ctx.Err()
 }
 
 func (g *Gate) question(ctx context.Context) (func(), error) {

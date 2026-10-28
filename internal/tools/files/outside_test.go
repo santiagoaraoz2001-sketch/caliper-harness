@@ -2,10 +2,12 @@ package files
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"specific-harness/internal/testfs"
 	"strings"
 	"testing"
 
@@ -49,15 +51,13 @@ func TestExplicitOutsideDiscovery(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(other, "ignored", "excluded.txt"), body, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(other, filepath.Join(root, "outside-link")); err != nil {
+	if err := testfs.Symlink(other, filepath.Join(root, "outside-link")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(root, filepath.Join(other, "inside-link")); err != nil {
+	if err := testfs.Symlink(root, filepath.Join(other, "inside-link")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(other, "source.txt"), filepath.Join(other, "file-link")); err != nil {
-		t.Fatal(err)
-	}
+	fileLink := testfs.FileSymlink(t, filepath.Join(other, "source.txt"), filepath.Join(other, "file-link"))
 	w := &Workspace{Path: root, Caps: cfg.Tools.Bash}
 	defs := w.OutsideDefinitions(cfg.Tools.Search)
 	read, find := defs[0], defs[1]
@@ -73,7 +73,7 @@ func TestExplicitOutsideDiscovery(t *testing.T) {
 	})
 	t.Run("directory page", func(t *testing.T) {
 		res, err := outsideCall(t, read, context.Background(), map[string]string{"path": other, "limit": "1"})
-		if err != nil || !res.Truncated || !strings.Contains(res.Text, "next_offset=2") || !strings.Contains(res.Text, other) || strings.Contains(res.Text, "sha256=") {
+		if err != nil || !res.Truncated || !strings.Contains(res.Text, "next_offset=2") || !strings.Contains(res.Text, quotedPathText(other)) || strings.Contains(res.Text, "sha256=") {
 			t.Fatalf("%+v %v", res, err)
 		}
 	})
@@ -92,13 +92,16 @@ func TestExplicitOutsideDiscovery(t *testing.T) {
 			t.Fatalf("git init %s %v", out, err)
 		}
 		res, err := outsideCall(t, find, context.Background(), map[string]string{"path": other, "mode": "file", "pattern": "*.txt"})
-		if err != nil || !strings.Contains(res.Text, "deep.txt") || strings.Contains(res.Text, "excluded.txt") || strings.Contains(res.Text, "inside-link") || !strings.HasPrefix(res.Text, other) {
+		if err != nil || !strings.Contains(res.Text, "deep.txt") || strings.Contains(res.Text, "excluded.txt") || strings.Contains(res.Text, "inside-link") || !strings.HasPrefix(res.Text, filepath.ToSlash(other)) {
 			t.Fatalf("%+v %v", res, err)
 		}
 	})
 	t.Run("scope refusals", func(t *testing.T) {
 		for _, d := range defs {
 			for _, p := range []string{".", "../other", root, filepath.Join(root, "source.txt"), filepath.Join(other, "inside-link"), filepath.Join(other, "file-link"), filepath.Join(other, "inside-link", "source.txt")} {
+				if p == filepath.Join(other, "file-link") && !fileLink {
+					continue
+				}
 				slots := map[string]string{"path": p}
 				if d.Name == "find_outside" {
 					slots["mode"] = "dir"
@@ -147,3 +150,5 @@ func TestExplicitOutsideDiscovery(t *testing.T) {
 		}
 	})
 }
+
+func quotedPathText(path string) string { b, _ := json.Marshal(path); return string(b) }

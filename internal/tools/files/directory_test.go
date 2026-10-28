@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"specific-harness/internal/config"
+	"specific-harness/internal/testfs"
 	"specific-harness/internal/tool"
 	"specific-harness/internal/tools/search"
 	"strconv"
@@ -22,14 +24,16 @@ func TestDirectoryReadNavigationAndAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := []byte("first\nsecond\n")
-	for _, name := range []string{"app.go", "unsafe\n\x1bβ.go"} {
+	unsafeName := "unsafe\n\x1bβ.go"
+	if runtime.GOOS == "windows" {
+		unsafeName = "unsafe β.go"
+	}
+	for _, name := range []string{"app.go", unsafeName} {
 		if err := os.WriteFile(filepath.Join(root, "internal", "tui", name), raw, 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := os.Symlink("app.go", filepath.Join(root, "internal", "tui", "link")); err != nil {
-		t.Fatal(err)
-	}
+	fileLink := testfs.FileSymlink(t, "app.go", filepath.Join(root, "internal", "tui", "link"))
 	w := &Workspace{Path: root, Caps: config.Defaults().Tools.Bash}
 	reg := tool.NewRegistry()
 	for _, d := range w.Definitions() {
@@ -76,10 +80,10 @@ func TestDirectoryReadNavigationAndAuthority(t *testing.T) {
 			if e = json.Unmarshal([]byte(quoted), &path); e != nil {
 				t.Fatal(e)
 			}
-			if _, exists := seen[path]; exists {
+			if _, exists := seen[filepath.ToSlash(path)]; exists {
 				t.Fatalf("duplicate page path %q", path)
 			}
-			seen[path] = kind
+			seen[filepath.ToSlash(path)] = kind
 		}
 		m := cursor.FindStringSubmatch(page.Text)
 		if !page.Truncated {
@@ -97,7 +101,11 @@ func TestDirectoryReadNavigationAndAuthority(t *testing.T) {
 		}
 		offset = next
 	}
-	if len(seen) != 3 || seen["internal/tui/app.go"] != "file" || seen["internal/tui/link"] != "symlink" || seen["internal/tui/unsafe\n\x1bβ.go"] != "file" {
+	wantEntries := 2
+	if fileLink {
+		wantEntries++
+	}
+	if len(seen) != wantEntries || seen["internal/tui/app.go"] != "file" || fileLink && seen["internal/tui/link"] != "symlink" || seen["internal/tui/"+unsafeName] != "file" {
 		t.Fatalf("paths lost/corrupted: %#v", seen)
 	}
 	absent, e := call("find", map[string]any{"pattern": "*tui*"})
@@ -131,7 +139,7 @@ func TestDirectoryReadNavigationAndAuthority(t *testing.T) {
 	if e != nil || page.Truncated || !strings.Contains(page.Text, "0 entries") {
 		t.Fatalf("past EOF %+v %v", page, e)
 	}
-	if e = os.Symlink("internal/tui", filepath.Join(root, "alias")); e != nil {
+	if e = testfs.Symlink("internal/tui", filepath.Join(root, "alias")); e != nil {
 		t.Fatal(e)
 	}
 	for _, path := range []string{"alias", "../escape"} {
@@ -168,7 +176,7 @@ func TestImmediateDirectoryFinderAndFileCompatibility(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "parent", "fixture.go"), []byte("package fixture\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink("empty", filepath.Join(root, "link")); err != nil {
+	if err := testfs.Symlink("empty", filepath.Join(root, "link")); err != nil {
 		t.Fatal(err)
 	}
 	w := &Workspace{Path: root, Caps: config.Defaults().Tools.Bash}

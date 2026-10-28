@@ -129,7 +129,12 @@ func (c *Client) judgeChat(ctx context.Context, r Request) (verdict Verdict, err
 	if math.IsNaN(confidence) || math.IsInf(confidence, 0) || confidence < 0 || confidence > 1 {
 		return Verdict{}, fmt.Errorf("judgment confidence must be a finite probability")
 	}
-	return Verdict{Pick: pick, Option: option, Confidence: confidence, Model: reply.Served, Device: "unknown", Protocol: runtime, ConfidenceSource: "self_reported"}, nil
+	usage := ""
+	if reply.Usage.Reported {
+		raw, _ := json.Marshal(reply.Usage)
+		usage = string(raw)
+	}
+	return Verdict{Usage: usage, Pick: pick, Option: option, Confidence: confidence, Model: reply.Served, Device: "unknown", Protocol: runtime, ConfidenceSource: "self_reported"}, nil
 }
 
 // Catalog availability is not native readiness, inference, or GPU residency.

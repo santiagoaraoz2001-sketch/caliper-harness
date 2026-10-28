@@ -32,7 +32,7 @@ func TestDiscoveryNavigationReceivesAdviceWithoutRequiringSourceRead(t *testing.
 		if packet.Checkpoint.RunStep != 5 || packet.LatestSourceText != "" {
 			t.Errorf("navigation bypassed advisory cadence or fabricated source: step%d source%q", packet.Checkpoint.RunStep, packet.LatestSourceText)
 		}
-		return decision.Verdict{Option: discoveryActOption, Confidence: .9}, nil
+		return decision.Verdict{Option: discoveryReconsiderOption, Confidence: .9}, nil
 	}, sink)
 	r.Registry.Register((&files.Workspace{Path: r.Workspace, Caps: config.Defaults().Tools.Bash}).FindDirDefinition())
 	navigation := llm.Reply{Message: llm.Message{Role: "assistant"}, FinishReason: "tool_calls"}
@@ -73,7 +73,7 @@ func TestDiscoveryNavigationReceivesAdviceWithoutRequiringSourceRead(t *testing.
 	if results != 6 {
 		t.Fatalf("actual settled receipts%d; want5 navigation plus first source", results)
 	}
-	if got := m.seen[1]; len(got) == 0 || !strings.Contains(got[len(got)-1].Content, r.Prompts.Text("continuation.discovery.act")) {
+	if got := m.seen[1]; len(got) == 0 || !strings.Contains(got[len(got)-1].Content, r.Prompts.Text("continuation.discovery.reconsider")) {
 		t.Fatal("navigation direction did not reach next actual request")
 	}
 }

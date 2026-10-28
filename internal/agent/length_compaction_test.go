@@ -84,16 +84,14 @@ func TestLengthAtContextPressureCompactsAndContinuesFromFactualSummary(t *testin
 			r := &agent.Runner{Model: llm.New(srv.URL, "fixture").WithRuntime("mlx"), Registry: reg, Session: &nativeRecordingSink{}, SessionID: "pressure", MaxSteps: 2, MaxTokens: 1000, Threshold: .7, ThinkingLoop: agent.ThinkingLoop{SampleBytes: 4096}, Compaction: agent.Compaction{Trigger: 90, Keep: 50}, Continuation: session.Continuation{Version: 1, BasisTokens: 100, BasisChars: 100000, Entries: []session.Entry{{Kind: "intent", Message: llm.Message{Role: "user", Content: "ALWAYS_REQ_ALPHA: preserve original requirement and actual effect receipt"}}}}, Judge: func(_ context.Context, req decision.Request) (decision.Verdict, error) {
 				if len(req.Options) == 3 {
 					progress++
-					if !strings.Contains(req.Context, "unverified partial") || !strings.Contains(req.Context, "unfinished unverified code reasoning") {
-						t.Error("length handover did not review actual unfinished thinking")
-					}
+					t.Error("physical length boundary must not add a progress-model call")
 					return decision.Verdict{Option: req.Options[0], Confidence: .99}, nil
 				}
 				reviews++
 				return decision.Verdict{Option: req.Options[0], Confidence: confidence}, nil
 			}}
 			final, _, err := r.Run(t.Context(), "perform one marker effect, then retain ALWAYS_REQ_ALPHA")
-			if err != nil || r.Outcome.Status != outcome.Completed || final != "done from retained facts" || effects != 1 || summaries != 1 || progress != 1 || reviews != 1 || requests != 4 || r.Continuation.Compactions != wantCompactions {
+			if err != nil || r.Outcome.Status != outcome.Completed || final != "done from retained facts" || effects != 1 || summaries != 1 || progress != 0 || reviews != 1 || requests != 4 || r.Continuation.Compactions != wantCompactions {
 				t.Fatalf("pressure handover failed: final=%q err=%v outcome=%+v effects=%d summary=%d progress=%d review=%d requests=%d compactions=%d", final, err, r.Outcome, effects, summaries, progress, reviews, requests, r.Continuation.Compactions)
 			}
 			bytes, readErr := os.ReadFile(marker)

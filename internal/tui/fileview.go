@@ -14,6 +14,7 @@ import (
 // own scroll; this file owns numbering, quoting, and specs.
 type FileView struct {
 	Title   string
+	Notice  string
 	Logical []string
 	Scroll  int
 }

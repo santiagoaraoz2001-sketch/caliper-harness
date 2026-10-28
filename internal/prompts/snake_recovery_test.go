@@ -11,7 +11,7 @@ func TestExistingWorkGuidancePreservesVerification(t *testing.T) {
 			t.Errorf("%s misses existing-work branch", key)
 		}
 	}
-	for _, want := range []string{"current passed episode", "later effects made it stale", "independent review"} {
+	for _, want := range []string{"host receipts mark them current for this task and attempt", "Source changes invalidate prior passes", "independent review"} {
 		if !strings.Contains(Builtin().Text("system.task.handoff"), want) {
 			t.Errorf("handoff lost %q", want)
 		}

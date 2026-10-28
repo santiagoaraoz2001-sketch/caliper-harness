@@ -36,9 +36,15 @@ func helpDefinition(cfg config.Config, reg *tool.Registry, pc *prompts.Catalog, 
 			}
 		} else if topic == "" {
 			text = pc.Text("help.overview") + "\n" + helpSchemaIndex(active, pc) + "\n" + pc.Text("help.reference.index")
+			if graph, ok := active.Lookup("graphql"); ok && graph.GraphQLFields != nil {
+				text = graph.Purpose + "\n" + helpSchemaIndex(active, pc)
+			}
 		} else {
 			if topic == "guide" {
 				text = pc.Text("help.overview")
+				if graph, ok := active.Lookup("graphql"); ok && graph.GraphQLFields != nil {
+					text = graph.Purpose
+				}
 			} else {
 				if topic == "reference" {
 					topic = "reference.index"
@@ -47,6 +53,9 @@ func helpDefinition(cfg config.Config, reg *tool.Registry, pc *prompts.Catalog, 
 			}
 			for _, name := range names {
 				owner := name
+				if strings.HasPrefix(name, "graphql.") {
+					owner = "graphql"
+				}
 				if name == "read.definition" || name == "read.outline" {
 					owner = "read"
 				}
@@ -69,13 +78,33 @@ func helpDefinition(cfg config.Config, reg *tool.Registry, pc *prompts.Catalog, 
 					continue
 				}
 				if available {
+					if owner == "graphql" && def.GraphQLFields != nil && name == "graphql.lifecycle" {
+						text += "\n" + pc.Text("help.unavailable")
+						continue
+					}
 					text += pc.Format("help.available", owner, def.Schema())
 				} else {
 					text += "\n" + pc.Text("help.unavailable")
 				}
 				// The current definition/question and native example come first;
 				// prose below explains use cases without competing future calls.
-				text += "\n" + pc.Text("help."+name)
+				if owner == "graphql" && available && def.GraphQLFields != nil {
+					text += "\n" + pc.Text("help.graphql.readonly")
+					for _, field := range def.GraphQLFields {
+						if field == "appendKnowledge" {
+							text += "\n" + pc.Text("help.graphql.worker_write")
+							text += "\n" + pc.Text("help.graphql.worker_authority")
+						}
+					}
+				} else if graph, ok := active.Lookup("graphql"); owner == "help" && ok && graph.GraphQLFields != nil {
+					text += "\n" + pc.Text("system.help_available.knowledge")
+				} else {
+					text += "\n" + pc.Text("help."+name)
+					if owner == "graphql" && available && name == "graphql.knowledge" {
+						text += "\n" + pc.Text("help.graphql.readonly")
+						text += "\n" + pc.Text("help.graphql.worker_write")
+					}
+				}
 				text += "\n"
 			}
 			text += pc.Format("help.output_caps", cfg.Tools.Bash.MaxBytes, cfg.Tools.Bash.MaxLines, cfg.Tools.Search.MaxBytes, cfg.Tools.Search.MaxMatches)

@@ -3,13 +3,16 @@ package run
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"syscall"
 	"testing"
 
 	"specific-harness/internal/config"
@@ -305,6 +308,9 @@ func TestInterfacePathFallbackKeepsLiteralAndScope(t *testing.T) {
 					t.Fatal(err)
 				}
 				if err := os.Symlink(target, "link file"); err != nil {
+					if runtime.GOOS == "windows" && errors.Is(err, syscall.Errno(1314)) {
+						t.Skipf("native file symlink privilege unavailable: %v", err)
+					}
 					t.Fatal(err)
 				}
 				input = "link%20file"

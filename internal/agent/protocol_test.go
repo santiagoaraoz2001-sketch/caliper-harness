@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -69,6 +70,12 @@ func TestProtocolLiteralBashBytes(t *testing.T) {
 	expected := []byte("# YAML-like data\n\nroot:\n  value: a=b  \n\t# tab kept\n```tool\ntool: literal data\n```\nEND_LITERAL_other\ncrlf kept\r\n\n")
 	file := filepath.Join(t.TempDir(), "bytes")
 	command := fmt.Sprintf("cat > '%s' <<'DATA'\n%sDATA\ncat '%s'\n", file, expected, file)
+	// The protocol must retain the original command bytes on every platform.
+	// Git Bash itself parses CRLF source as LF; byte-exact files use write/edit.
+	if runtime.GOOS == "windows" {
+		expected = bytes.ReplaceAll(expected, []byte("\r\n"), []byte("\n"))
+	}
+
 	verifyLiteralCommand(t, command, expected)
 	got, err := os.ReadFile(file)
 	if err != nil || !bytes.Equal(got, expected) {

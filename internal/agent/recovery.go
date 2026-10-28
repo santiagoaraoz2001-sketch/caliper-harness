@@ -39,8 +39,14 @@ func (r *Runner) preparationScope() string {
 }
 
 func (r *Runner) ownsPreparationGuidance(e session.Entry) bool {
+	return e.Kind == "guidance" && r.ownsPreparationPublication(e)
+}
+
+// The append-site tag covers only standalone host preparation publications.
+// Actual receipts, user notes and legacy/foreign advice are never replaceable.
+func (r *Runner) ownsPreparationPublication(e session.Entry) bool {
 	m := e.Message
-	return e.PreparationScope != "" && e.PreparationScope == r.preparationScope() && e.Kind == "guidance" && !e.Unread && e.Round == nil &&
+	return e.PreparationScope != "" && e.PreparationScope == r.preparationScope() && (e.Kind == "guidance" || e.Kind == "schema") && !e.Unread && e.Round == nil &&
 		m.Role == "user" && len(m.ToolCalls) == 0 && m.ToolCallID == "" && m.Name == ""
 }
 

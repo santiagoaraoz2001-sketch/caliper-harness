@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"specific-harness/internal/config"
 	"specific-harness/internal/tool"
 	"strings"
@@ -75,6 +76,9 @@ func TestGroupedGrepExactSource(t *testing.T) {
 	requireRG(t)
 	dir := t.TempDir()
 	name := "quote: \"é🌱.go"
+	if runtime.GOOS == "windows" {
+		name = "quote ‘é🌱.go"
+	}
 	rows := []string{"before", "\tHIT \"é🌱\" <tag>\r", "after", "gap", "gap", "HIT second", "tail"}
 	r19Write(t, dir, name, strings.Join(rows, "\n"))
 	res, err := groupedCall(t, dir, testCfg(), map[string]any{"pattern": "HIT", "context": int64(1)})

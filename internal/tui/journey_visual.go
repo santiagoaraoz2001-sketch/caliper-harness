@@ -22,7 +22,7 @@ func (m Model) dockRows() []string {
 	// A dock replaces the existing branch footer row. Leave at least six chat
 	// rows, and reclaim decoration for short/multiline/alert-heavy frames.
 	extra := min(2, max(0, m.Height-len(m.tabChrome())-(m.Input.Height()+2)-3-1-6))
-	if len(m.Alerts) > 0 {
+	if len(m.Alerts) > 0 && !m.alertHidden {
 		extra--
 	}
 	if chipsView(m) != "" {
@@ -360,7 +360,7 @@ func journeyEventRows(events []session.Event, inner int) []string {
 	}
 	return rows
 }
-func (m Model) renderJourney(w, h int) string {
+func (m *Model) renderJourney(w, h int) string {
 	at := m.Tabs[m.Active].at
 	r := m.journeyNode(at.target)
 	choices := m.journeyChoices()

@@ -18,7 +18,7 @@ func TestOutsideDiscoveryPreparationParity(t *testing.T) {
 			reg := tool.NewRegistry(pc)
 			reg.Register(tool.Definition{Name: name})
 			r := &Runner{Prompts: pc, Registry: reg, Assigned: &AssignedOps{Facts: func(context.Context) (any, error) { return BookkeepingFacts{}, nil }}}
-			if e := r.refreshWorkflow(); e != nil {
+			if e := r.refreshWorkflow(t.Context()); e != nil {
 				t.Fatal(e)
 			}
 			if _, ok := r.Registry.Lookup(name); !ok {

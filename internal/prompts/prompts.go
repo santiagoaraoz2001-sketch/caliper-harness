@@ -60,6 +60,17 @@ func Load(path string) (*Catalog, error) {
 	if err != nil {
 		return nil, fmt.Errorf("prompt catalog %s: %w", path, err)
 	}
+	// Git materializes symlinks as one-line files on Windows without symlink
+	// support. Recognize only the two shipped aliases, not arbitrary includes.
+	alias := strings.TrimSpace(string(raw))
+	if filepath.Base(path) == "prompts.yaml" && (alias == "internal/prompts/prompts.yaml" || alias == "../internal/prompts/prompts.yaml") {
+		target := filepath.Clean(filepath.Join(filepath.Dir(path), filepath.FromSlash(alias)))
+		raw, err = os.ReadFile(target)
+		if err != nil {
+			return nil, fmt.Errorf("prompt catalog alias %s: %w", path, err)
+		}
+		return decode(raw, target, Builtin())
+	}
 	return decode(raw, path, Builtin())
 }
 

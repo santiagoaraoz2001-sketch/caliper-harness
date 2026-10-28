@@ -310,7 +310,7 @@ func TestDecisionsViewportRefreshResizeAndEscape(t *testing.T) {
 	}
 	m.alert("warn", "owned notice")
 	m = decisionsViewportKey(t, m, tea.KeyEsc)
-	if !m.decisionsActive() || len(m.Alerts) != 0 {
+	if !m.decisionsActive() || !m.alertHidden {
 		t.Fatal("first Escape did not only dismiss the alert")
 	}
 	m = decisionsViewportKey(t, m, tea.KeyEsc)

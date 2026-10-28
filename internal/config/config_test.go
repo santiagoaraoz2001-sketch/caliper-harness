@@ -245,6 +245,7 @@ func TestEmptyBucketsValid(t *testing.T) {
 // TestSaveRoundTrip pins the runtime switch: Save writes, Load reads
 // back the same values through the real file.
 func TestSaveRoundTrip(t *testing.T) {
+	isolatedUser(t)
 	cfg := Defaults()
 	cfg.Model.Server = "http://127.0.0.1:11434/v1"
 	cfg.Decision.Device = "gpu"
@@ -266,6 +267,7 @@ func TestSaveRoundTrip(t *testing.T) {
 
 // TestSaveRefusesBad pins fail-closed: a bad value never clobbers the file.
 func TestSaveRefusesBad(t *testing.T) {
+	isolatedUser(t)
 	path := filepath.Join(t.TempDir(), "specific-harness.yaml")
 	if err := Save(path, Defaults()); err != nil {
 		t.Fatalf("save defaults: %v", err)
@@ -314,6 +316,7 @@ func TestTabsTitleEveryValidation(t *testing.T) {
 }
 
 func TestExampleMatchesDefaults(t *testing.T) {
+	isolatedUser(t)
 	cfg, usedFile, err := Load("../../specific-harness.yaml.example")
 	if err != nil {
 		t.Fatalf("example must load: %v", err)

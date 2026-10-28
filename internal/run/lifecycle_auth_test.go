@@ -54,8 +54,10 @@ func TestLifecyclePublicLaunchFactoryAppliesConfiguredAll(t *testing.T) {
 type lifecycleAuthRoleModel struct{ workers *int }
 
 func (m lifecycleAuthRoleModel) Chat(_ context.Context, msgs []llm.Message) (string, string, llm.Usage, error) {
-	if strings.HasPrefix(msgs[len(msgs)-1].Content, "Review ") {
-		return "PASS: component review after actual pair", "component", llm.Usage{}, nil
+	for _, message := range msgs {
+		if message.Role == "user" && strings.HasPrefix(message.Content, "Review ") {
+			return "PASS: component review after actual pair", "component", llm.Usage{}, nil
+		}
 	}
 	*m.workers++
 	return "component worker completed", "component", llm.Usage{}, nil
@@ -119,16 +121,24 @@ func TestLifecycleRiskyFirstAndNextTaskApproval(t *testing.T) {
 				}
 				if strings.Contains(text, ids[1]) {
 					entries, e := session.List(cfg.Sessions.Path)
-					if e == nil && len(entries) == 1 {
-						events, e := session.Read(cfg.Sessions.Path, entries[0])
-						if e == nil {
-							for _, ev := range events {
-								if ev.Kind == "task_settled" && strings.Contains(ev.Text, ids[0]) && strings.Contains(ev.Text, "qualified=true") {
-									completionBeforeNext = true
-								}
+					if e != nil {
+						t.Fatal(e)
+					}
+					settled := 0
+					// Role evidence has its own scoped archives; identify the actual
+					// owning settlement event rather than assuming one session file.
+					for _, entry := range entries {
+						events, e := session.Read(cfg.Sessions.Path, entry)
+						if e != nil {
+							t.Fatal(e)
+						}
+						for _, ev := range events {
+							if ev.Kind == "task_settled" && strings.Contains(ev.Text, ids[0]) && strings.Contains(ev.Text, "qualified=true") {
+								settled++
 							}
 						}
 					}
+					completionBeforeNext = settled == 1
 					return false
 				}
 				return true

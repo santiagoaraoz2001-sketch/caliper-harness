@@ -28,20 +28,21 @@ const (
 
 // Event is one coalesced file change.
 type Event struct {
-	Seq           int
-	Path          string // slash-separated, relative to the root
-	Op            string
-	At            time.Time
-	Added         []string
-	Removed       []string
-	AddedN        int // totals before capping
-	RemovedN      int
-	After         []string // file content after the change, capped
-	Truncated     bool
-	AfterTool     string // stamped by the TUI, not the watcher
-	BeforeKnown   bool
-	BeforePartial bool
-	ReadError     string
+	Seq            int
+	Path           string // slash-separated, relative to the root
+	Op             string
+	At             time.Time
+	Added          []string
+	Removed        []string
+	AddedN         int // totals before capping
+	RemovedN       int
+	After          []string // file content after the change, capped
+	Truncated      bool
+	AfterTool      string // stamped by the TUI, not the watcher
+	BeforeKnown    bool
+	BeforePartial  bool
+	ReadError      string
+	OutsideCapture bool // changed bytes were observed outside the retained line prefix
 }
 
 // Config tunables.
@@ -67,7 +68,7 @@ func DefaultConfig() Config {
 		StartupMaxEntries: 4096,
 		DiffLines:         6,
 		FileLines:         200,
-		Ignore:            []string{".git", "data"},
+		Ignore:            []string{".git", "data", "node_modules"},
 	}
 }
 
@@ -368,6 +369,11 @@ func (w *Watcher) ignored(rel string) bool {
 		if rel == ig || strings.HasPrefix(rel, ig+"/") {
 			return true
 		}
+		// Package managers also create dependency trees inside workspace packages.
+		// Keep the default exclusion at any depth without broadening path ignores.
+		if ig == "node_modules" && strings.Contains("/"+rel+"/", "/node_modules/") {
+			return true
+		}
 	}
 	return false
 }
@@ -531,6 +537,7 @@ func (w *Watcher) fire(rel string) {
 			ev.Op = OpDelete
 			if haveOld {
 				ev.Removed, ev.RemovedN = capLines(old.lines, w.cfg.DiffLines)
+				ev.After, ev.Truncated = old.lines, old.partial
 			}
 		} else {
 			ev.Op = OpModify
@@ -549,6 +556,7 @@ func (w *Watcher) fire(rel string) {
 	}
 	if ev.BeforeKnown {
 		ev.Added, ev.Removed, ev.AddedN, ev.RemovedN = diffLines(old.lines, ss.lines, w.cfg.DiffLines)
+		ev.OutsideCapture = (old.partial || ss.partial) && old.hash != ss.hash && ev.AddedN == 0 && ev.RemovedN == 0
 	} else {
 		ev.BeforeKnown = op == OpCreate && !st.Limited && st.Omitted == 0 && st.Skipped == 0 && st.Error == ""
 		if ev.BeforeKnown {

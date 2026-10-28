@@ -21,7 +21,7 @@ func TestAskRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ask failed: %v", err)
 	}
-	if res.Text != "1: blue" {
+	if res.Text != `[{"question":"favorite color?","picked":"blue","comment":""}]` {
 		t.Errorf("answer=%q", res.Text)
 	}
 	if !strings.Contains(out.String(), "Q1/1: favorite color?") {
@@ -41,12 +41,12 @@ func TestAskOptionsParse(t *testing.T) {
 	var got []Question
 	p := &Prompter{Ask: func(ctx context.Context, qs []Question) ([]Answer, error) {
 		got = qs
-		return []Answer{{Picked: "x"}}, nil
+		return []Answer{{Picked: "x"}, {Picked: "free"}}, nil
 	}}
 	d := New(p)
 	_, err := d.Execute(context.Background(), tool.Args{
-		"question": "a?", "options": "x, y ,z",
-		"question2": "b?", "options3": "orphan",
+		"question": "a?", "options": "x\n y \nz",
+		"question2": "b?",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -63,14 +63,25 @@ func TestAskOptionsParse(t *testing.T) {
 	}
 }
 
+func TestAskNaturalCommaIsNotAnOptionDelimiter(t *testing.T) {
+	got := parseOptions("Industrial, restrained UI\r\nWarm, handcrafted cockpit\n Minimal, quiet")
+	want := []string{"Industrial, restrained UI", "Warm, handcrafted cockpit", "Minimal, quiet", NoneOfAbove}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("natural labels split: %q", got)
+	}
+	if got := parseOptions("A single label, with a comma"); len(got) != 2 || got[0] != "A single label, with a comma" {
+		t.Fatalf("single choice split: %q", got)
+	}
+}
+
 func TestAskStdinOptions(t *testing.T) {
 	var out bytes.Buffer
 	p := &Prompter{In: strings.NewReader("2\nship it\n"), Out: &out}
-	res, err := New(p).Execute(context.Background(), tool.Args{"question": "which?", "options": "slow, fast"})
+	res, err := New(p).Execute(context.Background(), tool.Args{"question": "which?", "options": "slow\n fast"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Text != "1: fast — ship it" {
+	if res.Text != `[{"question":"which?","picked":"fast","comment":"ship it"}]` {
 		t.Errorf("answer=%q", res.Text)
 	}
 	for _, want := range []string{"1) slow", "2) fast", "3) None of the above"} {
@@ -81,11 +92,11 @@ func TestAskStdinOptions(t *testing.T) {
 }
 
 func TestAskFormat(t *testing.T) {
-	if got := format(nil); got != "unanswered" {
+	if got, err := format(nil, nil); err != nil || got != "unanswered" {
 		t.Errorf("nil=%q", got)
 	}
-	got := format([]Answer{{Picked: "a", Comment: "why"}, {Picked: ""}})
-	if got != "1: a — why\n2: no answer" {
+	got, err := format([]Question{{Text: "first?"}, {Text: "second?"}}, []Answer{{Picked: "a", Comment: "why"}, {Picked: ""}})
+	if err != nil || got != `[{"question":"first?","picked":"a","comment":"why"},{"question":"second?","picked":"","comment":""}]` {
 		t.Errorf("format=%q", got)
 	}
 }

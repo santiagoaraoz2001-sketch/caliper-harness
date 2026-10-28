@@ -287,6 +287,7 @@ func (s rgText) value() (string, error) {
 // globMatchFile matches a path against a glob. Patterns without a slash
 // match the basename (rg semantics); others match the full relative path.
 func globMatchFile(pattern, p, root, dir string) bool {
+	pattern, p = filepath.ToSlash(pattern), filepath.ToSlash(p)
 	hasPath := strings.Contains(pattern, "/")
 	pattern = strings.TrimPrefix(pattern, "./")
 	if hasPath && pattern == strings.TrimPrefix(p, "./") {
@@ -389,9 +390,9 @@ func runFind(ctx context.Context, cfg config.SearchConfig, args tool.Args, dir s
 func searchLocator(file string) string {
 	file = filepath.Clean(file)
 	if !filepath.IsAbs(file) && !strings.ContainsRune(file, filepath.Separator) {
-		return "." + string(filepath.Separator) + file
+		return "./" + file
 	}
-	return file
+	return filepath.ToSlash(file)
 }
 
 // FindFilesOutside reuses the bounded, non-following finder for an already

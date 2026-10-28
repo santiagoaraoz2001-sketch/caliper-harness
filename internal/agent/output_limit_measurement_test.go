@@ -25,6 +25,9 @@ func TestOutputLimitPromptMeasurementWithoutContinuationPrefix(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "literal token-prefix state") || r.Outcome.Status != outcome.Failed {
 		t.Fatalf("measurement changed missing-prefix refusal: %v %+v", err, r.Outcome)
 	}
+	if strings.Contains(err.Error(), "MLX") || !strings.Contains(err.Error(), "smaller response") {
+		t.Fatalf("missing-prefix recovery must not recommend a particular runtime: %v", err)
+	}
 	found := 0
 	for _, m := range r.Continuation.Messages() {
 		if m.Reasoning == "unfinished thought" {

@@ -36,6 +36,9 @@ func (r *Runner) keepSteered(reply llm.Reply, log func(string, string) error) er
 
 func (r *Runner) retainUnfinished(reply llm.Reply, log func(string, string) error) error {
 	message := reply.Message.Clone()
+	if reply.RawNative != "" {
+		message.Content += "\nUnverified unfinished native response (not executed):\n" + reply.RawNative
+	}
 	if len(message.ToolCalls) > 0 {
 		raw, err := json.Marshal(message.ToolCalls)
 		if err != nil {
@@ -43,7 +46,7 @@ func (r *Runner) retainUnfinished(reply llm.Reply, log func(string, string) erro
 		}
 		message.Content += "\nUnverified unfinished native call drafts (none executed):\n" + string(raw)
 	}
-	if reply.Prefix != nil && reply.Prefix.PendingToolDraft != "" {
+	if reply.RawNative == "" && reply.Prefix != nil && reply.Prefix.PendingToolDraft != "" {
 		message.Content += "\nUnverified unfinished native argument draft (not executed):\n" + reply.Prefix.PendingToolDraft
 	}
 	message.ToolCalls = nil
@@ -76,12 +79,8 @@ func (r *Runner) keepCompleted(reply llm.Reply, log func(string, string) error) 
 	if err := candidate.Snapshot().Validate(); err != nil {
 		return err
 	}
-	raw, _ := json.Marshal(reply)
 	if r.Session != nil {
-		if err := nativeArchiveHeader(map[string]any{"Usage": reply.Usage, "Bytes": len(raw), "RawOnly": false}, "completed native", log); err != nil {
-			return err
-		}
-		if err := nativeArchiveFragments(raw, "completed native", log); err != nil {
+		if err := r.archiveCompletedNative(reply, log); err != nil {
 			return err
 		}
 	}
@@ -94,6 +93,24 @@ func (r *Runner) keepCompleted(reply llm.Reply, log func(string, string) error) 
 	}
 	r.Continuation.Entries = candidate.Entries
 	return nil
+}
+
+// archiveCompletedNative preserves the full received response without adding a
+// transcript entry. Raw tool responses need this receipt before nativeStep can
+// publish their parsed calls or execute effects; earlier length receipts contain
+// only prefixes and cannot stand in for the completed response.
+func (r *Runner) archiveCompletedNative(reply llm.Reply, log func(string, string) error) error {
+	if r.Session == nil {
+		return fmt.Errorf("completed native response has no session archive; original not retained")
+	}
+	raw, err := json.Marshal(reply)
+	if err != nil {
+		return err
+	}
+	if err := nativeArchiveHeader(map[string]any{"Usage": reply.Usage, "Bytes": len(raw), "RawOnly": false}, "completed native", log); err != nil {
+		return err
+	}
+	return nativeArchiveFragments(raw, "completed native", log)
 }
 
 // keepThinking retains original nonexecuted fields, never assistant text.
@@ -193,12 +210,30 @@ func (r *Runner) definitions() ([]llm.ToolDefinition, error) {
 			return nil, err
 		}
 	}
+	r.planningPlacement(defs)
+	err = r.accountDefinitions(defs)
+	return defs, err
+}
+
+func (r *Runner) accountDefinitions(defs []llm.ToolDefinition) error {
 	raw, err := json.Marshal(defs)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	key := fmt.Sprintf("%x", sha256.Sum256(raw))
 	bytes := len(raw)
+	for i, def := range defs {
+		if def.TailPublished {
+			key += ":host-plan-tail-v1"
+			physical := append(append([]llm.ToolDefinition(nil), defs[:i]...), defs[i+1:]...)
+			wire, err := json.Marshal(physical)
+			if err != nil {
+				return err
+			}
+			bytes = len(wire)
+			break
+		}
+	}
 	if len(defs) == 0 {
 		bytes = 0
 		key = ""
@@ -208,7 +243,7 @@ func (r *Runner) definitions() ([]llm.ToolDefinition, error) {
 	}
 	r.Continuation.SchemaBytes = bytes
 	r.Continuation.SchemaKey = key
-	return defs, nil
+	return nil
 }
 func (r *Runner) nativeStep(ctx context.Context, reply llm.Message, exec Exec, log func(string, string) error, remaining *int, observe func(string, bool, string) string) (obs, stopped string, err error) {
 	r.nativeCharges = 0
@@ -229,9 +264,8 @@ func (r *Runner) nativeStep(ctx context.Context, reply llm.Message, exec Exec, l
 		}
 		ids[c.ID] = true
 		parsed, e := tool.JSONObject(c.Arguments)
-		if errors.Is(e, tool.ErrAmbiguousArguments) {
-			return "", "", e
-		}
+		// Ambiguous values are refused as a complete, correlated array below.
+		// Never guess a value or ask the judge to repair ambiguous authored data.
 		authored[i], parseErrors[i] = tool.Args(parsed), e
 	}
 	repairAllowed := !mixed

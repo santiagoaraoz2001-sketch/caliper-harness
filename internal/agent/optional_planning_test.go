@@ -65,7 +65,7 @@ func TestOptionalPlanningFinalRequiresCurrentSelectedPlan(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if (r.Outcome.Status == outcome.Completed) != (mode == "complete") {
+			if (r.Outcome.Status == outcome.Completed) != (mode == "complete" || mode == "historical") {
 				t.Fatalf("%s: %+v", mode, r.Outcome)
 			}
 		})

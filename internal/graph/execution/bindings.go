@@ -1,0 +1,41 @@
+package execution
+
+// Method argument bindings are named explicitly: reordering SDL arguments must
+// never swap same-typed resolver parameters. These names describe Go method
+// positions, while the SDL remains the authority for defaults and GraphQL types.
+var rootArguments = map[string][]string{
+	"Query.sessionEvidence":       {"sessionId", "offset", "limit", "callId"},
+	"Query.taskEvidence":          {"taskId", "offset", "limit", "attempt", "kind", "record", "phase", "callId"},
+	"Query.revisionContract":      {"kind", "id"},
+	"Query.taskComments":          {"taskId", "attempt", "limit"},
+	"Query.knowledge":             {"key", "id", "limit", "text", "section", "offset", "linkedFrom", "linkedTo", "relation"},
+	"Query.notices":               {"approachId", "limit"},
+	"Query.version":               {},
+	"Query.memories":              {"kind", "text", "limit"},
+	"Query.sessions":              {},
+	"Query.session":               {"id"},
+	"Query.plan":                  {"id"},
+	"Query.plans":                 {"state"},
+	"Query.approach":              {"id"},
+	"Query.task":                  {"id"},
+	"Mutation.requestRevision":    {"kind", "id", "expectedSnapshot", "text"},
+	"Mutation.editRevision":       {"kind", "id", "expectedSnapshot", "field", "value"},
+	"Mutation.resolveRevision":    {"kind", "id", "revisionId", "expectedSnapshot"},
+	"Mutation.addTaskComment":     {"taskId", "expectedAttempt", "text"},
+	"Mutation.prepareTask":        {"input"},
+	"Mutation.appendKnowledge":    {"key", "body", "expectedPreviousId", "taskId", "filePath", "references"},
+	"Mutation.noticed":            {"approachId", "body", "filePath"},
+	"Mutation.putKnowledge":       {"key", "body", "expectedPreviousId", "taskId", "filePath"},
+	"Mutation.bindPlanProject":    {"id"},
+	"Mutation.addMemory":          {"kind", "body", "sessionRef"},
+	"Mutation.addSessionEvent":    {"sessionId", "kind", "text"},
+	"Mutation.createPlan":         {"title", "goal"},
+	"Mutation.createApproach":     {"planId", "title"},
+	"Mutation.createTask":         {"approachId", "title", "prompt"},
+	"Mutation.transitionPlan":     {"id", "to"},
+	"Mutation.transitionApproach": {"id", "to"},
+	"Mutation.transitionTask":     {"id", "to"},
+	"Mutation.setTaskBlock":       {"id", "current", "target", "sketch", "acceptance", "tests", "verify", "checkCommand", "acceptanceCommand"},
+	"Mutation.retirePlan":         {"id"},
+	"Mutation.retireApproach":     {"id"},
+}

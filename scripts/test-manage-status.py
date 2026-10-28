@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Exercise the shipped TUI with a real PTY and an owned catalog endpoint.
 
-Windows uses pywinpty/ConPTY; POSIX uses its native PTY. No model is downloaded
+Windows uses owned raw-byte ConPTY; POSIX uses its native PTY. No model is downloaded
 or run. The endpoint is a catalog fixture, so this qualifies setup/navigation,
 not inference. Every write stays in a new evidence directory.
 """
 import argparse
 import hashlib
+import importlib.util
 import http.server
 import json
 import os
@@ -25,9 +26,11 @@ class Terminal:
         self.raw = bytearray()
         self.closed = False
         if self.windows:
-            from winpty import PtyProcess
-            self.process = PtyProcess.spawn(argv, cwd=str(cwd), env=env, dimensions=(40, 120), backend='0')
-            self.reader = self.process.fileobj
+            spec = importlib.util.spec_from_file_location('caliper_raw_conpty', Path(__file__).with_name('windows_terminal.py'))
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            self.process = module.RawConPTY(argv, cwd, env)
+            self.reader = None
         else:
             import fcntl
             import pty
@@ -52,13 +55,16 @@ class Terminal:
         start = len(self.raw)
         end = time.monotonic() + seconds
         while time.monotonic() < end:
-            if not select.select([self.reader], [], [], .05)[0]:
+            if not self.windows and not select.select([self.reader], [], [], .05)[0]:
                 continue
             try:
-                chunk = self.reader.recv(65536) if self.windows else os.read(self.reader, 65536)
+                chunk = self.process.read_available() if self.windows else os.read(self.reader, 65536)
             except (OSError, EOFError):
                 break
             if not chunk:
+                if self.windows:
+                    time.sleep(.01)
+                    continue
                 break
             self.raw.extend(chunk)
             if self.alive():
@@ -114,6 +120,44 @@ class Terminal:
 def plain(raw):
     text = raw.decode('utf-8', errors='replace')
     return re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07]*(?:\x07|\x1b\\)', '', text)
+
+
+
+def coding_role_from_effective_yaml(text):
+    """Read only the emitted flat model section, never saved catalog model names."""
+    match = re.search(r'(?m)^model:[ \t]*$', text)
+    if not match:
+        raise AssertionError('Effective configuration has no model section')
+    tail = text[match.end():].lstrip('\r\n')
+    boundary = re.search(r'(?m)^\S', tail)
+    block = tail[:boundary.start()] if boundary else tail
+    role = {}
+    for line in block.splitlines():
+        field = re.fullmatch(r'[ \t]+(name|server|runtime):[ \t]*(.*)', line)
+        if not field:
+            continue
+        key, value = field.groups()
+        if key in role:
+            raise AssertionError('Duplicate effective model field: ' + key)
+        if value.startswith('"'):
+            value = json.loads(value)
+        elif value.startswith("'") and value.endswith("'"):
+            value = value[1:-1].replace("''", "'")
+        role[key] = value
+    if set(role) != {'name', 'server', 'runtime'}:
+        raise AssertionError('Incomplete effective Coding role: ' + repr(role))
+    return role
+
+
+def effective_coding_role(binary, cfg, work, env, out, label):
+    # This command only loads/prints configuration; it cannot open inference/store.
+    result = subprocess.run([str(binary), 'config', '--config', str(cfg)],
+                            cwd=work, env=env, capture_output=True, timeout=20)
+    (out / (label + '-effective.yaml')).write_bytes(result.stdout)
+    (out / (label + '-config-stderr.txt')).write_bytes(result.stderr)
+    if result.returncode:
+        raise AssertionError('Effective config readback failed: ' + label)
+    return coding_role_from_effective_yaml(result.stdout.decode('utf-8'))
 
 
 def main():
@@ -253,11 +297,17 @@ def main():
         checks['model_saved'] = 'catalog-selected-model' in cfg.read_text() and 'models:' in cfg.read_text()
         term.send('/models catalog-selected-model\r', 1)
         term.send('u', 1)
-        checks['coding_selection_saved'] = 'name: catalog-selected-model' in cfg.read_text()
+        expected_role = {'name': 'catalog-selected-model', 'server': base, 'runtime': 'openai'}
+        checks['coding_selection_saved'] = effective_coding_role(binary, cfg, work, env, out, 'after-manage') == expected_role
+        if not checks['coding_selection_saved']:
+            raise AssertionError('Manage did not persist the exact Coding role')
         setup = term.send('/setup\r')
         for _ in range(4):
             setup += term.send('\r')
-        checks['setup_accepts_own_coding_selection'] = 'Configuration changed outside Setup' not in plain(setup)
+        checks['setup_accepts_own_coding_selection'] = ('Configuration changed outside Setup' not in plain(setup)
+            and effective_coding_role(binary, cfg, work, env, out, 'after-setup') == expected_role)
+        if not checks['setup_accepts_own_coding_selection']:
+            raise AssertionError('Retained Setup reverted the exact Coding role')
         term.send('/models catalog-selected-model\r', 1)
         term.expect('t', 'Server responds')
         checks['test_connection'] = True
@@ -277,6 +327,9 @@ def main():
         checks['connections_survive_reopen'] = True
         reopened.expect('/status\r', 'Generated tokens')
         checks['reopened_status'] = True
+        checks['coding_role_survives_reopen'] = effective_coding_role(binary, cfg, work, env, out, 'after-reopen') == expected_role
+        if not checks['coding_role_survives_reopen']:
+            raise AssertionError('Reopened effective Coding role differs from selected role')
         checks['reopened_clean_exit'] = reopened.quit() == 0
         # ConPTY emits an initial SGR reset even when its child sets no style.
         # Resets are harmless; every color/style-setting sequence still fails.

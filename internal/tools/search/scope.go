@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"specific-harness/internal/pathutil"
 	"specific-harness/internal/prompts"
 	"specific-harness/internal/tool"
 	"strings"
@@ -87,7 +88,7 @@ func DiscoveryPath(workspace, input string, outside bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	root, err = filepath.EvalSymlinks(root)
+	root, err = pathutil.EvalSymlinks(root)
 	if err != nil {
 		return "", err
 	}
@@ -106,11 +107,11 @@ func DiscoveryPath(workspace, input string, outside bool) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if info.Mode()&os.ModeSymlink != 0 {
+		if pathutil.IsLinkMode(info.Mode()) {
 			return "", fmt.Errorf("outside discovery refuses final symlinks; supply the actual absolute path")
 		}
 	}
-	target, err = filepath.EvalSymlinks(target)
+	target, err = pathutil.EvalSymlinks(target)
 	if err != nil {
 		return "", err
 	}
@@ -141,7 +142,7 @@ func scopedArgs(dir string, args tool.Args) (tool.Args, error) {
 	if err != nil {
 		return nil, err
 	}
-	root, err = filepath.EvalSymlinks(root)
+	root, err = pathutil.EvalSymlinks(root)
 	if err != nil {
 		return nil, err
 	}

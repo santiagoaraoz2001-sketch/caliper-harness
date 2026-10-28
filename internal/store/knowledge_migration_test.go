@@ -34,8 +34,8 @@ func TestProjectKnowledgeAdditiveLegacyReopen(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		rows, e := s.Query(`MATCH(m:MemoryEntry) RETURN m.body AS body,m.session_ref AS ref,m.project_root AS root,m.key AS key,m.previous_id AS previous,m.task_id AS task,m.file_path AS file`, nil)
-		if e != nil || len(rows) != 1 || rows[0]["body"] != "historical α🙂" || rows[0]["ref"] != "old-session" || rows[0]["root"] != nil || rows[0]["key"] != nil {
+		rows, e := s.Query(`MATCH(m:MemoryEntry) RETURN m.body AS body,m.session_ref AS ref,m.project_root AS root,m.key AS key,m.previous_id AS previous,m.task_id AS task,m.file_path AS file,m.file_sha256 AS sha`, nil)
+		if e != nil || len(rows) != 1 || rows[0]["body"] != "historical α🙂" || rows[0]["ref"] != "old-session" || rows[0]["root"] != nil || rows[0]["key"] != nil || rows[0]["sha"] != nil {
 			s.Close()
 			t.Fatalf("legacy note %v %v", rows, e)
 		}

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"specific-harness/internal/decision"
 	"testing"
 )
@@ -59,6 +60,9 @@ func TestDiscoveryGGUFDoesNotClaimMLXCompatibility(t *testing.T) {
 func TestInstalledServersNoEndpointGuess(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "gufo")
+	if runtime.GOOS == "windows" {
+		path += ".cmd"
+	}
 	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -97,6 +101,9 @@ func TestDiscoveryGGUFNativeSnapshotAndExplicitFile(t *testing.T) {
 func TestInstalledRecipesUseConfiguredEndpointAndLiteralModel(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"gufo", "llama-server"} {
+		if runtime.GOOS == "windows" {
+			name += ".cmd"
+		}
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -107,9 +114,13 @@ func TestInstalledRecipesUseConfiguredEndpointAndLiteralModel(t *testing.T) {
 		t.Fatalf("recipes %+v", got)
 	}
 	for _, r := range got {
-		want := []string{filepath.Join(dir, r.Name), "--host", "127.0.0.1", "--port", "18890", "--model", "{model}"}
+		executable := filepath.Join(dir, r.Name)
+		if runtime.GOOS == "windows" {
+			executable += ".cmd"
+		}
+		want := []string{executable, "--host", "127.0.0.1", "--port", "18890", "--model", "{model}"}
 		if r.Name == "gufo" {
-			want = []string{filepath.Join(dir, r.Name), "serve", "--host", "127.0.0.1", "--port", "18890", "llm", "--model", "{model}"}
+			want = []string{executable, "serve", "--host", "127.0.0.1", "--port", "18890", "llm", "--model", "{model}"}
 		}
 		if !reflect.DeepEqual(r.Argv, want) {
 			t.Fatalf("argv %v", r.Argv)

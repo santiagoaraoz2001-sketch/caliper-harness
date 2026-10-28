@@ -77,7 +77,7 @@ func (m *Model) resizeComposer() {
 	if m.Tabs[m.Active].at.view == ViewChat {
 		reserved++
 	}
-	if len(m.Alerts) > 0 {
+	if len(m.Alerts) > 0 && !m.alertHidden {
 		reserved++
 	}
 	if chipsView(*m) != "" {

@@ -75,7 +75,8 @@ func TestSupervisionNativeContinuationPreservesPrefixAndSilence(t *testing.T) {
 						judgments++
 						pick := tc.pick
 						if observeThinking && len(q.Options) == 3 {
-							pick = 0 // Continue at length cannot produce the in-stream nudge.
+							t.Error("physical output limit invoked progress judgment")
+							pick = 0
 						}
 						if len(q.Options) == 2 {
 							pick = 0
@@ -89,7 +90,7 @@ func TestSupervisionNativeContinuationPreservesPrefixAndSilence(t *testing.T) {
 					r.ThinkingLoop = agent.ThinkingLoop{Repeat: 16, MinUnitBytes: 8, MaxUnitBytes: 256, SampleBytes: 4096, MaxInputBytes: 8192}
 				}
 				final, _, err := r.Run(t.Context(), "execute once after completing your own reasoning")
-				wantJudgments := 1
+				wantJudgments := 0 // Output limits are transparent physical boundaries.
 				if observeThinking {
 					wantJudgments++
 				}
@@ -122,7 +123,8 @@ func TestSupervisionNativeContinuationPreservesPrefixAndSilence(t *testing.T) {
 						}
 					}
 				}
-				if !retained || (nudges > 0) != tc.nudge || r.Continuation.Assignment != nil {
+				wantNudge := tc.nudge && observeThinking // Existing stream observation still applies independently.
+				if !retained || (nudges > 0) != wantNudge || r.Continuation.Assignment != nil {
 					t.Fatalf("fresh boundary retained=%t nudges=%d wanted=%t", retained, nudges, tc.nudge)
 				}
 			})

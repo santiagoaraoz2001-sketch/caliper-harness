@@ -22,7 +22,7 @@ var commandSpecs = map[string]commandSpec{
 	"chat":      {"one model prompt (no agent tools)", "", "config server model prompt no-stream", 0, 0},
 	"hw":        {"print hardware profile and limits", "", "", 0, 0},
 	"tool":      {"list standalone primitive schemas / show one schema", "[name]", "config", 0, 1},
-	"run":       {"headless coding task; completion requires an actual declared check", "", "config server model prompt tools max-steps", 0, 0},
+	"run":       {"headless task; changed project work requires a declared check", "", "config server model prompt tools max-steps", 0, 0},
 	"graph":     {"run one in-process GraphQL operation", "", "config db sessions-dir query", 0, 0},
 	"sessions":  {"list past runs / show one run", "[id]", "config sessions-dir", 0, 1},
 	"judgments": {"summarize one run's judgments", "<id>", "config sessions-dir", 1, 1},

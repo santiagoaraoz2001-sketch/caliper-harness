@@ -288,6 +288,11 @@ func (m *Model) onPlansLoaded(msg plansLoadedMsg) {
 		}
 	}
 	open := m.Plans.Detail != nil
+	oldID, oldLine := "", 1
+	if open {
+		oldID = m.Plans.Detail.ID
+		oldLine = layoutLines(detailLogical(m.Plans.Detail), BoxInner(m.Width)).topLine(m.Plans.Scroll)
+	}
 	m.Plans.rebuild(target)
 	if refused != "" {
 		m.Plans.Sel, m.Plans.Err = -1, refused
@@ -298,6 +303,9 @@ func (m *Model) onPlansLoaded(msg plansLoadedMsg) {
 	}
 	if open && m.Plans.Err == "" {
 		m.plansDetail(m.plansCur())
+		if msg.target == "" && m.Plans.Detail != nil && m.Plans.Detail.ID == oldID {
+			m.Plans.Scroll = layoutLines(detailLogical(m.Plans.Detail), BoxInner(m.Width)).gotoLine(oldLine, detailAvail(m.plansHeight(viewHeight(*m), m.Width)))
+		}
 	}
 	// Workflows dive, second step: the tree arrived with the approach
 	// selected — open its detail now.
@@ -444,9 +452,9 @@ func guidedBrief(raw string, approach bool) (label string, rows []string) {
 
 func approachLabel(title string) string {
 	if label, _ := guidedBrief(title, true); label != "" {
-		return label
+		return plan.DisplayText(label)
 	}
-	return title
+	return plan.DisplayText(title)
 }
 
 // detailLogical is the dive content as numbered logical lines: title,
@@ -470,7 +478,7 @@ func detailLogical(d *PlanDetail) []string {
 		}
 		out := []string{d.Ref + " " + lp.P.Title, "state: " + lp.P.State}
 		if _, fields := guidedBrief(lp.P.Goal, false); fields != nil {
-			out = append(out, fields...)
+			out = append(out, strings.Split(plan.DisplayText(strings.Join(fields, "\n")), "\n")...)
 		} else {
 			out = append(out, "goal: "+lp.P.Goal)
 		}
@@ -495,7 +503,7 @@ func detailLogical(d *PlanDetail) []string {
 		}
 		out := []string{d.Ref + " " + approachLabel(la.A.Title), "state: " + la.A.State}
 		if _, fields := guidedBrief(la.A.Title, true); fields != nil {
-			out = append(out, fields...)
+			out = append(out, strings.Split(plan.DisplayText(strings.Join(fields, "\n")), "\n")...)
 		}
 		out = append(out, fmt.Sprintf("progress: %d/%d tasks qualified", done, total), "", "tasks:")
 		for ti, t := range la.Tasks {

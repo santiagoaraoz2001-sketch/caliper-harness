@@ -166,7 +166,7 @@ func (m Model) footer() string {
 	c := m.Chat.Context
 	s.CtxUsed = c.Prompt
 	s.CtxKnown = c.Measured && c.ModelKey == m.contextKey()
-	view := m.Chat.Tools
+	view := m.Chat.toolView()
 	if view == "" {
 		view = "coding, /tools full"
 	}

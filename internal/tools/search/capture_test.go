@@ -38,7 +38,7 @@ func settledRG(t *testing.T) (string, string) {
 		// CreateProcess cannot run a bare script; a .cmd shim keeps the
 		// same contract: forward args, settle, then write the marker.
 		// `set /p` writes exactly "settled" with no trailing newline.
-		script := "@echo off\r\n\"" + real + "\" %*\r\nset st=%errorlevel%\r\n<nul set /p _=settled >\"" + marker + "\"\r\nexit /b %st%\r\n"
+		script := "@echo off\r\n\"" + real + "\" %*\r\nset st=%errorlevel%\r\n<nul set /p \"_=settled\">\"" + marker + "\"\r\nexit /b %st%\r\n"
 		if err := os.WriteFile(filepath.Join(bin, "rg.cmd"), []byte(script), 0700); err != nil {
 			t.Fatal(err)
 		}

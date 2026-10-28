@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"specific-harness/internal/testfs"
 	"strings"
 	"syscall"
 	"testing"
@@ -33,7 +34,7 @@ func TestInventoryRefusesExternalSymlink(t *testing.T) {
 	outside := t.TempDir()
 	os.WriteFile(filepath.Join(outside, "data"), []byte("bytes"), 0600)
 	os.RemoveAll(filepath.Join(root, "runtime"))
-	if err := os.Symlink(outside, filepath.Join(root, "runtime")); err != nil {
+	if err := testfs.Symlink(outside, filepath.Join(root, "runtime")); err != nil {
 		if runtime.GOOS == "windows" && (os.IsPermission(err) || errors.Is(err, syscall.Errno(1314))) {
 			t.Skip("Windows symlink creation requires Developer Mode or privilege")
 		}

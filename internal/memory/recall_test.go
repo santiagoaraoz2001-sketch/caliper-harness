@@ -54,7 +54,7 @@ func TestRecallTopNCap(t *testing.T) {
 		{Kind: "note", Body: "refund denied today"},
 	}
 	got := Recall(es, "refund", 1, 1000, 4)
-	if strings.Count(got, "- [note]") != 1 || !strings.Contains(got, "Relevant memories:") {
+	if strings.Count(got, "- [note]") != 1 || !strings.Contains(got, "Historical memory") {
 		t.Errorf("topN=1 must pick one: %q", got)
 	}
 }
@@ -65,8 +65,8 @@ func TestRecallCharCapSkips(t *testing.T) {
 		{Kind: "note", Body: "refund ok"},
 	}
 	got := Recall(es, "refund", 3, 12, 4)
-	if strings.Contains(got, "yesterday") || !strings.Contains(got, "refund ok") {
-		t.Errorf("must skip the over-cap body: %q", got)
+	if got != "" {
+		t.Errorf("must omit rather than strip provenance: %q", got)
 	}
 }
 
@@ -74,7 +74,7 @@ func TestRecallFallbackTruncates(t *testing.T) {
 	es := []*Entry{{Kind: "event", Body: "reported outage resolved"}}
 	got := Recall(es, "outage", 3, 8, 4)
 	// maxChars now bounds the complete returned text, not only the body.
-	want := "reporte…"
+	want := ""
 	if got != want {
 		t.Errorf("got %q want %q", got, want)
 	}

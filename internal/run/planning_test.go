@@ -107,7 +107,7 @@ func TestGuidedPlanningQuestionsAndOwningReady(t *testing.T) {
 	}
 	f.task()
 	tid := f.scope.ID
-	if got := f.definition().Params; len(got) != 2 || got[0].Name != "current" {
+	if got := f.definition().Params; len(got) != 3 || got[0].Name != "current" || !got[0].Required || got[1].Name != "target" || !got[1].Required || got[2].Name != "guidance" || got[2].Required {
 		t.Fatal(got)
 	}
 	f.call(tool.Args{"current": "observed defect", "target": "correct behavior"})
@@ -420,9 +420,8 @@ func TestGuidedPlanningReceiptRetainsGraphEffects(t *testing.T) {
 	}
 }
 
-// All guided phases advertise one wire contract while owner validation and
-// receipts continue to identify the exact next question.
-func TestPlanningWireDeclarationStable(t *testing.T) {
+// Every guided phase advertises exactly what its owning validator consumes.
+func TestPlanningWireDeclarationTracksCurrentQuestion(t *testing.T) {
 	f := newPlanningFixture(t)
 	wire := func() string {
 		reg := tool.NewRegistry(f.d.Prompts)
@@ -437,15 +436,32 @@ func TestPlanningWireDeclarationStable(t *testing.T) {
 		}
 		return string(raw)
 	}
-	initial := wire()
 	answers := []tool.Args{{}, {"title": "Repair", "outcome": "correct behavior", "rules": "preserve neighbors", "articles": "repair movement", "proof": "regression"}, {"strategy": "repair with regression"}, {"title": "Movement", "objective": "reject invalid direction"}, {"current": "invalid direction accepted", "target": "invalid direction ignored"}, {"acceptance": "assert rejection", "tests": "planned regression", "acceptance_command": "test 1 -eq 1"}, {"objective": "repair owner"}, {"execution": "edit movement validation"}, {"validation": "run regression"}, {"more": false}, {"verify": "review implementation and regression"}, {"invoke": "COMPLETE"}}
 	for _, answer := range answers {
 		f.call(answer)
-		if wire() != initial {
-			t.Fatal("planning changed native declaration", f.definition().Schema())
+		def := f.definition()
+		var native []struct {
+			Function struct {
+				Parameters struct {
+					Properties map[string]any `json:"properties"`
+					Required   []string       `json:"required"`
+				} `json:"parameters"`
+			} `json:"function"`
+		}
+		if err := json.Unmarshal([]byte(wire()), &native); err != nil {
+			t.Fatal(err)
+		}
+		properties := native[0].Function.Parameters.Properties
+		if len(properties) != len(def.Params) {
+			t.Fatal("native schema contains non-current fields", properties)
+		}
+		for _, param := range def.Params {
+			if properties[param.Name] == nil {
+				t.Fatal("native schema omits current field", param.Name)
+			}
 		}
 	}
 	if _, repair := tool.ValidateJSON(f.definition(), `{"invoke":"STATUS"}`); repair == "" {
-		t.Fatal("stable advertisement bypassed current question validation")
+		t.Fatal("non-current action bypassed current question validation")
 	}
 }

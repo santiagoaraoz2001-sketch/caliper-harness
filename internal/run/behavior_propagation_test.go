@@ -132,10 +132,12 @@ func TestBehaviorPropagationCapturedRoles(t *testing.T) {
 					if m.Role == "user" {
 						if strings.HasPrefix(m.Content, "Review ") {
 							role = "reviewer"
+							break
 						} else if m.Content == "PARENT_ROLE" || m.Content == "RELOAD_ROLE" {
 							role = "parent"
+							break
 						}
-						break
+						// Injected project data can precede the actual role intent.
 					}
 				}
 				mu.Lock()
@@ -202,6 +204,12 @@ func TestBehaviorPropagationCapturedRoles(t *testing.T) {
 				}
 				if _, _, e = parent.Run(ctx, "PARENT_ROLE"); e != nil {
 					t.Fatalf("parent check/launch failed %+v %v", parent.Outcome, e)
+				}
+				if parent.Continuation.Assignment == nil {
+					t.Logf("parent missing assignment: outcome=%+v estimate=%d schema_bytes=%d entries=%d", parent.Outcome, parent.Continuation.Estimate(), parent.Continuation.SchemaBytes, len(parent.Continuation.Entries))
+					for i, entry := range parent.Continuation.Entries {
+						t.Logf("parent entry%d kind=%s role=%s message_bytes=%d", i, entry.Kind, entry.Message.Role, entry.Message.Size())
+					}
 				}
 				assertQualifiedTaskWithOpenParents(t, parent, s)
 				c, _, e := session.Restore(sink.events, 32768)

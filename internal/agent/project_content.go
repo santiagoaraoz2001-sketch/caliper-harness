@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"specific-harness/internal/pathutil"
 	"strings"
 )
 
@@ -24,7 +25,7 @@ func projectFingerprint(ctx context.Context, root string, excludes []string) (st
 	if err != nil {
 		return "", err
 	}
-	root, err = filepath.EvalSymlinks(root)
+	root, err = pathutil.EvalSymlinks(root)
 	if err != nil {
 		return "", err
 	}
@@ -37,7 +38,7 @@ func projectFingerprint(ctx context.Context, root string, excludes []string) (st
 				continue
 			}
 			abs, err := filepath.Abs(ex)
-			if resolved, e := filepath.EvalSymlinks(abs); e == nil {
+			if resolved, e := pathutil.EvalSymlinks(abs); e == nil {
 				abs = resolved
 			}
 			if err == nil && (path == abs || strings.HasPrefix(path, abs+string(filepath.Separator))) {
@@ -108,7 +109,7 @@ func projectFingerprint(ctx context.Context, root string, excludes []string) (st
 			return "", err
 		}
 		fmt.Fprintf(h, "%q\x00%d\x00", name, info.Mode())
-		if info.Mode()&os.ModeSymlink != 0 {
+		if pathutil.IsLinkMode(info.Mode()) {
 			target, e := os.Readlink(path)
 			if e != nil {
 				return "", e

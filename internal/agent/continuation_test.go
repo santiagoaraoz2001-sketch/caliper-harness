@@ -193,7 +193,7 @@ func (s *boundaryFailSink) Append(ctx context.Context, id, kind, text string) er
 	return s.recordSink.Append(ctx, id, kind, text)
 }
 func TestAutomaticCompactSnapshotWriteFailurePreventsNextForward(t *testing.T) {
-	model := &scriptModel{replies: []string{echoBlock(strings.Repeat("x", 5000)), echoBlock("b"), "SUMMARY", "MUST_NOT_FORWARD"}, usages: []llm.Usage{{In: 20, Out: 5, Reported: true}, {In: 1450, Out: 5, Reported: true}, {In: 20, Out: 5, Reported: true}}}
+	model := &scriptModel{replies: []string{echoBlock(strings.Repeat("x", 5000)), echoBlock("b"), "Observed source read; verification pending.", "MUST_NOT_FORWARD"}, usages: []llm.Usage{{In: 20, Out: 5, Reported: true}, {In: 1450, Out: 5, Reported: true}, {In: 20, Out: 5, Reported: true}}}
 	sink := &boundaryFailSink{}
 	r := compactRunner(model, &sink.recordSink, testTemplateDir(t))
 	r.Session = sink
@@ -226,7 +226,7 @@ func (s *compactArchiveFailSink) Append(ctx context.Context, id, kind, text stri
 }
 
 func TestAutomaticCompactArchiveFailureRemainsFailed(t *testing.T) {
-	model := &scriptModel{replies: []string{echoBlock(strings.Repeat("x", 5000)), echoBlock("b"), "SUMMARY", "MUST_NOT_FORWARD"}, usages: []llm.Usage{{In: 20, Out: 5, Reported: true}, {In: 1450, Out: 5, Reported: true}, {In: 20, Out: 5, Reported: true}}}
+	model := &scriptModel{replies: []string{echoBlock(strings.Repeat("x", 5000)), echoBlock("b"), "Observed source read; verification pending.", "MUST_NOT_FORWARD"}, usages: []llm.Usage{{In: 20, Out: 5, Reported: true}, {In: 1450, Out: 5, Reported: true}, {In: 20, Out: 5, Reported: true}}}
 	sink := &compactArchiveFailSink{}
 	r := compactRunner(model, &sink.recordSink, testTemplateDir(t))
 	r.Session, r.Compaction.Keep = sink, 5

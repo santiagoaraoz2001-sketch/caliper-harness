@@ -95,7 +95,7 @@ func TestCompactPreservesBehavior(t *testing.T) {
 	var calls []string
 	reg.Register(echoTool(&calls))
 	model := &scriptModel{
-		replies: []string{echoBlock(strings.Repeat("x", 5000)), echoBlock("b"), "SUMMARY", "done"},
+		replies: []string{echoBlock(strings.Repeat("x", 5000)), echoBlock("b"), "Observed source read; verification pending.", "done"},
 		usages:  []llm.Usage{{In: 20, Out: 5, Reported: true}, {In: 1450, Out: 5, Reported: true}, {In: 50, Out: 5, Reported: true}, {In: 100, Out: 5, Reported: true}},
 	}
 	sink := &recordSink{}

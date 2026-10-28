@@ -21,8 +21,14 @@ func TestGuidedPlanningOpeningToleranceDoesNotSaveOrAnswer(t *testing.T) {
 			}
 			f.call(args)
 			question := f.definition()
-			if question.Opening || len(question.Params) != 5 || question.Params[0].Name != "title" {
+			want := []string{"title", "outcome", "rules", "articles", "proof", "guidance"}
+			if question.Opening || len(question.Params) != len(want) {
 				t.Fatalf("not the first authored question: %+v", question)
+			}
+			for i, name := range want {
+				if question.Params[i].Name != name || question.Params[i].Required != (name != "guidance") {
+					t.Fatalf("goal field %s lost required/optional semantics: %+v", name, question.Params[i])
+				}
 			}
 			args, ignored = tool.NormalizeOpening(question, tool.Args{"query": query})
 			if len(ignored) != 0 {

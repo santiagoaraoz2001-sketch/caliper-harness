@@ -17,7 +17,7 @@ func TestManagedPlanningCodingRequiresClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	scope := &session.WorkflowScope{Store: f.d.Store.Identity(), Kind: "root"}
-	if err := planningProjectCoding(t.Context(), f.d, scope); err == nil || !strings.Contains(err.Error(), "all tasks") {
+	if err := planningProjectCoding(t.Context(), f.d, scope); err == nil || !strings.Contains(err.Error(), "EXECUTE action claims a task") || !strings.Contains(err.Error(), `help(topic="plan")`) {
 		t.Fatalf("root planning bypass: %v", err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())

@@ -14,9 +14,9 @@ const (
 	RuntimeOpenAI = "openai"
 	RuntimeOllama = "ollama"
 	RuntimeMLX    = "mlx"
-	// RuntimeRulith is an identity, not a dialect: inference uses the
-	// generic OpenAI wire; the name preserves which server family owns
-	// lifecycle (the Rulith manager) in evidence and selection.
+	// RuntimeRulith uses the server's template and native completion stream for
+	// tool turns, retaining raw response bytes across physical output limits.
+	// Direct Chat retains OpenAI compatibility; lifecycle belongs to its manager.
 	RuntimeRulith = "rulith"
 )
 
@@ -79,6 +79,9 @@ func (c *Client) ParameterStatus() []ParameterStatus {
 	}
 	if c.MaxOutputTokens != nil {
 		support, reason := "unknown", "max_completion_tokens sent; generic server acceptance unconfirmed; includes reasoning"
+		if c.runtime == RuntimeRulith {
+			reason = "native tool turns send n_predict; direct chat sends max_completion_tokens; includes reasoning; acceptance is server-dependent"
+		}
 		if c.runtime == RuntimeMLX || c.runtime == RuntimeOllama {
 			support, reason = "supported", "documented native generation ceiling including reasoning; server acceptance is not an acknowledgement"
 		}

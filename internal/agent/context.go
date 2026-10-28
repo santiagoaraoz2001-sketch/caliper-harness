@@ -22,6 +22,20 @@ func contentSize(messages []llm.Message) int {
 // Begin restores provenance or explicitly marks compatibility History as legacy.
 func (r *Runner) begin(prompt string) {
 	c := r.Continuation.Snapshot()
+	r.reviewRequest = ""
+	if r.Reviewing && r.TaskSystem != "" && c.Coding != nil && c.Coding.TaskID != "" && c.Coding.Attempt > 0 {
+		r.reviewRequest = prompt
+		for _, entry := range c.Entries {
+			if entry.Kind == "intent" {
+				r.reviewRequest = ""
+				break
+			}
+		}
+		// Legacy history may carry human intent which begin is about to restore.
+		if len(r.History) > 0 {
+			r.reviewRequest = ""
+		}
+	}
 	if c.Version == 0 {
 		c.Version = 1
 		for _, m := range r.History {
@@ -68,7 +82,7 @@ func (r *Runner) begin(prompt string) {
 }
 
 // refreshWorkflow owns one immutable view per request; snapshots omit its header.
-func (r *Runner) refreshWorkflow() error {
+func (r *Runner) refreshWorkflow(ctx context.Context) error {
 	if scope := r.PlanningScope(); r.WorkflowView != nil && scope != nil {
 		reg, header, err := r.WorkflowView(scope)
 		if err != nil {
@@ -83,30 +97,13 @@ func (r *Runner) refreshWorkflow() error {
 		r.phaseView = r.ProjectPhaseRegistry(r.phaseRegistry)
 		r.Registry = r.phaseView
 	}
-	// Current preparation state belongs at the conversation tail, not in the
-	// stable system prefix. Existing receipts usually already carry it.
-	if r.PlanningActive() && (!r.assignedClaim || r.settlement != nil) && r.Registry != nil {
-		if def, ok := r.Registry.Lookup("plan"); ok {
-			question := def.Schema()
-			if question != r.preparationQuestion {
-				r.preparationQuestion = question
-				entries := r.Continuation.Entries
-				encoded, _ := json.Marshal(question)
-				inReceipt := false
-				for i := len(entries) - 1; i >= 0 && entries[i].Message.Role != "assistant"; i-- {
-					text := entries[i].Message.Content
-					inReceipt = inReceipt || strings.Contains(text, question) || strings.Contains(text, string(encoded))
-				}
-				if !inReceipt {
-					r.Continuation.Add("guidance", "user", r.workflowHeader+"\n"+question, false)
-					r.Continuation.Invalidate()
-				}
-			}
-		}
-	}
+	r.ensurePlanningPublication()
 	// begin owns entry zero; Behavior and legacy system entries are not ours.
 	if entries := r.Continuation.Entries; len(entries) > 0 && entries[0].Kind == "injected" && entries[0].Message.Role == "system" {
 		entries[0].Message.Content = r.basePrompt()
+	}
+	if r.OnRegistryChange != nil && r.Registry != nil {
+		r.OnRegistryChange(r.Registry.Names())
 	}
 	return nil
 }
@@ -153,8 +150,15 @@ func (r *Runner) basePrompt() string {
 	}
 	if r.Registry != nil {
 		if _, available := r.Registry.Lookup("help"); available {
-			base += "\n" + r.Prompts.Text("system.help_available")
+			key := "system.help_available"
+			if graph, ok := r.Registry.Lookup("graphql"); ok && graph.GraphQLFields != nil {
+				key = "system.help_available.knowledge"
+			}
+			base += "\n" + r.Prompts.Text(key)
 		}
+	}
+	if r.ProjectContext != nil {
+		base += "\n" + r.Prompts.Text("system.project_context")
 	}
 	if r.Registry != nil {
 		_, construction := r.Registry.Lookup("workflow_plan")
@@ -186,13 +190,18 @@ func (r *Runner) basePrompt() string {
 		base += "\n" + r.Prompts.Text("system.task.prepare")
 	}
 	if r.CodingRequired {
-		if direct || !r.PlanningActive() {
+		if r.CodingObligation() && (direct || !r.PlanningActive()) {
+			// Dispatched workers have a host-installed protected role plus the
+			// current task's bound coding state. Historical state alone is not
+			// worker provenance and cannot select role instructions.
+			boundWorker := r.TaskSystem != "" && !r.Reviewing && r.Assigned == nil && r.Continuation.Coding != nil && r.Continuation.Coding.Attempt > 0
 			key := "system.coding.requirements"
-			if !r.PlanningActive() {
+			if !r.PlanningActive() && !boundWorker {
 				key = "system.coding.direct"
 			}
 			base += "\n" + r.Prompts.Text(key)
 		}
+		base += "\n" + r.Prompts.Text("system.coding.knowledge")
 		check := r.CheckCommand
 		if r.Assigned != nil {
 			check = r.Assigned.ConfiguredCommand
@@ -216,8 +225,8 @@ func (r *Runner) basePrompt() string {
 }
 
 // Claim readmission still belongs to this request boundary. Preparation
-// exchanges and their reasoning remain exact until model-written compaction;
-// deterministic pruning may replace only eligible consumed output bodies.
+// exchanges and their reasoning remain exact. After successful readmission,
+// only tagged standalone host preparation publications have become obsolete.
 func (r *Runner) archiveClaimPreparation(ctx context.Context) error {
 	if r.claimPreparationEnd <= 0 {
 		return nil
@@ -227,6 +236,33 @@ func (r *Runner) archiveClaimPreparation(ctx context.Context) error {
 	}
 	if err := r.Assigned.Admit(ctx); err != nil {
 		return err
+	}
+	candidate := r.Continuation.Clone()
+	candidate.Entries = nil
+	for _, e := range r.Continuation.Entries {
+		if !r.ownsPreparationPublication(e) {
+			candidate.Entries = append(candidate.Entries, e)
+		}
+	}
+	if len(candidate.Entries) != len(r.Continuation.Entries) {
+		candidate.Invalidate()
+		raw, err := candidate.Snapshot().Encode()
+		if err != nil {
+			return err
+		}
+		if r.Session == nil {
+			return fmt.Errorf("claimed preparation retirement needs a durable session")
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := r.Session.Append(ctx, r.SessionID, "continuation", raw); err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		r.Continuation = candidate
 	}
 	r.claimPreparationEnd = 0
 	return nil

@@ -351,7 +351,7 @@ func TestAssignedMainClaimsChecksReviewsAndRestores(t *testing.T) {
 						t.Error("actual qualification not supplied once as factual reference")
 					}
 				}
-				fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"summary\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+				fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"The owning task has a recorded qualification receipt; preserve that exact receipt and its scope.\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
 			}))
 			defer summarySrv.Close()
 			compactRunner := *r
@@ -475,14 +475,14 @@ func TestAssignedPreclaimSemanticFactsAndSelectedKnowledge(t *testing.T) {
 	cfg.Model.ToolProtocol = "structured"
 	var contexts []string
 	bindDecisionFixture(t, &cfg, func(q decision.Request) int { contexts = append(contexts, q.Context); return 0 })
-	srv := codingFixture(t, "structured", []codingCall{{"read", map[string]any{"path": "source"}}, {"graphql", map[string]any{"query": `mutation {createPlan(title:"actual unfinished",goal:"observed semantic goal"){id goal}}`}}, {"graphql", map[string]any{"query": `{__schema {types {name}}}`}}, {"graphql", map[string]any{"query": `mutation {putKnowledge(key:"working/fact",body:"supported α",filePath:"source",expectedPreviousId:""){id}}`}}})
+	srv := codingFixture(t, "structured", []codingCall{{"read", map[string]any{"path": "source"}}, {"graphql", map[string]any{"query": `mutation {createPlan(title:"actual unfinished",goal:"observed semantic goal"){id goal}}`}}, {"graphql", map[string]any{"query": `{plans {id goal}}`}}, {"graphql", map[string]any{"query": `mutation {putKnowledge(key:"working/fact",body:"supported α",filePath:"source",expectedPreviousId:""){id}}`}}})
 	cfg.Model.Server = srv.URL
 	r, _, e := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, "root")}, Cfg: cfg, Store: s, Server: srv.URL, Model: "fixture", Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: "facts", Window: 32768, MaxSteps: 8}, "investigate")
 	if e != nil {
 		t.Fatal(e)
 	}
 	_, _, e = r.Run(context.Background(), "investigate")
-	if e != nil || r.Outcome.Status != outcome.Stopped {
+	if e != nil || r.Outcome.Status != outcome.Completed || r.Continuation.Coding.Passed() || !strings.Contains(r.Evidence, "correctness/test count unverified") {
 		t.Fatalf("preclaim %+v %v", r.Outcome, e)
 	}
 	var semantic, selected, discovery, graphDigest bool
@@ -577,13 +577,15 @@ func assignedTemplates() string {
 // Real discovery/tool/session continuation; only model and decision replies are doubles.
 func TestAssignedUncertainGuidanceContinuesWithoutAsk(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		pick       int
-		confidence float64
-		guidance   bool
+		name            string
+		pick            int
+		confidence      float64
+		guidance        bool
+		failedDiscovery bool
 	}{
-		{"both failed", 3, .3, false}, {"alert failed", 4, .499, false}, {"coherent failed", 0, .3, false},
-		{"both at floor", 3, .5, true}, {"alert above floor", 4, .6, true}, {"coherent confident", 0, .99, false}, {"high alert", 4, .9, true},
+		{"both failed", 3, .3, false, true}, {"alert failed", 4, .499, false, true}, {"coherent failed", 0, .3, false, true},
+		{"both at floor", 3, .5, true, true}, {"alert above floor", 4, .6, true, true}, {"coherent confident", 0, .99, false, true}, {"high alert", 4, .9, true, true},
+		{"successful inspection suppresses bookkeeping", 0, .99, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -600,11 +602,15 @@ func TestAssignedUncertainGuidanceContinuesWithoutAsk(t *testing.T) {
 			cfg.Model.Runtime, cfg.Model.ToolProtocol = "openai", "structured"
 			cfg.Auth.Mode, cfg.Recall.TopN = config.AuthYOLO, 0
 			cfg.Templates.Path = assignedTemplates()
+			nonfinalBookkeeping := 0
 			bindDecisionFixture(t, &cfg, func(q decision.Request) int {
 				var input struct{ NormalFinal bool }
 				_ = json.Unmarshal([]byte(q.Context), &input)
 				if input.NormalFinal {
 					return 0
+				}
+				if len(q.Options) == 5 {
+					nonfinalBookkeeping++
 				}
 				return tc.pick
 			}, tc.confidence)
@@ -630,6 +636,9 @@ func TestAssignedUncertainGuidanceContinuesWithoutAsk(t *testing.T) {
 				delta := map[string]any{"content": "discovery complete"}
 				finish := "stop"
 				calls := []codingCall{{"find_file", map[string]any{"pattern": "source.go"}}, {"read", map[string]any{"path": "source.go"}}}
+				if tc.failedDiscovery {
+					calls[0] = codingCall{"read", map[string]any{"path": "genuinely-missing.go"}}
+				}
 				if n := len(wires) - 1; n < len(calls) {
 					raw, _ := json.Marshal(calls[n].args)
 					delta = map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": fmt.Sprint("observed", n), "type": "function", "function": map[string]string{"name": calls[n].name, "arguments": string(raw)}}}}
@@ -648,7 +657,7 @@ func TestAssignedUncertainGuidanceContinuesWithoutAsk(t *testing.T) {
 			asked := 0
 			r.Ask = func(context.Context, string) bool { asked++; return false }
 			_, _, err = r.Run(context.Background(), "investigate the actual source")
-			if err != nil || asked != 0 || r.Outcome.Status != outcome.Stopped {
+			if err != nil || asked != 0 || r.Outcome.Status != outcome.Completed {
 				t.Fatalf("actual outcome=%+v asks=%d error=%v", r.Outcome, asked, err)
 			}
 			for _, wire := range wires {
@@ -673,16 +682,34 @@ func TestAssignedUncertainGuidanceContinuesWithoutAsk(t *testing.T) {
 				t.Fatal(err)
 			}
 			results, logged := 0, false
+			firstKind := ""
 			for _, event := range events {
 				if event.Kind == "native_result" {
 					results++
+					if results == 1 {
+						var entry session.Entry
+						if err := json.Unmarshal([]byte(event.Text), &entry); err != nil {
+							t.Fatal(err)
+						}
+						firstKind = entry.Kind
+					}
 				}
 				if event.Kind == "judgment" && strings.Contains(event.Text, "pat-product-enforcer") && strings.Contains(event.Text, "resolution=failed-confidence") {
 					logged = true
 				}
 			}
-			if len(wires) != 3 || results != 2 || logged != (tc.confidence < .5) || r.Outcome.Status != outcome.Stopped || r.Continuation.Coding.Passed() {
+			if len(wires) != 3 || results != 2 || logged != (tc.confidence < .5) || r.Outcome.Status != outcome.Completed || r.Continuation.Coding.Passed() {
 				t.Fatalf("requests=%d actualresults=%d durableguidance=%v outcome=%+v", len(wires), results, logged, r.Outcome)
+			}
+			if tc.failedDiscovery {
+				if firstKind != "failure" || nonfinalBookkeeping == 0 {
+					t.Fatalf("actual failed discovery did not reach eligible judgment: kind=%s judgments=%d", firstKind, nonfinalBookkeeping)
+				}
+			} else if firstKind != "output" || nonfinalBookkeeping != 0 {
+				t.Fatalf("successful inspection caused bookkeeping: kind=%s judgments=%d", firstKind, nonfinalBookkeeping)
+			}
+			if !strings.Contains(r.Evidence, "correctness/test count unverified") {
+				t.Fatal("inspection completion presented as qualification")
 			}
 			observedSource := false
 			for _, message := range wires[2] {
@@ -748,12 +775,20 @@ func TestAssignedSuccessfulReadStallTruthful(t *testing.T) {
 	cfg.Model.Runtime, cfg.Model.ToolProtocol = "openai", "structured"
 	cfg.Agent.LoopRepeat, cfg.Agent.LoopStall = 0, 1
 	var trip string
+	nonfinalBookkeeping := 0
 	bindDecisionFixture(t, &cfg, func(q decision.Request) int {
 		if len(q.Options) == 3 && strings.Contains(q.Context, "cadence review") {
 			trip = q.Context
 			return 0
 		}
-		return 1 // concrete missing PAT; keep the actual request pending
+		if len(q.Options) == 5 {
+			var input struct{ NormalFinal bool }
+			_ = json.Unmarshal([]byte(q.Context), &input)
+			if !input.NormalFinal {
+				nonfinalBookkeeping++
+			}
+		}
+		return 1 // final requests missing PAT; keep the actual request pending
 	})
 	model := codingFixture(t, "structured", []codingCall{{"read", map[string]any{"path": "source"}}, {"read", map[string]any{"path": "source"}}, {"read", map[string]any{"path": "source"}}})
 	cfg.Model.Server = model.URL
@@ -796,8 +831,11 @@ func TestAssignedSuccessfulReadStallTruthful(t *testing.T) {
 		}
 		PendingRepair, ProgressBasis string
 	}
-	if json.Unmarshal([]byte(trip), &evidence) != nil || evidence.Latest.Tool != "read" || evidence.Latest.Args["path"] != "source" || evidence.Latest.OutputBytes == 0 || len(evidence.Latest.OutputSHA256) != 64 || evidence.Latest.Failed || evidence.Latest.Blocked || evidence.PendingRepair == "" || evidence.ProgressBasis == "" {
+	if json.Unmarshal([]byte(trip), &evidence) != nil || evidence.Latest.Tool != "read" || evidence.Latest.Args["path"] != "source" || evidence.Latest.OutputBytes == 0 || len(evidence.Latest.OutputSHA256) != 64 || evidence.Latest.Failed || evidence.Latest.Blocked || evidence.ProgressBasis == "" {
 		t.Fatalf("missing actual loop observation: %q", trip)
+	}
+	if nonfinalBookkeeping != 0 {
+		t.Fatalf("successful reads triggered %d unnecessary bookkeeping judgments", nonfinalBookkeeping)
 	}
 	if strings.Contains(trip, "no observed progress") || strings.Contains(trip, "no successful result") || !strings.Contains(trip, "cadence review") {
 		t.Fatalf("misleading loop input after successful reads: %q", trip)
@@ -1027,7 +1065,7 @@ func TestAssignedLoopActualFailureEvidence(t *testing.T) {
 			if kind == "graphql-summary" {
 				calls = nil
 				for i := 0; i < 6; i++ {
-					calls = append(calls, codingCall{"graphql", map[string]any{"query": `query { __type(name:"Mutation") { name } }`}})
+					calls = append(calls, codingCall{"graphql", map[string]any{"query": `query { plans { id title } }`}})
 				}
 			}
 			model := codingFixture(t, "structured", calls)
@@ -1037,8 +1075,15 @@ func TestAssignedLoopActualFailureEvidence(t *testing.T) {
 				t.Fatal(e)
 			}
 			_, _, e = rr.Run(context.Background(), "investigate")
-			if e != nil || rr.Outcome.Status != outcome.Stopped || rr.Continuation.Coding.Passed() {
+			wantStatus := outcome.Stopped
+			if kind == "missing-read" {
+				wantStatus = outcome.Completed
+			}
+			if e != nil || rr.Outcome.Status != wantStatus || rr.Continuation.Coding.Passed() {
 				t.Fatalf("outcome=%+v %v", rr.Outcome, e)
+			}
+			if kind == "missing-read" && !strings.Contains(rr.Evidence, "correctness/test count unverified") {
+				t.Fatal("failed inspection claims qualification")
 			}
 			events, e := session.Read(filepath.Join(dir, "sessions"), "loop-error")
 			if e != nil {
@@ -1067,7 +1112,7 @@ func TestAssignedLoopActualFailureEvidence(t *testing.T) {
 				t.Fatalf("loop evidence %q %v", trip, e)
 			}
 			if kind == "graphql-summary" {
-				if observed.Latest.Tool != "graphql" || observed.Latest.TextBasis != "GraphQL observation summary; response body omitted" || observed.Latest.OutputBytes == 0 || len(observed.Latest.OutputSHA256) != 64 {
+				if observed.Latest.Failed || observed.Latest.Error != "" || observed.Latest.Tool != "graphql" || observed.Latest.TextBasis != "GraphQL observation summary; response body omitted" || observed.Latest.OutputBytes == 0 || len(observed.Latest.OutputSHA256) != 64 {
 					t.Fatalf("mislabelled GraphQL provenance %+v", observed)
 				}
 
@@ -1081,14 +1126,30 @@ func TestAssignedLoopActualFailureEvidence(t *testing.T) {
 						rawBody = entry.Message.Content
 					}
 				}
-				if rawBody == "" || !strings.Contains(rawBody, "Mutation") || observed.Latest.OutputSHA256 == fmt.Sprintf("%x", sha256.Sum256([]byte(rawBody))) {
+				if rawBody == "" || !strings.Contains(rawBody, "plans") || observed.Latest.OutputSHA256 == fmt.Sprintf("%x", sha256.Sum256([]byte(rawBody))) {
 					t.Fatalf("summary hash confused with actual archived response: loop=%+v raw=%q", observed, rawBody)
 				}
 				return
 			}
 			if kind == "missing-read" {
-				if observed.Latest.Tool != "read" || observed.Latest.Error == "" {
-					t.Fatalf("missing actual error %+v", observed)
+				// A returned Go error is separate from Result.Failed. Preserve both
+				// channels and compare the actual archived failure, not OS wording.
+				if observed.Latest.Tool != "read" || observed.Latest.Failed || !strings.Contains(observed.Latest.Error, "absent") || observed.Latest.OutputBytes != 0 || observed.Latest.OutputSHA256 != fmt.Sprintf("%x", sha256.Sum256(nil)) {
+					t.Fatalf("missing actual read error identity/provenance %+v", observed)
+				}
+				exactFailure := false
+				for _, event := range events {
+					if event.Kind != "native_result" {
+						continue
+					}
+					var entry session.Entry
+					if err := json.Unmarshal([]byte(event.Text), &entry); err != nil {
+						t.Fatal(err)
+					}
+					exactFailure = exactFailure || entry.Kind == "failure" && strings.Contains(entry.Message.Content, observed.Latest.Error)
+				}
+				if !exactFailure {
+					t.Fatal("projected error absent from actual correlated failure receipt")
 				}
 			} else if observed.Latest.Tool != "bash" || !observed.Latest.Failed || observed.Latest.ExitCode == nil || *observed.Latest.ExitCode != 7 || observed.Latest.OutputBytes == 0 || len(observed.Latest.OutputSHA256) != 64 {
 				t.Fatalf("missing settled Bash receipt %+v", observed)

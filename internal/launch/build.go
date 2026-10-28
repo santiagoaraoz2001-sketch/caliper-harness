@@ -249,7 +249,7 @@ func NewBuild(d Deps, configuredCommand ...string) []tool.Definition {
 			},
 		},
 		{
-			Name: "workflow_status", WorkflowRefArg: "approach", ResolveWorkflowRef: workflowRef(d), Label: "workflow status",
+			Name: "workflow_status", Label: "workflow status",
 			Desc:    d.Prompts.Text("tools.workflow_status.description"),
 			Purpose: d.Prompts.Text("tools.workflow_status.purpose"),
 			Params: []tool.Param{
@@ -274,7 +274,10 @@ func NewBuild(d Deps, configuredCommand ...string) []tool.Definition {
 				for i, t := range tasks {
 					results[i] = resultOf(t)
 				}
-				return workflowResult(d, aid, results, nil)
+				result, err := workflowResult(d, aid, results, nil)
+				// Observation success is independent of the inspected work's state.
+				result.Failed = err != nil
+				return result, err
 			},
 		},
 		{

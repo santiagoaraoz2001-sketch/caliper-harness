@@ -16,6 +16,7 @@ import (
 	"specific-harness/internal/decision"
 	"specific-harness/internal/graph"
 	"specific-harness/internal/llm"
+	"specific-harness/internal/outcome"
 	"specific-harness/internal/plan"
 	"specific-harness/internal/session"
 	"specific-harness/internal/store"
@@ -70,10 +71,21 @@ func TestPreparationRecoveryCurrentNextWire(t *testing.T) {
 					if sequence == "normal-final combined repair" {
 						option, pick = "request both PAT and product knowledge updates", 3
 					}
-					pending = pc.Text("continuation.bookkeeping.request_prefix") + option + pc.Text("continuation.bookkeeping.authority_suffix") + pc.Text("continuation.bookkeeping.next_action") + input.Checkpoint.NextAction
+					// The compact judge packet deduplicates Preparation; transport
+					// refusal NextAction can differ from the current owning plan.
+					ownerFacts, factsErr := active.Assigned.Facts(context.Background())
+					if factsErr != nil {
+						t.Fatal(factsErr)
+					}
+					preparation := ownerFacts.(agent.BookkeepingFacts).Preparation
+					if preparation == "" {
+						t.Fatal("owning preparation unexpectedly empty")
+					}
+					pending = pc.Text("continuation.bookkeeping.request_prefix") + option + pc.Text("continuation.bookkeeping.authority_suffix") + pc.Text("continuation.bookkeeping.next_action") + preparation
 					return pick
 				})
 				n, taskID := 0, ""
+				preclaimPreparation := ""
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 					// Live Caliper discovery may GET any loopback listener; only inference belongs in this fixture.
 					if req.Method == http.MethodGet {
@@ -83,6 +95,16 @@ func TestPreparationRecoveryCurrentNextWire(t *testing.T) {
 					var body struct{ Messages []llm.Message }
 					if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 						t.Error(err)
+						return
+					}
+					// Context admission may request a summary between the claim and
+					// executor continuation. It is a different role, not the next
+					// scripted worker action. Preserve all executor assertions below.
+					if len(body.Messages) > 0 && strings.Contains(body.Messages[0].Content, "You are the summarizer") {
+						if len(body.Messages) != 2 || !strings.Contains(body.Messages[1].Content, "Legacy guidance: preserve unresolved knowledge requirement") || !strings.Contains(body.Messages[1].Content, "reference-only=true") {
+							t.Error("summary request lost protected guidance anchors")
+						}
+						fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Observed: read source.go. Failed/pending: source repair and verification remain pending. Current: use preserved task claim and guidance anchors.\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
 						return
 					}
 					for _, m := range body.Messages {
@@ -105,6 +127,17 @@ func TestPreparationRecoveryCurrentNextWire(t *testing.T) {
 					if !legacy {
 						t.Error("ambiguous legacy guidance was removed")
 					}
+					if n == 2 && sequence == "tool refusal" {
+						retained := false
+						for _, message := range body.Messages {
+							if protocol == "structured" && message.Role == "tool" && message.ToolCallID == "recovery1" || protocol == "text" && message.Role == "user" {
+								retained = retained || strings.Contains(message.Content, "checkCommand must equal configured command")
+							}
+						}
+						if !retained {
+							t.Error("actual refusal receipt was lost from model context")
+						}
+					}
 					if n >= 2 && n <= 5 {
 						if len(current) != 1 {
 							t.Errorf("request%d current preparation receipts=%d, want1", n+1, len(current))
@@ -122,17 +155,7 @@ func TestPreparationRecoveryCurrentNextWire(t *testing.T) {
 							if sequence != "coherent final fallback" && !strings.Contains(text, currentFacts.Preparation) {
 								t.Errorf("request%d stale recovery: %q", n+1, text)
 							}
-							if n == 2 && sequence == "tool refusal" {
-								retained := false
-								for _, message := range body.Messages {
-									if protocol == "structured" && message.Role == "tool" && message.ToolCallID == "recovery1" || protocol == "text" && message.Role == "user" {
-										retained = retained || strings.Contains(message.Content, "checkCommand must equal configured command")
-									}
-								}
-								if !retained {
-									t.Error("actual refusal receipt was lost from model context")
-								}
-							}
+
 							currentScope := false
 							for _, m := range body.Messages {
 								currentScope = currentScope || strings.Contains(m.Content, "Selected workflow: task ") && strings.Contains(m.Content, taskID)
@@ -155,13 +178,16 @@ func TestPreparationRecoveryCurrentNextWire(t *testing.T) {
 						}
 					}
 					if n == 6 {
-						knowledge, preparationHistory := false, false
+						knowledge, livePreparation := false, false
 						for _, e := range active.Continuation.Entries {
-							preparationHistory = preparationHistory || e.PreparationScope != ""
+							livePreparation = livePreparation || e.PreparationScope == s.Identity()+"\n"+dir
 							knowledge = knowledge || e.Kind == "guidance" && e.Round == nil && strings.Contains(e.Message.Content, "request supported product knowledge update")
 						}
-						if !preparationHistory || len(current) != 1 {
-							t.Error("claim deleted historical preparation advice")
+						if livePreparation || len(current) != 0 {
+							t.Error("successful claim retained superseded preparation advice in active context")
+						}
+						if !source {
+							t.Error("claim deleted the actual source observation")
 						}
 						if sequence == "normal-final combined repair" && !knowledge {
 							t.Error("combined normal-final request lost unresolved product knowledge")
@@ -169,6 +195,9 @@ func TestPreparationRecoveryCurrentNextWire(t *testing.T) {
 						if !strings.Contains(body.Messages[0].Content, "EXECUTE claimed task "+taskID) {
 							t.Error("current system role did not supersede historical preparation advice")
 						}
+					}
+					if n == 5 && len(current) == 1 {
+						preclaimPreparation = current[0] // Exact advice delivered before the actual task_start.
 					}
 					name, args := "read", map[string]any{"path": "source.go"}
 					if n == 1 || n == 2 {
@@ -221,6 +250,34 @@ func TestPreparationRecoveryCurrentNextWire(t *testing.T) {
 				if _, _, err = r.Run(context.Background(), "repair source"); err != nil {
 					t.Fatal(err)
 				}
+				if sequence == "coherent final fallback" {
+					plans, listErr := plan.ListPlans(s, "")
+					if n != 2 || judgments != 1 || listErr != nil || len(plans) != 0 || taskID != "" || r.Outcome.Status != outcome.Completed || r.Continuation.Assignment != nil || r.Continuation.Coding.Passed() {
+						t.Fatalf("coherent inspection invented work: requests%d judgments%d plans%+v task%s outcome%+v error%v", n, judgments, plans, taskID, r.Outcome, listErr)
+					}
+					events, readErr := session.Read(sink.dir, "recovery")
+					if readErr != nil {
+						t.Fatal(readErr)
+					}
+					restored, _, restoreErr := session.Restore(events, 32768)
+					if restoreErr != nil || restored.Validate() != nil {
+						t.Fatalf("inspection restore: %v", restoreErr)
+					}
+					source, legacy := false, false
+					for _, entry := range restored.Entries {
+						source = source || strings.Contains(entry.Message.Content, "package source")
+						legacy = legacy || entry.Message.Content == "Legacy guidance: preserve unresolved knowledge requirement"
+					}
+					for _, event := range events {
+						if event.Kind == "enforcement" && event.Text == pc.Text("continuation.no_claim_final") {
+							t.Error("coherent inspection forced fresh planning")
+						}
+					}
+					if !source || !legacy {
+						t.Fatal("inspection lost source or protected legacy guidance")
+					}
+					return
+				}
 				actual, err := plan.GetTask(s, taskID)
 				if judgments < 2 {
 					t.Error("next actual decision request was not observed")
@@ -235,6 +292,27 @@ func TestPreparationRecoveryCurrentNextWire(t *testing.T) {
 				restored, _, err := session.Restore(events, 32768)
 				if err != nil || restored.Validate() != nil {
 					t.Fatalf("durable restore: %v", err)
+				}
+				archivedPreparation := false
+				for _, event := range events {
+					if event.Kind != "continuation" {
+						continue
+					}
+					var snapshot session.Continuation
+					if err := json.Unmarshal([]byte(event.Text), &snapshot); err != nil {
+						t.Fatal(err)
+					}
+					for _, entry := range snapshot.Entries {
+						archivedPreparation = archivedPreparation || entry.PreparationScope == s.Identity()+"\n"+dir && entry.Message.Content == preclaimPreparation
+					}
+				}
+				if preclaimPreparation == "" || !archivedPreparation {
+					t.Error("exact preclaim model-visible advice was not retained in the committed archive")
+				}
+				for _, entry := range restored.Entries {
+					if entry.PreparationScope == s.Identity()+"\n"+dir {
+						t.Error("restore reactivated superseded preparation advice")
+					}
 				}
 				if sequence != "tool refusal" {
 					logged := false

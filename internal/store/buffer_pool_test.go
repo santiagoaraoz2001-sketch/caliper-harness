@@ -3,6 +3,7 @@ package store
 import (
 	"os"
 	"path/filepath"
+	"specific-harness/internal/testfs"
 	"strings"
 	"testing"
 )
@@ -16,7 +17,7 @@ func TestBufferPoolOwnerPolicy(t *testing.T) {
 	}
 	defer s.Close()
 	alias := filepath.Join(t.TempDir(), "alias")
-	if err = os.Symlink(dir, alias); err != nil {
+	if err = testfs.Symlink(dir, alias); err != nil {
 		t.Fatal(err)
 	}
 	shared, err := OpenWithBufferPool(filepath.Join(alias, "db"), 64<<20)

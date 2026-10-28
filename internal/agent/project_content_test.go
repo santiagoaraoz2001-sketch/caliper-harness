@@ -29,6 +29,13 @@ func TestFingerprintIgnoredAncestorStillObservesProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(parent, "unrelated.txt"), []byte("sibling"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	sibling, err := (&agent.Runner{Workspace: root}).WorkspaceFingerprint(context.Background())
+	if err != nil || sibling != before {
+		t.Fatalf("ancestor repository expanded project scope: %v", err)
+	}
 	info, _ := os.Stat(path)
 	if err := os.WriteFile(path, []byte("new"), 0600); err != nil {
 		t.Fatal(err)

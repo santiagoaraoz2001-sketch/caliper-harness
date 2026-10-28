@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"specific-harness/internal/pathutil"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/x/ansi"
 
 	"specific-harness/internal/config"
 	"specific-harness/internal/decision"
@@ -438,7 +438,7 @@ func (m *Model) onServeProbed(msg serveProbedMsg) {
 		}
 	}
 	if wanted := m.Serve.Focus; wanted != "" {
-		canonical, _ := filepath.EvalSymlinks(wanted)
+		canonical, _ := pathutil.EvalSymlinks(wanted)
 		var matches, active []int
 		for i, r := range msg.rows {
 			if r.IsModel && (r.Ep.Model == wanted || canonical != "" && r.Ep.Model == canonical || r.Asset != nil && r.Asset.ID == wanted) {
@@ -606,13 +606,13 @@ func (m *Model) serveUseJudge() {
 		}
 		a := r.Asset
 		if r.Recipe != nil && decision.NativeRuntime(r.Recipe.Runtime) {
-			next.Decision.Runtime = r.Recipe.Runtime
+			next.Decision = next.Decision.WithRuntime(r.Recipe.Runtime)
 		}
 		if !a.Complete || a.Format != "safetensors" || a.Runtime != next.Decision.Runtime || (a.Runtime != "laya" && a.Runtime != "system_one") {
 			m.alert("err", "select a native decision runtime in Settings, then refresh its local candidates")
 			return
 		}
-		path, err := filepath.EvalSymlinks(a.Path)
+		path, err := pathutil.EvalSymlinks(a.Path)
 		if err != nil || !filepath.IsAbs(path) || path != a.Path {
 			m.alert("err", "judge candidate path changed or unavailable — refresh inventory")
 			return
@@ -644,11 +644,12 @@ func (m *Model) serveUseJudge() {
 		next.Decision.Revision = ""
 		notice := "Native Judge selection staged · availability unconfirmed · a apply · Settings s save"
 		if r.Recipe != nil && decision.NativeRuntime(r.Recipe.Runtime) {
-			next.Decision.Runtime = r.Recipe.Runtime
+			next.Decision = next.Decision.WithRuntime(r.Recipe.Runtime)
 		}
 		if active != nil {
 			selection := active.Selection
-			next.Decision.Runtime, next.Decision.Device = selection.Runtime, active.Device
+			next.Decision = next.Decision.WithRuntime(selection.Runtime)
+			next.Decision.Device = active.Device
 			if selection.Path != nil {
 				next.Decision.Path = *selection.Path
 			}
@@ -679,22 +680,23 @@ func (m *Model) serveUseJudge() {
 		next.Decision.Path = ""
 		next.Decision.Revision = ""
 		next.Decision.Device = "auto"
-		next.Decision.Runtime = r.Health.Runtime
+		runtime := r.Health.Runtime
 		if r.Health.Kind == serve.KindOllama || r.Ep.Kind == serve.KindOllama {
-			next.Decision.Runtime = "ollama"
+			runtime = "ollama"
 		}
 		if r.Health.Kind == serve.KindRulith || r.Ep.Kind == serve.KindRulith {
-			next.Decision.Runtime = "rulith"
+			runtime = "rulith"
 		}
 		if r.Asset != nil {
-			next.Decision.Runtime = r.Asset.Runtime
+			runtime = r.Asset.Runtime
 		}
-		if next.Decision.Runtime == "" && r.Recipe != nil {
-			next.Decision.Runtime = r.Recipe.Runtime
+		if runtime == "" && r.Recipe != nil {
+			runtime = r.Recipe.Runtime
 		}
-		if next.Decision.Runtime == "" {
-			next.Decision.Runtime = "openai"
+		if runtime == "" {
+			runtime = "openai"
 		}
+		next.Decision = next.Decision.WithRuntime(runtime)
 		if next.Decision.Runtime == "mlx" && r.Asset != nil && r.Recipe != nil && r.Recipe.HasModelPlaceholder() {
 			next.Decision.Model = r.Asset.Path
 		}
@@ -846,7 +848,7 @@ func (m *Model) servingPending() bool {
 
 // servingBusy protects active worker use and one unsettled serving operation.
 func (m *Model) servingBusy() bool {
-	if m.Chat.Running || m.Wf.Busy != "" || m.compactBusy(false) || m.Serve.Loading != "" {
+	if m.Chat.Running || m.Wf.Busy != "" || m.Tests.Busy != "" || m.compactBusy(false) || m.Serve.Loading != "" {
 		m.alert("info", "worker use or serving action still unsettled")
 		return true
 	}
@@ -1136,6 +1138,10 @@ type decisionApplied struct {
 }
 
 func (m *Model) applyDecisionSelection() tea.Cmd {
+	if m.Tests.Busy != "" {
+		m.alert("info", "activate decision configuration after the test command settles")
+		return nil
+	}
 	if m.Settings.Applying {
 		m.alert("info", "decision activation still unsettled")
 		return nil
@@ -1337,19 +1343,6 @@ func (m *Model) serveEnterLabel() string {
 	return "use"
 }
 
-// shortURL drops the scheme for dense rows.
-func shortURL(raw string) string {
-	return strings.TrimPrefix(strings.TrimPrefix(raw, "https://"), "http://")
-}
-
-// serveDot is the health lamp: lit when up, hollow when down.
-func serveDot(up bool) string {
-	if up {
-		return InfoSt.Render("●")
-	}
-	return ErrSt.Render("○")
-}
-
 // serveShown lists a server's models: resident first, else known.
 func serveShown(h serve.Health) []string {
 	if len(h.Loaded) > 0 {
@@ -1358,20 +1351,27 @@ func serveShown(h serve.Health) []string {
 	return h.Available
 }
 
-// serveModelRow renders one model under its server: residency lamp,
-// guides, and the in-use marker for the worker model.
-func serveModelRow(m Model, i int, r ServeRow, inner int) string {
-	mark := "  "
-	if i == m.Serve.Sel {
-		mark = "❯ "
+// serveModelItem projects captured evidence; rendering never probes a server or launcher.
+func (m Model) serveModelItem(r ServeRow) surfaceRow {
+	saved, catalog := false, false
+	for _, v := range m.Cfg.Serve.Models {
+		saved = saved || sameServeURL(v.Server, r.Ep.URL) && v.Name == r.Ep.Model
 	}
-	branch := "├─"
-	if i+1 >= len(m.Serve.Rows) || !m.Serve.Rows[i+1].IsModel {
-		branch = "└─"
+	for _, name := range append(append([]string(nil), r.Health.Loaded...), r.Health.Available...) {
+		catalog = catalog || name == r.Ep.Model
 	}
-	state := "saved · availability/residency unknown"
-	if r.Health.Up && (r.Health.Kind == serve.KindOllama || r.Ep.Kind == serve.KindOllama) {
-		state = "available — l load"
+	state := "catalog · availability/residency unknown"
+	if saved {
+		state = "saved · availability/residency unknown"
+	}
+	if catalog && r.Health.Up {
+		state = "catalog · advertised; residency unknown"
+		if saved {
+			state = "saved · advertised; residency unknown"
+		}
+		if r.Health.Kind == serve.KindOllama || r.Ep.Kind == serve.KindOllama {
+			state += " — l load"
+		}
 	}
 	if r.Asset != nil {
 		state = "candidate — " + r.Asset.Reason
@@ -1384,10 +1384,10 @@ func serveModelRow(m Model, i int, r ServeRow, inner int) string {
 	}
 	tags := ""
 	if m.Serve.Loading == serveKeyOf(r) {
-		tags += " " + WarnSt.Render("[loading/releasing]")
+		tags += " [loading/releasing]"
 	}
 	if sameServeURL(r.Ep.URL, m.Cfg.Model.Server) && (r.Ep.Model == m.Cfg.Model.Name || r.Asset != nil && r.Asset.Path == m.Cfg.Model.Name) && m.Cfg.Model.Name != "" {
-		tags += " " + InfoSt.Render("[requested next]")
+		tags += " [requested next]"
 	}
 	display := r.Ep.Model
 	if r.Asset != nil {
@@ -1400,21 +1400,58 @@ func serveModelRow(m Model, i int, r ServeRow, inner int) string {
 		display = active.Model
 		state = "active native Judge · j select"
 	}
-	dot := Muted.Render("○")
-	tone := Muted
-	if r.Resident {
-		dot = InfoSt.Render("●")
-		tone = InfoSt
+	return surfaceRow{"model · " + display, state + tags}
+}
+
+func (m Model) serveServerItem(r ServeRow) surfaceRow {
+	state := "probing…"
+	model := r.Ep.Model
+	if r.Have {
+		state = "down"
+		if r.Health.Up {
+			state = fmt.Sprintf("up %dms", r.Health.LatencyMs)
+			if shown := serveShown(r.Health); len(shown) > 0 {
+				state += " · " + strings.Join(shown, ", ")
+			}
+			if r.Sidecar {
+				h := r.Health.Decision
+				if h == nil || !h.IsReady() {
+					state += " · not ready"
+				} else {
+					model = h.Active.Model
+					state += " · " + h.Active.Runtime + " " + h.Active.NativeDevice
+					if !h.Matches(decision.SelectionFor(m.Cfg.Decision)) {
+						state += " · requested selection pending"
+					}
+				}
+			}
+		} else if r.Health.Err != "" {
+			state += ": " + r.Health.Err
+		}
+	}
+	if r.Recipe != nil && !r.Health.Up {
+		state += " · launch recipe; executable checked on action"
+	}
+	if r.Worker {
+		state += " [Coding]"
+	}
+	if !m.Cfg.Decision.Disabled && sameServeURL(r.Ep.URL, m.Cfg.Decision.Server) {
+		state += " [Judge]"
+	}
+	if r.Ours {
+		state += " [ours]"
 	}
 	if m.Serve.Loading == serveKeyOf(r) {
-		dot = WarnSt.Render("◌")
-		tone = WarnSt.Bold(false)
+		state += " [loading/releasing]"
 	}
-	row := fmt.Sprintf("  %s%s %s %s · %s%s", mark, dot, branch, PathSt.Render(truncate(display, 30)), tone.Render(state), tags)
-	if i == m.Serve.Sel {
-		return selectionRow(row, inner)
+	if r.Have && !r.Health.Up && r.Recipe != nil && !(r.Sidecar && r.Health.Reachable) {
+		state += " [s start]"
 	}
-	return Body.Render(ansi.Truncate(row, inner, "…"))
+	kind := "runtime"
+	if r.Sidecar {
+		kind = "decision sidecar"
+	}
+	return surfaceRow{kind + " · " + r.Ep.Label + " · " + model, state + " · " + r.Ep.URL}
 }
 
 // serveHints is the full key list, wrapped to fit any frame —
@@ -1431,141 +1468,45 @@ func (m Model) serveHints(inner int) []string {
 	return out
 }
 
-// renderServe draws mission control: runtime rows, the sidecar row,
-// and always-visible wrapped hints.
-func (m Model) serveContent(w int) ([]string, int) {
+func (m Model) serveSurface(w int) surface {
 	inner := BoxInner(w)
-	var lines []string
-	selected := 0
-	lines = append(lines, Title.Render("Models & Servers"))
+	pane := surface{Title: "Models & Servers", Selected: m.Serve.Sel, Scrollable: true, Hints: m.serveHints(inner)}
 	if !decision.NativeRuntime(m.Cfg.Decision.Runtime) {
-		for _, line := range Wrap("Judge: "+m.Cfg.Decision.Model+" · "+externalDecisionNotice(m.Cfg.Decision), inner) {
-			lines = append(lines, Guidance.Render(line))
-		}
+		pane.Summary = append(pane.Summary, "Judge: "+m.Cfg.Decision.Model+" · "+externalDecisionNotice(m.Cfg.Decision))
 	}
 	if m.Serve.Loading != "" {
-		lines = append(lines, WarnSt.Render("loading/releasing — awaiting native receipt"))
+		pane.Summary = append(pane.Summary, "loading/releasing — awaiting native receipt")
 	}
 	if len(m.Serve.Rows) == 0 {
-		lines = append(lines, Muted.Render("No saved connections · n Add server"))
+		pane.Summary = append(pane.Summary, "No saved connections · n Add server")
 	}
-	section := ""
-	for i, r := range m.Serve.Rows {
-		want := "RUNTIME"
-		if r.Sidecar {
-			want = "DECISION SIDECAR"
-		}
-		if want != section {
-			section = want
-			lines = append(lines, SectionSt.Render(section))
-		}
-		if i == m.Serve.Sel {
-			selected = len(lines)
-		}
+	for _, r := range m.Serve.Rows {
+		item := m.serveServerItem(r)
 		if r.IsModel {
-			lines = append(lines, serveModelRow(m, i, r, inner))
-			continue
+			item = m.serveModelItem(r)
 		}
-		mark := "  "
-		if i == m.Serve.Sel {
-			mark = "❯ "
+		pane.Rows = append(pane.Rows, item)
+	}
+	pane.Status = []string{"selected 0/0 · no rows"}
+	if r := m.serveCur(); r != nil {
+		name := r.Ep.Model
+		if name == "" {
+			name = r.Ep.Label
 		}
-		dot := Muted.Render("○")
-		if r.Have {
-			dot = serveDot(r.Health.Up)
-		}
-		url := truncate(shortURL(r.Ep.URL), 34)
-		model := r.Ep.Model
-		if model == "" {
-			model = "—"
-		}
-		state := "probing…"
-		if r.Have {
-			if r.Health.Up {
-				state = fmt.Sprintf("up %dms", r.Health.LatencyMs)
-				if shown := serveShown(r.Health); len(shown) > 0 {
-					state += " · " + truncate(strings.Join(shown, ", "), 40)
-				}
-				if r.Sidecar {
-					h := r.Health.Decision
-					if h == nil || !h.IsReady() {
-						state += " · not ready"
-					} else {
-						model = h.Active.Model
-						state += " · " + h.Active.Runtime + " " + h.Active.NativeDevice
-						if !h.Matches(decision.SelectionFor(m.Cfg.Decision)) {
-							state += " · requested selection pending"
-						}
-					}
-				}
-			} else {
-				state = "down"
-				if r.Health.Err != "" {
-					state += ": " + truncate(r.Health.Err, 60)
-				}
-			}
-		}
-		if r.Recipe != nil && !r.Health.Up {
-			executable, err := r.Recipe.Executable()
-			if err != nil {
-				state += " · launcher unavailable: " + err.Error()
-			} else {
-				state += " · installed: " + executable
-			}
-		}
-		if r.Recipe != nil && r.Ep.Label == r.Recipe.Name {
-			state = "launch recipe; endpoint " + state
-		}
-		tags := ""
-		if r.Worker {
-			tags += " " + InfoSt.Render("[Coding]")
-		}
-		if !m.Cfg.Decision.Disabled && sameServeURL(r.Ep.URL, m.Cfg.Decision.Server) {
-			tags += " " + InfoSt.Render("[Judge]")
-		}
-		if r.Ours {
-			tags += " " + WarnSt.Render("[ours]")
-		}
-		if m.Serve.Loading == serveKeyOf(r) {
-			tags += " " + WarnSt.Render("[loading/releasing]")
-		}
-		if r.Have && !r.Health.Up && r.Recipe != nil && !(r.Sidecar && r.Health.Reachable) {
-			tags += " " + Muted.Render("[s start]")
-		}
-		row := fmt.Sprintf("%s%s %-7s %-18s %s · %s%s", mark, dot, r.Ep.Label, truncate(model, 18), state, url, tags)
-		if inner < 95 {
-			row = fmt.Sprintf("%s%s %-7s %-20s %s%s", mark, dot, r.Ep.Label, truncate(model, 20), state, tags)
-		}
-		tone := Muted
-		if r.Have {
-			if r.Health.Up {
-				tone = InfoSt
-			} else {
-				tone = ErrSt.Bold(false)
-			}
-		}
-		if strings.Contains(state, "not ready") || strings.Contains(state, "pending") {
-			tone = WarnSt.Bold(false)
-		}
-		row = strings.Replace(row, state, tone.Render(state), 1)
-		if i == m.Serve.Sel {
-			lines = append(lines, selectionRow(row, inner))
-		} else {
-			lines = append(lines, Body.Render(ansi.Truncate(row, inner, "…")))
-		}
+		pane.Status[0] = fmt.Sprintf("selected %d/%d · %s · Enter %s", m.Serve.Sel+1, len(m.Serve.Rows), name, m.serveEnterLabel())
 	}
 	if r := m.serveCur(); r != nil {
 		identity := Body.Render("Selected runtime: "+r.Ep.Label) + PathSt.Render(" · "+r.Ep.URL+" · "+r.Ep.Model)
 		if r.Health.Err != "" {
 			identity += ErrSt.Bold(false).Render(" · " + r.Health.Err)
 		}
-		lines = append(lines, identity)
+		pane.Details = append(pane.Details, identity)
 	}
 	if len(m.Serve.Installed) > 0 {
-		lines = append(lines, "Installed server launchers (not running proof): "+strings.Join(m.Serve.Installed, "; "), "Configure endpoint/launch command in serve.recipes; installation does not imply a listening URL.")
+		pane.Details = append(pane.Details, "Installed server launchers (not running proof): "+strings.Join(m.Serve.Installed, "; "), "Configure endpoint/launch command in serve.recipes; installation does not imply a listening URL.")
 	}
 	if len(m.Serve.Warnings) > 0 {
-		lines = append(lines, WarnSt.Render(fmt.Sprintf("inventory warnings (%d): %s", len(m.Serve.Warnings), strings.Join(m.Serve.Warnings, "; "))))
+		pane.Details = append(pane.Details, WarnSt.Render(fmt.Sprintf("inventory warnings (%d): %s", len(m.Serve.Warnings), strings.Join(m.Serve.Warnings, "; "))))
 	}
 	if r := m.serveCur(); r != nil && r.Asset != nil {
 		reason := r.Asset.Reason
@@ -1573,9 +1514,9 @@ func (m Model) serveContent(w int) ([]string, int) {
 			reason = "native resident/generation readiness confirmed"
 		}
 		for _, line := range Wrap(r.Asset.Path+" · "+reason, inner) {
-			lines = append(lines, Body.Render(line))
+			pane.Details = append(pane.Details, Body.Render(line))
 		}
-		lines = append(lines, "Asset identity: "+r.Asset.ID+"@"+r.Asset.Revision)
+		pane.Details = append(pane.Details, "Asset identity: "+r.Asset.ID+"@"+r.Asset.Revision)
 	}
 	if r := m.serveCur(); r != nil && r.Sidecar && r.Health.Decision != nil {
 		h := r.Health.Decision
@@ -1586,61 +1527,40 @@ func (m Model) serveContent(w int) ([]string, int) {
 				revision = *a.Revision
 			}
 			for _, l := range Wrap(fmt.Sprintf("active: %s · %s/%s · %d parameters · %s · source %s · path %s · revision %s · trust %t", a.Model, a.Runtime, a.NativeDevice, a.Parameters, a.Architecture, a.Source, a.Path, revision, a.Selection.TrustRemoteCode), inner) {
-				lines = append(lines, Body.Render(l))
+				pane.Details = append(pane.Details, Body.Render(l))
 			}
 		}
 		if h.Error != nil {
-			lines = append(lines, ErrSt.Render("last activation: "+*h.Error))
+			pane.Details = append(pane.Details, ErrSt.Render("last activation: "+*h.Error))
 		}
 		for _, l := range Wrap(fmt.Sprintf("requested: %s · %s/%s · path %s · revision %s · trust %t", m.Cfg.Decision.Model, m.Cfg.Decision.Runtime, m.Cfg.Decision.Device, m.Cfg.Decision.Path, m.Cfg.Decision.Revision, m.Cfg.Decision.TrustRemoteCode), inner) {
-			lines = append(lines, Muted.Render(l))
+			pane.Details = append(pane.Details, Muted.Render(l))
 		}
 	}
-	lines = append(lines, m.renderMemory())
+	pane.Details = append(pane.Details, m.renderMemory())
 	if m.Serve.MemErr != "" {
-		lines = append(lines, ErrSt.Bold(false).Render("Memory error: "+m.Serve.MemErr))
+		pane.Details = append(pane.Details, ErrSt.Bold(false).Render("Memory error: "+m.Serve.MemErr))
 	}
-	lines = append(lines, SectionSt.Render("SESSION"), "Session identity: "+m.St.Model+" · "+m.St.Dir+" · "+m.St.Branch+" · "+m.St.PlanTitle+" · "+strings.Join(m.St.PlanApproaches, " · "))
+	pane.Details = append(pane.Details, SectionSt.Render("SESSION"), "Session identity: "+m.St.Model+" · "+m.St.Dir+" · "+m.St.Branch+" · "+m.St.PlanTitle+" · "+strings.Join(m.St.PlanApproaches, " · "))
 	for i, tab := range m.Tabs {
-		lines = append(lines, fmt.Sprintf("Tab %d/%d (active %t): ", i+1, len(m.Tabs), i == m.Active)+tab.Title+" · "+string(tab.at.view))
+		pane.Details = append(pane.Details, fmt.Sprintf("Tab %d/%d (active %t): ", i+1, len(m.Tabs), i == m.Active)+tab.Title+" · "+string(tab.at.view))
 	}
 	for _, a := range m.Alerts {
-		lines = append(lines, "alert "+a.Kind+": "+a.Text)
+		pane.Details = append(pane.Details, "alert "+a.Kind+": "+a.Text)
 	}
-	return Wrap(strings.Join(lines, "\n"), inner), selected
+	return pane
 }
+
+func (m Model) serveContent(w int) ([]string, int) { return m.serveSurface(w).lines(BoxInner(w)) }
 
 func (m Model) servePageHeight() int { return viewHeight(m) - 3 - len(m.serveHints(BoxInner(m.Width))) }
 func (m *Model) followServe()        { _, row := m.serveContent(m.Width); m.Serve.Scroll = row }
 
-func (m Model) renderServe(w, vh int) string {
+func (m *Model) renderServe(w, vh int) string {
 	if m.Setup.Add != nil {
 		return m.renderConnection(w, vh)
 	}
-	inner := BoxInner(w)
-	lines, _ := m.serveContent(w)
-	hints := m.serveHints(inner)
-	page := vh - 3 - len(hints)
-	if page < 1 {
-		return Box("Models & Servers", ansi.Truncate("enlarge terminal to select or act", inner, "…"), w)
-	}
-	start := min(max(0, m.Serve.Scroll), max(0, len(lines)-page))
-	end := min(len(lines), start+page)
-	pinned := fmt.Sprintf("selected %d/%d · no rows", 0, len(m.Serve.Rows))
-	if r := m.serveCur(); r != nil {
-		name := r.Ep.Model
-		if name == "" {
-			name = r.Ep.Label
-		}
-		pinned = fmt.Sprintf("selected %d/%d · ", m.Serve.Sel+1, len(m.Serve.Rows)) + PathSt.Render(name) + " · Enter " + m.serveEnterLabel()
-	}
-	body := []string{ansi.Truncate(pinned, inner, "…")}
-	body = append(body, lines[start:end]...)
-	for len(body) < page+1 {
-		body = append(body, "")
-	}
-	body = append(body, hints...)
-	return Box(fmt.Sprintf("Models & Servers · %d-%d/%d", start+1, end, len(lines)), strings.Join(body, "\n"), w)
+	return m.serveSurface(w).view(w, vh, m.Serve.Scroll, false)
 }
 
 func externalDecisionNotice(cfg config.DecisionConfig) string {

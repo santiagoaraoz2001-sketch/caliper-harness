@@ -48,9 +48,9 @@ func TestEnforcementJudgeTimeoutDegradesToNoAdvice(t *testing.T) {
 	if err != nil || text != "final answer" || r.Outcome.Status == outcome.Failed {
 		t.Fatalf("enforcer timeout stopped executor: text=%q outcome=%+v err=%v", text, r.Outcome, err)
 	}
-	// Two distinct evidence packets (post-tool and final) are each judged
-	// once; the digest recorded on failure suppresses judging either again.
-	if enforcerAttempts != 2 {
+	// A successful inspection needs no per-call judgment. The final is judged
+	// once; failure is recorded and cannot turn into execution authority.
+	if enforcerAttempts != 1 {
 		t.Fatalf("unexpected enforcer attempts: %d", enforcerAttempts)
 	}
 	failures, guidance := 0, 0

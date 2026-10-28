@@ -2,11 +2,9 @@ package tui
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/x/ansi"
 
 	"specific-harness/internal/config"
 	"specific-harness/internal/hw"
@@ -23,35 +21,11 @@ type SettingField struct {
 // settingFields is the curated form: chat-time knobs, not the whole
 // YAML (serve/watch stay file-only — launch-time concerns).
 func settingFields() []SettingField {
-	return []SettingField{
-		{"model", "server", "model server", "text"},
-		{"model", "name", "model name", "text"},
-		{"model", "runtime", "model runtime", "runtime"},
-		{"model", "tool_protocol", "tool protocol", "protocol"},
-		{"coding", "check_command", "project check command (empty = recorded proposal)", "text"},
-		{"agent", "max_run_seconds", "run seconds (0 = caller budget only)", "int"},
-		{"params", "temperature", "temperature", "float"},
-		{"params", "top_k", "top_k", "int"},
-		{"params", "repetition_penalty", "repetition penalty", "float"},
-		{"params", "thinking", "thinking requested", "bool"},
-		{"params", "max_output_tokens", "output tokens including reasoning (0 = runtime policy unknown)", "int"},
-		{"auth", "mode", "auth mode", "auth"},
-		{"context", "window", "context window (0 = auto)", "int"},
-		{"decision", "disabled", "decision model disabled (readiness/risky ask you)", "bool"},
-		{"decision", "server", "decision server URL", "text"},
-		{"decision", "runtime", "decision runtime", "runtime"},
-		{"decision", "protocol", "decision protocol (empty or system_one for Ollama D1)", "text"},
-		{"decision", "path", "decision assets path (optional)", "text"},
-		{"decision", "revision", "decision revision (optional)", "text"},
-		{"decision", "trust_remote_code", "trust decision remote code", "bool"},
-		{"decision", "model", "decision model", "text"},
-		{"decision", "device", "decision device", "device"},
-		{"subagents", "mode", "subagent mode", "submode"},
-		{"subagents", "max_subagents", "max subagents (0 = auto)", "int"},
-		{"subagents", "context_window", "subagent window (0 = inherit)", "int"},
-		{"workflows", "verify_followup", "review runs", "bool"},
-		{"workflows", "max_retries", "max retries", "int"},
+	fields := make([]SettingField, len(settingBindings))
+	for i, binding := range settingBindings {
+		fields[i] = binding.field
 	}
+	return fields
 }
 
 // SettingsState is the T6.10 form: selection plus one armed edit.
@@ -75,69 +49,16 @@ func (m *Model) settingValue(f SettingField) string {
 	if m.Settings.DecisionDraft != nil {
 		c.Decision = *m.Settings.DecisionDraft
 	}
-	switch f.Section + "/" + f.Key {
-	case "model/tool_protocol":
-		if c.Model.ToolProtocol == "" {
+	value := settingRead(settingTarget(&c, f))
+	if f.Section == "model" && value == "" {
+		switch f.Key {
+		case "tool_protocol":
 			return "structured"
-		}
-		return c.Model.ToolProtocol
-	case "coding/check_command":
-		return c.Coding.CheckCommand
-	case "agent/max_run_seconds":
-		return strconv.Itoa(int(c.Agent.MaxRunSeconds))
-	case "model/runtime":
-		if c.Model.Runtime == "" {
+		case "runtime":
 			return llm.RuntimeOpenAI
 		}
-		return c.Model.Runtime
-	case "model/server":
-		return c.Model.Server
-	case "model/name":
-		return c.Model.Name
-	case "params/temperature":
-		return strconv.FormatFloat(c.Params.Temperature, 'f', -1, 64)
-	case "params/top_k":
-		return strconv.Itoa(c.Params.TopK)
-	case "params/repetition_penalty":
-		return strconv.FormatFloat(c.Params.RepetitionPenalty, 'f', -1, 64)
-	case "params/thinking":
-		return strconv.FormatBool(c.Params.Thinking)
-	case "params/max_output_tokens":
-		return strconv.Itoa(int(c.Params.MaxOutputTokens))
-	case "auth/mode":
-		return c.Auth.Mode
-	case "context/window":
-		return strconv.Itoa(c.Context.Window)
-	case "decision/disabled":
-		return strconv.FormatBool(c.Decision.Disabled)
-	case "decision/server":
-		return c.Decision.Server
-	case "decision/runtime":
-		return c.Decision.Runtime
-	case "decision/protocol":
-		return c.Decision.Protocol
-	case "decision/path":
-		return c.Decision.Path
-	case "decision/revision":
-		return c.Decision.Revision
-	case "decision/trust_remote_code":
-		return strconv.FormatBool(c.Decision.TrustRemoteCode)
-	case "decision/model":
-		return c.Decision.Model
-	case "decision/device":
-		return c.Decision.Device
-	case "subagents/mode":
-		return c.Subagents.Mode
-	case "subagents/max_subagents":
-		return strconv.Itoa(c.Subagents.MaxSubagents)
-	case "subagents/context_window":
-		return strconv.Itoa(c.Subagents.ContextWindow)
-	case "workflows/verify_followup":
-		return strconv.FormatBool(c.Workflows.VerifyFollowup)
-	case "workflows/max_retries":
-		return strconv.Itoa(c.Workflows.MaxRetries)
 	}
-	return "?"
+	return value
 }
 
 // cycleNext returns the next enum value, wrapping around.
@@ -188,104 +109,32 @@ func (m *Model) cycleField(f SettingField) {
 // applyField parses one value onto a config copy and validates the
 // whole copy: bad values refuse loud with the error named, nothing
 // written anywhere.
-func (m *Model) applyField(f SettingField, val string) {
+func (m *Model) applyField(f SettingField, val string) bool {
+	if m.Tests.Busy != "" {
+		m.alert("info", "change configuration after the test command settles")
+		return false
+	}
 	next := m.Cfg
 	if f.Section == "decision" && m.Settings.DecisionDraft != nil {
 		next.Decision = *m.Settings.DecisionDraft
 	}
-	var err error
-	setFloat := func(dst *float64) {
-		var v float64
-		v, err = strconv.ParseFloat(strings.TrimSpace(val), 64)
-		if err == nil {
-			*dst = v
-		}
-	}
-	setInt := func(dst *int) {
-		var v int
-		v, err = strconv.Atoi(strings.TrimSpace(val))
-		if err == nil {
-			*dst = v
-		}
-	}
-	switch f.Section + "/" + f.Key {
-	case "model/tool_protocol":
-		next.Model.ToolProtocol = val
-	case "coding/check_command":
-		next.Coding.CheckCommand = val
-	case "agent/max_run_seconds":
-		var value int
-		setInt(&value)
-		next.Agent.MaxRunSeconds = config.RunSeconds(value)
-	case "model/runtime":
-		next.Model.Runtime = val
-	case "model/server":
-		next.Model.Server = strings.TrimSpace(val)
-	case "model/name":
-		next.Model.Name = strings.TrimSpace(val)
-	case "params/temperature":
-		setFloat(&next.Params.Temperature)
-	case "params/top_k":
-		setInt(&next.Params.TopK)
-	case "params/repetition_penalty":
-		setFloat(&next.Params.RepetitionPenalty)
-	case "params/thinking":
-		next.Params.Thinking = val == "true"
-	case "params/max_output_tokens":
-		var value int
-		setInt(&value)
-		next.Params.MaxOutputTokens = config.OutputTokens(value)
-	case "auth/mode":
-		next.Auth.Mode = val
-	case "context/window":
-		setInt(&next.Context.Window)
-	case "decision/disabled":
-		next.Decision.Disabled = val == "true"
-	case "decision/server":
-		next.Decision.Server = strings.TrimSpace(val)
-	case "decision/runtime":
-		next.Decision.Runtime = val
-		if val != "ollama" {
-			next.Decision.Protocol = ""
-		}
-	case "decision/protocol":
-		next.Decision.Protocol = val
-	case "decision/path":
-		next.Decision.Path = strings.TrimSpace(val)
-	case "decision/revision":
-		next.Decision.Revision = strings.TrimSpace(val)
-	case "decision/trust_remote_code":
-		next.Decision.TrustRemoteCode = val == "true"
-	case "decision/model":
-		next.Decision.Model = strings.TrimSpace(val)
-	case "decision/device":
-		next.Decision.Device = val
-	case "subagents/mode":
-		next.Subagents.Mode = val
-	case "subagents/max_subagents":
-		setInt(&next.Subagents.MaxSubagents)
-	case "subagents/context_window":
-		setInt(&next.Subagents.ContextWindow)
-	case "workflows/verify_followup":
-		next.Workflows.VerifyFollowup = val == "true"
-	case "workflows/max_retries":
-		setInt(&next.Workflows.MaxRetries)
-	default:
+	if settingTarget(&next, f) == nil {
 		m.alert("err", fmt.Sprintf("unknown setting %s/%s", f.Section, f.Key))
-		return
+		return false
 	}
+	err := settingWrite(&next, f, val)
 	if err != nil {
 		m.alert("err", fmt.Sprintf("%s.%s (%s) needs a number, got %q", f.Section, f.Key, f.Label, val))
-		return
+		return false
 	}
 	if verr := next.Validate(); verr != nil {
 		m.alert("err", fmt.Sprintf("refusing %s=%q: %s", f.Label, val, verr.Error()))
-		return
+		return false
 	}
 	if f.Section == "decision" && f.Key == "disabled" {
 		if m.Chat.Running || m.modelWorkActive() || m.Settings.Applying {
 			m.alert("err", "wait for active work to settle before changing decision availability")
-			return
+			return false
 		}
 		m.Cfg.Decision.Disabled = next.Decision.Disabled
 		if m.Setup.Started {
@@ -296,18 +145,19 @@ func (m *Model) applyField(f SettingField, val string) {
 		}
 		m.Settings.DecisionNotice = "decision availability changed for future runs; selected model preserved; s saves"
 		m.alert("info", m.Settings.DecisionNotice)
-		return
+		return true
 	}
 	if f.Section == "decision" {
 		m.Settings.DecisionDraft = &next.Decision
 		m.Settings.DecisionSeq++
 		m.Settings.DecisionNotice = "staged — a applies; external native services remain pending activation"
 		m.alert("info", m.Settings.DecisionNotice)
-		return
+		return true
 	}
 	m.Cfg = next
 	m.syncDerived()
 	m.alert("info", fmt.Sprintf("%s live — s saves to file", f.Label))
+	return true
 }
 
 // syncDerived re-resolves the working fields runs read directly:
@@ -338,11 +188,12 @@ func (m *Model) armEdit(f SettingField) {
 // validation failures keep their error on screen, nothing written.
 func (m *Model) applyEdit(input string) {
 	f := m.Settings.Editing
-	m.disarmEdit()
 	if f == nil {
 		return
 	}
-	m.applyField(*f, input)
+	if m.applyField(*f, input) {
+		m.disarmEdit()
+	}
 }
 
 func (m *Model) disarmEdit() {
@@ -355,6 +206,10 @@ func (m *Model) disarmEdit() {
 // saveSettings persists the working config: config.Save validates
 // the whole file first, so a bad value refuses with nothing written.
 func (m *Model) saveSettings() {
+	if m.Tests.Busy != "" {
+		m.alert("info", "save configuration after the test command settles")
+		return
+	}
 	if m.CfgPath == "" {
 		m.alert("err", "no config file in use — relaunch with --config to persist")
 		return
@@ -430,67 +285,28 @@ func (m Model) settingsScope() string {
 	return "explicit project overrides · " + m.CfgPath
 }
 
-func (m Model) renderSettings(w, vh int) string {
-	inner := BoxInner(w)
+func (m *Model) renderSettings(w, vh int) string {
 	fields := settingFields()
-	labelWidth := settingLabelWidth(fields, inner)
 	sel := min(max(0, m.Settings.Sel), len(fields)-1)
-	if vh < 3 {
-		selected := fields[sel].Label + ": " + m.settingValue(fields[sel])
-		return strings.Join(fitRows([]string{truncate(selected, w)}, max(0, vh)), "\n")
-	}
-	hints := Wrap(m.ownedHint("↑↓ move · enter edit · ←/→ cycle · a apply decision · s save · "+m.escapeHint()), inner)
-	body := []string{Muted.Render("worker edits live; decision edits staged · a apply · s save")}
-	body = append(body, Wrap(m.settingsScope(), inner)...)
+	current := fields[sel]
+	pane := surface{Title: "Settings · " + current.Section, Selected: sel, PinDetails: true,
+		Status: []string{"worker edits live; decision selection staged · a apply · s save", "decision disabled changes future-run availability immediately", m.settingsScope()},
+		Hints:  []string{m.ownedHint("↑↓ move · enter edit · ←/→ cycle · a apply decision · s save · " + m.escapeHint())}}
 	if m.CfgPath == "" {
-		body = append(body, WarnSt.Bold(false).Render("(no file: s refuses)"))
+		pane.Status = append(pane.Status, "(no file: s refuses)")
 	}
-	body = append(body, SectionSt.Render(fields[sel].Section))
-	var rows []string
-	selectedLine := 0
-	lastSection := ""
-	for i, f := range fields {
-		if f.Section != lastSection {
-			lastSection = f.Section
-			if f.Section != fields[sel].Section {
-				rows = append(rows, SectionSt.Render(f.Section))
-			}
-		}
-		value := m.settingValue(f)
-		if m.Settings.Editing != nil && m.Settings.Editing.Key == f.Key && m.Settings.Editing.Section == f.Section {
+	for _, field := range fields {
+		value := m.settingValue(field)
+		if m.Settings.Editing != nil && *m.Settings.Editing == field {
 			value += " ◀ editing"
 		}
-		label := truncate(f.Label, labelWidth)
-		pad := max(2, labelWidth+2-ansi.StringWidth(label))
-		line := "  " + Body.Render(label) + strings.Repeat(" ", pad) + InfoSt.Render(value)
-		if i == sel {
-			selectedLine = len(rows)
-			selected := "❯ " + Body.Render(label) + strings.Repeat(" ", pad) + InfoSt.Render(value)
-			rows = append(rows, shadedRow(selected, inner, SelectedSt.Bold(false), Shade))
-		} else {
-			rows = append(rows, truncate(line, inner))
-		}
-	}
-	notes := []string{}
-	details := Wrap(fields[sel].Label+": "+m.settingValue(fields[sel]), inner)
-	for _, l := range details[:min(2, len(details))] {
-		notes = append(notes, Body.Render(l))
-	}
-	if len(details) > 2 {
-		notes = append(notes, Muted.Render("… enter edit shows the full value · esc cancels edit"))
-	}
-	for _, note := range strings.Split(llm.RequestedControlNotice(m.Cfg.Model.Runtime, run.ModelParams(m.Cfg.Params)), "; ") {
-		if fields[sel].Section == "params" && strings.HasPrefix(note, fields[sel].Key) {
-			for _, l := range Wrap(note, inner) {
-				notes = append(notes, WarnSt.Bold(false).Render(l))
-			}
-		}
+		pane.Rows = append(pane.Rows, surfaceRow{field.Label, value})
 	}
 	rule := "Working configuration · future requests · s saves"
-	if fields[sel].Section == "params" {
+	if current.Section == "params" {
 		rule = "Requested control · runtime effect shown here"
 	}
-	if fields[sel].Section == "decision" {
+	if current.Section == "decision" {
 		rule = "Decision configuration · a applies · s saves"
 		if m.Settings.DecisionDraft != nil {
 			rule = "Staged decision selection · a applies · s saves configuration"
@@ -499,39 +315,14 @@ func (m Model) renderSettings(w, vh int) string {
 			rule = "Applying decision selection · awaiting activation receipt"
 		}
 	}
-	for _, l := range Wrap(rule, inner) {
-		notes = append(notes, Guidance.Render(l))
-	}
+	pane.Details = []string{rule, current.Label + ": " + m.settingValue(current)}
 	if m.Settings.DecisionNotice != "" {
-		for _, l := range Wrap(m.Settings.DecisionNotice, inner) {
-			notes = append(notes, WarnSt.Bold(false).Render(l))
+		pane.Details = append(pane.Details, m.Settings.DecisionNotice)
+	}
+	for _, note := range strings.Split(llm.RequestedControlNotice(m.Cfg.Model.Runtime, run.ModelParams(m.Cfg.Params)), "; ") {
+		if strings.HasPrefix(note, current.Key) || vh > len(fields)+12 {
+			pane.Details = append(pane.Details, note)
 		}
 	}
-	// Unrelated runtime disclosures stay available when the entire table fits;
-	// smaller panels explain only the selection instead of consuming its space.
-	if vh-2-len(hints)-len(body) > len(rows)+len(notes)+4 {
-		for _, note := range strings.Split(llm.RequestedControlNotice(m.Cfg.Model.Runtime, run.ModelParams(m.Cfg.Params)), "; ") {
-			if fields[sel].Section == "params" && strings.HasPrefix(note, fields[sel].Key) {
-				continue
-			}
-			for _, l := range Wrap(note, inner) {
-				notes = append(notes, Guidance.Render(l))
-			}
-		}
-	}
-	notesBudget := min(len(notes), max(0, vh-2-len(hints)-len(body)-3))
-	room := max(1, vh-2-len(hints)-len(body)-notesBudget)
-	body = append(body, listWindow(rows, selectedLine, room)...)
-	body = append(body, notes[:notesBudget]...)
-	return panel("Settings · "+fields[sel].Section, body, hints, w, vh)
-}
-
-// Reserve a useful value column before expanding labels into spare cells.
-func settingLabelWidth(fields []SettingField, inner int) int {
-	longest := 0
-	for _, f := range fields {
-		longest = max(longest, ansi.StringWidth(f.Label))
-	}
-	valueWidth := min(36, max(12, inner/3))
-	return max(1, min(longest, inner-4-valueWidth))
+	return pane.view(w, vh, 0, true)
 }

@@ -7,6 +7,12 @@ const platforms = ['darwin-arm64', 'windows-amd64', 'linux-amd64', 'linux-arm64'
 const repository = 'santiagoaraoz2001-sketch/caliper-harness';
 const stable = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 function requireThat(condition, message) { if (!condition) throw new Error(message); }
+function validateSource(release, head, tagHead) {
+  requireThat(/^[a-f0-9]{40}$/.test(head), 'Checked-out source must be an exact commit');
+  requireThat(release.target_commitish === head, 'Release target differs from the checked-out build source');
+  requireThat(release.draft || tagHead === head, 'Published tag differs from the checked-out build source');
+  return {source: head, draft: release.draft, tag: release.draft ? null : tagHead};
+}
 function digest(bytes, algorithm = 'sha256', encoding = 'hex') { return crypto.createHash(algorithm).update(bytes).digest(encoding); }
 function validateRelease(tag, pkg, lock, release, readMetadata, dryRun) {
   const version = tag.startsWith('v') ? tag.slice(1) : '';
@@ -88,7 +94,10 @@ async function registryState(pkg, pack, bytes, request = fetch) {
 async function main() {
   const [command, ...args] = process.argv.slice(2);
   const pkg = JSON.parse(fs.readFileSync('scripts/npm/package.json'));
-  if (command === 'release') {
+  if (command === 'source') {
+    const [releaseFile, head, tagHead] = args;
+    console.log(JSON.stringify(validateSource(JSON.parse(fs.readFileSync(releaseFile)), head, tagHead), null, 2));
+  } else if (command === 'release') {
     const [tag, releaseFile, metadataDirectory, mode] = args;
     requireThat(mode === 'dry-run' || mode === 'publish', 'Expected dry-run or publish mode');
     const result = validateRelease(tag, pkg, JSON.parse(fs.readFileSync('scripts/npm/package-lock.json')), JSON.parse(fs.readFileSync(releaseFile)), name => fs.readFileSync(path.join(metadataDirectory, name)), mode === 'dry-run');
@@ -100,7 +109,7 @@ async function main() {
     const result = await registryState(pkg, packed[0], fs.readFileSync(file));
     if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `publish=${result.publish}\npackage_path=${file}\n`);
     console.log(JSON.stringify(result, null, 2));
-  } else throw new Error('Usage: check-npm-release.cjs release TAG RELEASE_JSON METADATA_DIR MODE | registry PACK_JSON');
+  } else throw new Error('Usage: check-npm-release.cjs source RELEASE_JSON HEAD TAG_HEAD | release TAG RELEASE_JSON METADATA_DIR MODE | registry PACK_JSON');
 }
 if (require.main === module) main().catch(error => { console.error(`npm publication check failed: ${error.message}`); process.exitCode = 1; });
-module.exports = { validateRelease, registryState, newer, platforms };
+module.exports = { validateRelease, validateSource, registryState, newer, platforms };

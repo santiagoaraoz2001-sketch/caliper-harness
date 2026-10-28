@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"specific-harness/internal/pathutil"
 	"strconv"
 	"strings"
 
@@ -25,7 +26,7 @@ import (
 )
 
 const Repository = "santiagoaraoz2001-sketch/caliper-harness"
-const Version = "0.2.1"
+const Version = "0.2.3"
 
 type Release struct{ Version, ArchiveURL, ChecksumURL, PartsURL string }
 type Selection struct {
@@ -36,6 +37,8 @@ type Selection struct {
 type Manager struct {
 	Home, Platform, API string
 	Client              *http.Client
+	Progress            func(Progress) // Synchronous, bounded notifications; callback must return promptly.
+	progress            *progressReporter
 }
 
 func Default() (Manager, error) {
@@ -164,7 +167,7 @@ func (m Manager) Selected() (*Selection, error) {
 // Legacy installed versions retain their inventoried app-local CRT. New releases
 // must carry the system-runtime helper instead; never rewrite old version files.
 func legacyWindowsRuntime(root string) bool {
-	root, err := filepath.EvalSymlinks(root)
+	root, err := pathutil.EvalSymlinks(root)
 	if err != nil {
 		return false
 	}
@@ -174,7 +177,7 @@ func legacyWindowsRuntime(root string) bool {
 	}
 	lines := "\n" + strings.TrimSuffix(strings.ReplaceAll(string(inventory), "\r\n", "\n"), "\n") + "\n"
 	for _, name := range []string{"msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll", "runtime/decision/msvcp140.dll"} {
-		file, err := filepath.EvalSymlinks(filepath.Join(root, name))
+		file, err := pathutil.EvalSymlinks(filepath.Join(root, name))
 		if err != nil || !inside(root, file) {
 			return false
 		}
@@ -297,6 +300,10 @@ func validate(root, platform string, allowLegacy ...bool) error {
 // Existing versions, including a running Windows exe/DLL,
 // are never overwritten. The temporary directory is private to this attempt.
 func (m Manager) Prepare(ctx context.Context, r Release) (*Selection, error) {
+	m.beginProgress()
+	if err := m.phase(ctx, "Preparing update"); err != nil {
+		return nil, err
+	}
 	if e := ctx.Err(); e != nil {
 		return nil, e
 	}
@@ -309,7 +316,7 @@ func (m Manager) Prepare(ctx context.Context, r Release) (*Selection, error) {
 			if e = validate(existing, m.Platform); e != nil {
 				return nil, e
 			}
-			if e = validateInventory(existing); e != nil {
+			if e = m.verify(ctx, existing); e != nil {
 				return nil, e
 			}
 			return &Selection{Version: r.Version, Platform: m.Platform, Root: existing}, nil
@@ -328,6 +335,9 @@ func (m Manager) Prepare(ctx context.Context, r Release) (*Selection, error) {
 		return nil, e
 	}
 	defer os.RemoveAll(temp)
+	if e := m.phase(ctx, "Fetching release checksum"); e != nil {
+		return nil, e
+	}
 	check, e := m.get(ctx, r.ChecksumURL)
 	if e != nil {
 		return nil, e
@@ -358,6 +368,9 @@ func (m Manager) Prepare(ctx context.Context, r Release) (*Selection, error) {
 	if closeErr != nil {
 		return nil, closeErr
 	}
+	if e := m.phase(ctx, "Verifying archive checksum"); e != nil {
+		return nil, e
+	}
 	if !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), fields[0]) {
 		return nil, fmt.Errorf("release checksum mismatch; existing installation unchanged")
 	}
@@ -370,14 +383,20 @@ func (m Manager) Prepare(ctx context.Context, r Release) (*Selection, error) {
 	if e = os.Mkdir(unpack, 0700); e != nil {
 		return nil, e
 	}
-	if e = extract(f, unpack); e != nil {
+	if e = m.phase(ctx, "Extracting update"); e != nil {
+		return nil, e
+	}
+	if e = extractContext(ctx, f, unpack); e != nil {
 		return nil, e
 	}
 	root := filepath.Join(unpack, "Caliper")
 	if e = validate(root, m.Platform); e != nil {
 		return nil, e
 	}
-	if e = validateInventory(root); e != nil {
+	if e = m.verify(ctx, root); e != nil {
+		return nil, e
+	}
+	if e = m.phase(ctx, "Storing verified update"); e != nil {
 		return nil, e
 	}
 	target := filepath.Join(m.Home, "versions", r.Version, m.Platform)
@@ -388,7 +407,7 @@ func (m Manager) Prepare(ctx context.Context, r Release) (*Selection, error) {
 		if e = validate(filepath.Join(target, "Caliper"), m.Platform); e != nil {
 			return nil, e
 		}
-		if e = validateInventory(filepath.Join(target, "Caliper")); e != nil {
+		if e = m.verify(ctx, filepath.Join(target, "Caliper")); e != nil {
 			return nil, e
 		}
 	} else if !errors.Is(e, os.ErrNotExist) {
@@ -397,6 +416,9 @@ func (m Manager) Prepare(ctx context.Context, r Release) (*Selection, error) {
 		return nil, e
 	}
 	s := &Selection{Version: r.Version, Platform: m.Platform, Root: filepath.Join(target, "Caliper")}
+	if e = m.phase(ctx, "Ready for activation"); e != nil {
+		return nil, e
+	}
 	return s, nil
 }
 
@@ -443,18 +465,28 @@ func inside(root, path string) bool {
 	return e == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && !filepath.IsAbs(rel)
 }
 func extract(input io.Reader, root string) error {
+	return extractContext(context.Background(), input, root)
+}
+
+func extractContext(ctx context.Context, input io.Reader, root string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	var e error
-	root, e = filepath.EvalSymlinks(root)
+	root, e = pathutil.EvalSymlinks(root)
 	if e != nil {
 		return e
 	}
-	gz, e := gzip.NewReader(input)
+	gz, e := gzip.NewReader(contextReader{ctx, input})
 	if e != nil {
 		return e
 	}
 	defer gz.Close()
 	tr := tar.NewReader(gz)
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		h, e := tr.Next()
 		if e == io.EOF {
 			return nil
@@ -485,7 +517,7 @@ func extract(input io.Reader, root string) error {
 			var f *os.File
 			f, e = os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, os.FileMode(h.Mode)&0777)
 			if e == nil {
-				_, e = io.Copy(f, tr)
+				_, e = io.Copy(f, contextReader{ctx, tr})
 				ce := f.Close()
 				if e == nil {
 					e = ce
@@ -499,7 +531,7 @@ func extract(input io.Reader, root string) error {
 			e = os.Symlink(h.Linkname, p)
 		case tar.TypeLink:
 			target := filepath.Join(root, filepath.FromSlash(h.Linkname))
-			resolved, err := filepath.EvalSymlinks(target)
+			resolved, err := pathutil.EvalSymlinks(target)
 			if err != nil || !inside(root, resolved) {
 				return fmt.Errorf("invalid archive hard link: %s", h.Name)
 			}
@@ -514,7 +546,10 @@ func extract(input io.Reader, root string) error {
 }
 
 func validateInventory(root string) error {
-	_, failures, e := bundle.VerifyManifest(root)
+	return validateInventoryContext(context.Background(), root, nil)
+}
+func validateInventoryContext(ctx context.Context, root string, progress func(int, int)) error {
+	_, failures, e := bundle.VerifyManifestContext(ctx, root, progress)
 	if e != nil {
 		return e
 	}
@@ -527,7 +562,7 @@ func safeParent(root, parent string) error {
 	for probe := parent; ; probe = filepath.Dir(probe) {
 		_, e := os.Lstat(probe)
 		if e == nil {
-			resolved, e := filepath.EvalSymlinks(probe)
+			resolved, e := pathutil.EvalSymlinks(probe)
 			if e != nil || !inside(root, resolved) {
 				return fmt.Errorf("archive parent escapes install: %s", parent)
 			}

@@ -70,5 +70,5 @@ func run(ctx context.Context, d Deps, args tool.Args, catalogs ...*prompts.Catal
 	if block != "" {
 		return tool.Result{Text: block}, nil
 	}
-	return tool.Result{Text: fmt.Sprintf("no memories match %q", query)}, nil
+	return tool.Result{Text: fmt.Sprintf("no matching memories available within recall budget for %q", query)}, nil
 }

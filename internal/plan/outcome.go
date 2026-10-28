@@ -109,6 +109,16 @@ func ApproachQualified(s stateStore, id string) (bool, error) {
 
 // AppendTaskComment never modifies the frozen brief or owning check/review facts.
 func AppendTaskComment(ctx context.Context, s *store.Store, id string, attempt int, source, sessionRef, text string) (*outcome.TaskComment, error) {
+	return appendTaskComment(ctx, s, id, attempt, source, sessionRef, text, false)
+}
+
+// AppendUserTaskFeedback preserves late user intent for the exact current attempt.
+// It grants no execution or delivery authority and never changes authored work.
+func AppendUserTaskFeedback(ctx context.Context, s *store.Store, id string, attempt int, sessionRef, text string, noteIDs ...string) (*outcome.TaskComment, error) {
+	return appendTaskComment(ctx, s, id, attempt, "user", sessionRef, text, true, noteIDs...)
+}
+
+func appendTaskComment(ctx context.Context, s *store.Store, id string, attempt int, source, sessionRef, text string, feedback bool, noteIDs ...string) (*outcome.TaskComment, error) {
 	if ProjectRoot(ctx) == "" || strings.TrimSpace(text) == "" || (source != "user" && source != "model-authored" && source != "api-authored") {
 		return nil, fmt.Errorf("task comment needs captured project, append-site source and nonblank text")
 	}
@@ -117,11 +127,50 @@ func AppendTaskComment(ctx context.Context, s *store.Store, id string, attempt i
 		if err := CheckProject(tx, "task", id, ProjectRoot(ctx)); err != nil {
 			return err
 		}
-		t, err := commentTask(tx, id, attempt, false)
+		var t *Task
+		var err error
+		if feedback {
+			t, err = GetTask(tx, id)
+			if err == nil && attempt == 0 && t.Attempts == 0 && t.State == TaskQueued {
+				a, parentErr := taskApproach(tx, id)
+				if parentErr != nil {
+					return parentErr
+				}
+				p, parentErr := ApproachPlan(tx, a.ID)
+				if parentErr != nil {
+					return parentErr
+				}
+				if a.State != ApproachDraft || p.State != PlanDraft && p.State != PlanActive {
+					return fmt.Errorf("draft user feedback requires an open unadmitted task brief")
+				}
+			} else if err == nil && (attempt < 1 || t.Attempts != attempt) {
+				err = fmt.Errorf("user feedback requires the exact current task attempt")
+			}
+		} else {
+			t, err = commentTask(tx, id, attempt, false)
+		}
 		if err != nil {
 			return err
 		}
-		comment = &outcome.TaskComment{ID: uuid.NewString(), TaskID: id, Attempt: attempt, Source: source, SessionRef: sessionRef, Text: text, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+		commentID := uuid.NewString()
+		if len(noteIDs) > 0 && noteIDs[0] != "" {
+			commentID = noteIDs[0]
+			existing, err := outcome.TaskComments(t.AttemptLog, attempt)
+			if err != nil {
+				return err
+			}
+			for _, prior := range existing {
+				if prior.ID == commentID {
+					if prior.TaskID != id || prior.Attempt != attempt || prior.Source != source || prior.SessionRef != sessionRef || prior.Text != text {
+						return fmt.Errorf("user note identity conflicts with owning feedback")
+					}
+					copy := prior
+					comment = &copy
+					return nil
+				}
+			}
+		}
+		comment = &outcome.TaskComment{ID: commentID, TaskID: id, Attempt: attempt, Source: source, SessionRef: sessionRef, Text: text, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 		log, err := outcome.AppendRecord(t.AttemptLog, struct {
 			Kind    string
 			Comment *outcome.TaskComment

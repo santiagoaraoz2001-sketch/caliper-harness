@@ -257,7 +257,7 @@ func viewerBody(ev watch.Event) []string {
 		return ev.After
 	}
 	if len(ev.Removed) > 0 {
-		return append([]string{"(deleted — last seen content)"}, ev.Removed...)
+		return ev.Removed
 	}
 	return []string{"(no content captured)"}
 }
@@ -271,10 +271,13 @@ func (m *Model) diffScroll(d, h int) {
 	vw.Scroll = layoutLines(viewerBody(vw.Ev), BoxInner(m.Width)).clamp(vw.Scroll+d, viewerAvail(vw.Ev, h))
 }
 
-// diffComment jumps to chat with /comment prefilled for the event.
+// diffComment retains the captured owner while composing a scoped comment.
 func (m *Model) diffComment(ev *watch.Event) {
 	if ev == nil {
 		return
+	}
+	if m.Diff.Viewer == nil {
+		m.Diff.Viewer = &DiffViewer{Ev: *ev}
 	}
 	m.commentPrefill(ev.Path)
 }
@@ -350,7 +353,10 @@ func diffMeta(ev watch.Event) string {
 	if !ev.BeforeKnown {
 		meta += " · baseline unknown"
 	} else if ev.BeforePartial || ev.Truncated {
-		meta += " · partial observed comparison"
+		meta += " · partial observed comparison; counts cover retained prefix only"
+	}
+	if ev.OutsideCapture {
+		meta += " · changed beyond retained lines"
 	}
 	if ev.ReadError != "" {
 		meta += " · read failed; last capture: " + ev.ReadError

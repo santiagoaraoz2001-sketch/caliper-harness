@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"specific-harness/internal/checkreport"
 	"specific-harness/internal/llm"
 	"specific-harness/internal/outcome"
 	"specific-harness/internal/plan"
@@ -15,26 +16,33 @@ import (
 )
 
 type attemptRecord struct {
-	Kind            string
-	Verification    outcome.Verification
-	Attempt         int
-	Outcome         outcome.Outcome
-	Output          string
-	Review          string `json:",omitempty"`
-	Error           string
-	Command         string                  `json:",omitempty"`
-	Cwd             string                  `json:",omitempty"`
-	Started, Ended  string                  `json:",omitempty"`
-	ExitCode        *int                    `json:",omitempty"`
-	Acceptance      *session.CommandReceipt `json:",omitempty"`
-	Revision        int                     `json:",omitempty"`
-	EpisodeStarted  string                  `json:"episode_started,omitempty"`
-	EpisodeEnded    string                  `json:"episode_ended,omitempty"`
-	CheckEvents     []session.Event         `json:",omitempty"`
-	Truncated       bool                    `json:",omitempty"`
-	ReviewerEvents  []session.Event         `json:",omitempty"`
-	ExecutionEvents []session.Event         `json:",omitempty"`
-	Transcript      []llm.Message
+	Report           checkreport.Contract            `json:",omitzero"`
+	RunID            string                          `json:",omitempty"`
+	Coverage         checkreport.Coverage            `json:",omitzero"`
+	Prerequisites    *checkreport.PrerequisiteReport `json:",omitempty"`
+	ExecutionSession string                          `json:",omitempty"`
+	CheckSession     string                          `json:",omitempty"`
+	ReviewerSession  string                          `json:",omitempty"`
+	Kind             string
+	Verification     outcome.Verification
+	Attempt          int
+	Outcome          outcome.Outcome
+	Output           string
+	Review           string `json:",omitempty"`
+	Error            string
+	Command          string                  `json:",omitempty"`
+	Cwd              string                  `json:",omitempty"`
+	Started, Ended   string                  `json:",omitempty"`
+	ExitCode         *int                    `json:",omitempty"`
+	Acceptance       *session.CommandReceipt `json:",omitempty"`
+	Revision         int                     `json:",omitempty"`
+	EpisodeStarted   string                  `json:"episode_started,omitempty"`
+	EpisodeEnded     string                  `json:"episode_ended,omitempty"`
+	CheckEvents      []session.Event         `json:",omitempty"`
+	Truncated        bool                    `json:",omitempty"`
+	ReviewerEvents   []session.Event         `json:",omitempty"`
+	ExecutionEvents  []session.Event         `json:",omitempty"`
+	Transcript       []llm.Message
 }
 
 func (r Result) Qualified() bool {
@@ -122,7 +130,7 @@ func countResults(rs []Result) Counts {
 		case outcome.Cancelled:
 			c.Cancelled++
 		}
-		if r.Verification == outcome.Rejected {
+		if r.Verification == outcome.Rejected && r.Outcome.Status != outcome.Failed {
 			c.Failed++
 		}
 	}

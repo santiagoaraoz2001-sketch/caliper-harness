@@ -17,6 +17,7 @@ import (
 	"specific-harness/internal/memory"
 	"specific-harness/internal/plan"
 	"specific-harness/internal/prompts"
+	"specific-harness/internal/session"
 	"specific-harness/internal/tool"
 )
 
@@ -41,6 +42,10 @@ func TestReferenceLibraryPublicStartupAndVersioning(t *testing.T) {
 		}
 		if r.Memories != "" {
 			t.Fatal("startup injected reference library")
+		}
+		c := session.Continuation{Version: 1}
+		if err := r.ProjectContext(t.Context(), &c, ""); err != nil || contextPacket(t, &c).Recall != "" {
+			t.Fatal("disabled automatic recall injected reference library", err)
 		}
 		return r.Registry
 	}
@@ -141,7 +146,7 @@ func TestReferenceLibraryPublicStartupAndVersioning(t *testing.T) {
 func TestGuidedPlanningPublicQuestionSequence(t *testing.T) {
 	f := newPlanningFixture(t)
 	entry := f.definition()
-	if len(entry.Params) != 0 || strings.TrimSpace(entry.Purpose) != "Call plan with {}; returns the first question." {
+	if len(entry.Params) != 0 || !strings.Contains(entry.Purpose, "Call plan with {} alone") || !strings.Contains(entry.Purpose, "do not combine this opening call with inspection or other tools") || !strings.Contains(entry.Purpose, "first question and its current allowed fields") {
 		t.Fatalf("entry competes with future questions: %s", entry.Schema())
 	}
 	_, example, found := strings.Cut(entry.CallTemplate(), "```json\n")

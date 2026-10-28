@@ -114,7 +114,7 @@ func TestNativeWorkflowCaptured666RepairNoEffects(t *testing.T) {
 	d, _ := reg.Lookup("workflow_block")
 	raw := `{"current":"alpha.txt does not exist","sketch":"Write 'alpha' to alpha.txt with a newline","target":"alpha.txt contains 'alpha\\n'","task":"Generate alpha.txt","tests":"python3 checks/check_alpha.py","verify":"No review required","approach":"94c3bd61-4ef1-41da-9892-ab9f62f8f155","acceptance":"alpha.txt exists and matches 'alpha\\n'"}`
 	args, q := tool.ValidateJSON(d, raw)
-	if args != nil || !strings.Contains(q, `Remove unsupported argument "approach"`) || !strings.Contains(q, "task, current, target, sketch, acceptance, tests, verify, acceptance_command, check_command") || !strings.Contains(q, d.Purpose) || len(q) >= 1024 {
+	if args != nil || !strings.Contains(q, `Remove unsupported arguments "approach"`) || !strings.Contains(q, "task, current, target, sketch, acceptance, tests, verify, acceptance_command, check_command") || !strings.Contains(q, "Current legal call:") || len(q) >= 1024 {
 		t.Errorf("unknown repair args%v q%q", args, q)
 	}
 	after, _ := plan.GetTask(s, task.ID)

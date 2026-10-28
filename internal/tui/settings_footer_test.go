@@ -89,7 +89,7 @@ func TestR13NextEscapeActualPriority(t *testing.T) {
 			t.Fatal("footer priority")
 		}
 		m = key(m, "esc")
-		if !m.serveActive() || len(m.Alerts) != 0 {
+		if !m.serveActive() || !m.alertHidden {
 			t.Fatal("alert action")
 		}
 		if !strings.Contains(ansi.Strip(m.footer()), "esc chat") {
@@ -132,7 +132,7 @@ func TestR13NextEscapeActualPriority(t *testing.T) {
 		if m.Chat.Dialog == nil || m.Chat.Dialog.Commenting || len(m.Alerts) != 1 {
 			t.Fatal("comment action")
 		}
-		if !strings.Contains(ansi.Strip(m.footer()), "esc skips questions") {
+		if !strings.Contains(ansi.Strip(m.footer()), "esc skips all questions") {
 			t.Fatal("question promise")
 		}
 		m = key(m, "esc")

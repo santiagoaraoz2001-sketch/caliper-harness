@@ -166,12 +166,27 @@ func (r *queryResolver) TaskEvidence(ctx context.Context, taskID string, offset,
 				return fmt.Errorf("selected task record does not match the supplied stored attempt/kind")
 			}
 			var sources struct {
-				ExecutionEvents *[]session.Event
-				ReviewerEvents  *[]session.Event
-				CheckEvents     *[]session.Event
+				ExecutionEvents  *[]session.Event
+				ReviewerEvents   *[]session.Event
+				CheckEvents      *[]session.Event
+				ExecutionSession string
+				ReviewerSession  string
+				CheckSession     string
 			}
 			if err := json.Unmarshal(raw, &sources); err != nil {
 				return fmt.Errorf("task %s has corrupt saved event sources: %w", taskID, err)
+			}
+			archive := map[string]string{"execution": sources.ExecutionSession, "reviewer": sources.ReviewerSession, "check": sources.CheckSession}[*phase]
+			if archive != "" {
+				reference := fmt.Sprintf("task:%s:%d:%s", taskID, index, *phase)
+				if err := collectEvidencePage(ctx, p, offset, limit, callID, reference, func(visit func(session.EvidenceGroup) error) (int, *session.EvidenceGroup, error) {
+					ownerPhase := map[string]string{"execution": "execution_pending", "reviewer": "review_pending", "check": "check_pending"}[*phase]
+					return session.VisitRoleEvidence(ctx, r.sessionsDir, archive, p.ProjectRoot, taskID, record.Attempt, ownerPhase, visit)
+				}); err != nil {
+					return err
+				}
+				budget(ctx).sessionUses = append(budget(ctx).sessionUses, struct{ dir, id string }{r.sessionsDir, archive})
+				return nil
 			}
 			events := map[string]*[]session.Event{"execution": sources.ExecutionEvents, "reviewer": sources.ReviewerEvents, "check": sources.CheckEvents}[*phase]
 			if events == nil {
@@ -273,6 +288,8 @@ func projectEvidenceRecord(ctx context.Context, out *model.EvidenceRecord, v ses
 		source = "recorded tool result; correctness unknown"
 	case "prompt", "btw":
 		source = "user-authored message"
+	case "test_start", "test_result", "test_suite_result", "test_check", "test_approval":
+		source = "host-recorded standalone Tests evidence; never Chat/PAT qualification"
 	case "workspace", "coding", "continuation", "context", "approval":
 		source = "host-recorded state"
 	}

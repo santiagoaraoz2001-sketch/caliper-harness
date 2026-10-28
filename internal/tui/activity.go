@@ -13,7 +13,7 @@ const activityUnknown = "#9AA4A8"
 type workerObservation struct{ Server, Model, State string }
 
 func (m Model) modelWorkActive() bool {
-	if m.Chat.Running || m.Chat.Compacting || m.Wf.Busy != "" {
+	if m.Chat.Running || m.Chat.Compacting || m.Wf.Busy != "" || m.Tests.Busy != "" {
 		return true
 	}
 	for i, t := range m.Tabs {
@@ -34,7 +34,7 @@ func (m Model) activityState() (label, color string) {
 		return "Waiting for you", activityAmber
 	}
 	if m.modelWorkActive() {
-		if m.Chat.Running && m.Chat.stopFlag {
+		if (m.Chat.Running && m.Chat.stopFlag) || m.Tests.Stopping {
 			return "Stopping", activityAmber
 		}
 		return "Running", activityBlue

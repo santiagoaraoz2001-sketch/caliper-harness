@@ -225,7 +225,11 @@ func chatRows(m *Model, w int) []chatRow {
 				}
 				found = true
 				set("diffhead", fmt.Sprintf("Observed #%d · %s", ev.Seq, ev.Path))
-				push("diffhead", Title.Render("Observed "+ev.Op)+" "+PathSt.Render(ev.Path)+Muted.Render(fmt.Sprintf(" (+%d −%d) · #%d", ev.AddedN, ev.RemovedN, ev.Seq)))
+				counts := fmt.Sprintf(" (+%d −%d) · #%d", ev.AddedN, ev.RemovedN, ev.Seq)
+				if ev.BeforePartial || ev.Truncated {
+					counts = fmt.Sprintf(" (retained prefix +%d −%d; total unknown) · #%d", ev.AddedN, ev.RemovedN, ev.Seq)
+				}
+				push("diffhead", Title.Render("Observed "+ev.Op)+" "+PathSt.Render(ev.Path)+Muted.Render(counts))
 				set("diffmeta", fmt.Sprintf("Observed #%d · %s", ev.Seq, ev.Path))
 				push("diffmeta", diffMeta(ev))
 				var removed, added []chatRow
@@ -278,6 +282,8 @@ func chatRows(m *Model, w int) []chatRow {
 			origin.Line, origin.Stream = -1, true
 			label := "Waiting for model…"
 			switch m.Chat.StreamActivity {
+			case "executing tool":
+				label = "Executing tool…"
 			case "active":
 				label = "Server is responding…"
 			case "thinking":

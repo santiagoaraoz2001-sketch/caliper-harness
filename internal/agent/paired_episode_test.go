@@ -50,7 +50,7 @@ func episodeRunner(t *testing.T, acceptance string) (*agent.Runner, tool.Definit
 	r := &agent.Runner{Session: sink, SessionID: "paired", Workspace: dir, CheckCommand: suite, CodingRequired: true, Continuation: session.Continuation{Coding: &c}}
 	return r, r.CheckDefinition(bash.NewAt(config.Defaults().Tools.Bash, dir)), sink, dir
 }
-func TestPairedEpisodeBehaviorFailureStopsPassingSuite(t *testing.T) {
+func TestPairedEpisodeBehaviorFailureRetainsPassingSuite(t *testing.T) {
 	r, def, sink, dir := episodeRunner(t, `printf ACTUAL=; cat behavior.txt; test "$(cat behavior.txt)" = EXPECTED`)
 	if err := os.WriteFile(filepath.Join(dir, "behavior.txt"), []byte("WRONG"), 0600); err != nil {
 		t.Fatal(err)
@@ -72,14 +72,14 @@ func TestPairedEpisodeBehaviorFailureStopsPassingSuite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, e := os.Stat(filepath.Join(dir, "suite.txt")); !os.IsNotExist(e) {
-		t.Fatalf("passing suite ran after behavioral failure: %v", e)
+	if _, e := os.Stat(filepath.Join(dir, "suite.txt")); e != nil {
+		t.Fatalf("independent suite did not run after behavioral failure: %v", e)
 	}
 	if !res.Failed || r.Continuation.Coding.Passed() {
 		t.Fatalf("behavioral failure qualified: %+v", res)
 	}
 	events, err := session.Read(sink.dir, "paired")
-	if err != nil || len(events) != 2 || !strings.Contains(events[1].Text, "ACTUAL=WRONG") || !strings.Contains(events[1].Text, `"status":"unexecuted"`) {
+	if err != nil || len(events) != 4 || !strings.Contains(events[1].Text, "ACTUAL=WRONG") || !strings.Contains(events[3].Text, `"status":"passed"`) {
 		t.Fatalf("actual failure/tail not archived: %+v %v", events, err)
 	}
 	if err := r.Continuation.Coding.Validate(); err != nil {

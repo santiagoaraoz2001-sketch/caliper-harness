@@ -9,6 +9,19 @@ const tar = require('tar');
 const { spawnSync } = require('node:child_process');
 const app = require('./install.cjs');
 const fixtureActivate = async (root, version, base) => fs.writeFileSync(path.join(base,'current.json'),JSON.stringify({root,version,platform:app.identity}));
+
+test('progress coalesces chunks and keeps exact phase boundaries', () => {
+  const events = []; let clock = 0;
+  const report = app.progressReporter(p => events.push(p), () => clock);
+  report({phase: 'Downloading update', bytes: 0});
+  for (let bytes = 1; bytes <= 1000; bytes++) report({bytes});
+  assert.equal(events.length, 1);
+  clock = 1000; report({bytes: 1001});
+  report({phase: 'Verifying archive checksum'});
+  assert.equal(events.length, 3);
+  assert.equal(events[2].bytes, 1001);
+  assert.equal(events[2].elapsedMs, 1000);
+});
 async function fixture(t, platform = app.identity) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'caliper-npm-test-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -33,6 +46,18 @@ test('whole-folder install preserves user files and explicit reinstall selects n
   fs.writeFileSync(path.join(home, 'current.json'), JSON.stringify({ version: '0.9.0' }));
   await app.install(home, async () => { throw new Error('existing version should be reused'); }, fixtureActivate);
   assert.equal(JSON.parse(fs.readFileSync(path.join(home, 'current.json'))).version, app.version);
+});
+
+test('install reports downloaded bytes and verified files without invented totals', async t => {
+  const f = await fixture(t); const events = [];
+  await app.install(path.join(f.dir, 'progress-home'), f.download, fixtureActivate, p => events.push(p));
+  const phases = events.map(p => p.phase).filter((phase, i, list) => !i || phase !== list[i - 1]);
+  assert.deepEqual(phases, ['Preparing update', 'Fetching release checksum', 'Downloading update', 'Verifying archive checksum', 'Extracting update', 'Verifying installed files', 'Activating verified update', 'Ready']);
+  assert.equal(events.find(p => p.phase === 'Verifying archive checksum').bytes, f.data.length);
+  assert.equal(events.find(p => p.phase === 'Downloading update').totalBytes, 0);
+  assert.ok(events.at(-1).files > 0);
+  assert.equal(events.at(-1).files, events.at(-1).totalFiles);
+  assert.ok(events.every((p, i) => !i || p.elapsedMs >= events[i - 1].elapsedMs));
 });
 test('checksum failure preserves old selection and leaves no completed install', async t => {
   const f = await fixture(t); const home = path.join(f.dir, 'user-data'); fs.mkdirSync(home); fs.writeFileSync(path.join(home, 'current.json'), 'prior receipt');

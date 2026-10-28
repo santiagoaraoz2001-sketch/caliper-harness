@@ -217,9 +217,13 @@ func TestStartStop(t *testing.T) {
 	if err := p.Stop(); err != nil {
 		t.Errorf("second stop: %v", err)
 	}
-	p, err = Start(Recipe{Name: "quick", Argv: []string{"true"}}, filepath.Join(dir, "serve.log"))
+	exe, err := os.Executable()
 	if err != nil {
-		t.Fatalf("start true: %v", err)
+		t.Fatal(err)
+	}
+	p, err = Start(Recipe{Name: "quick", Argv: []string{exe, "-test.run=^$"}}, filepath.Join(dir, "serve.log"))
+	if err != nil {
+		t.Fatalf("start neutral quick process: %v", err)
 	}
 	time.Sleep(200 * time.Millisecond)
 	if err := p.Stop(); err != nil {

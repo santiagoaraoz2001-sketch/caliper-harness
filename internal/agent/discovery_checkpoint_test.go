@@ -24,6 +24,7 @@ import (
 
 const discoveryContinueOption = "continue productive work"
 const discoveryActOption = "repair the latest rejected call"
+const discoveryReconsiderOption = "reconsider the unsuccessful approach"
 
 // Completed-response component double; no model inference. Tools use real files.
 type discoveryModel struct {
@@ -113,7 +114,7 @@ func TestDiscoveryCheckpointCompletedWindowAndNextRequest(t *testing.T) {
 				t.Error("judge ran before array settled", id)
 			}
 		}
-		return decision.Verdict{Option: discoveryActOption, Confidence: .9}, nil
+		return decision.Verdict{Option: discoveryReconsiderOption, Confidence: .9}, nil
 	}, sink)
 	_, _, err := r.Run(context.Background(), "original bounded user task")
 	if err != nil {
@@ -124,7 +125,7 @@ func TestDiscoveryCheckpointCompletedWindowAndNextRequest(t *testing.T) {
 	}
 	found := false
 	for _, msg := range m.seen[5] {
-		found = found || strings.Contains(msg.Content, r.Prompts.Text("continuation.discovery.act")) && msg.Role == "user"
+		found = found || strings.Contains(msg.Content, r.Prompts.Text("continuation.discovery.reconsider")) && msg.Role == "user"
 	}
 	if !found {
 		t.Fatal("action advice absent from NEXT actual model request")
@@ -318,7 +319,7 @@ func TestDiscoveryCheckpointNativeTransportGuidance(t *testing.T) {
 	defer srv.Close()
 	r := discoveryRunner(t, llm.New(srv.URL, "component").WithToolProtocol("structured"), func(context.Context, decision.Request) (decision.Verdict, error) {
 		judges++
-		return decision.Verdict{Option: discoveryActOption, Confidence: .9}, nil
+		return decision.Verdict{Option: discoveryReconsiderOption, Confidence: .9}, nil
 	}, &recordSink{})
 	_, _, err := r.Run(context.Background(), "original exact user task")
 	if err != nil {
@@ -326,7 +327,7 @@ func TestDiscoveryCheckpointNativeTransportGuidance(t *testing.T) {
 	}
 	found := false
 	for _, msg := range next {
-		found = found || msg.Role == "user" && strings.Contains(msg.Content, r.Prompts.Text("continuation.discovery.act"))
+		found = found || msg.Role == "user" && strings.Contains(msg.Content, r.Prompts.Text("continuation.discovery.reconsider"))
 	}
 	if n != 6 || judges != 1 || !found {
 		t.Fatalf("actual transport requests=%d judges=%d advice=%t", n, judges, found)
@@ -348,10 +349,10 @@ func TestDiscoveryCheckpointPreviousDeliveredAdvice(t *testing.T) {
 		if calls == 1 && packet.PreviousAdvice != "" {
 			t.Fatal("invented prior advice")
 		}
-		if calls == 2 && !strings.Contains(packet.PreviousAdvice, prompts.Builtin().Text("continuation.discovery.act")) {
+		if calls == 2 && !strings.Contains(packet.PreviousAdvice, prompts.Builtin().Text("continuation.discovery.reconsider")) {
 			t.Fatal("new successful reads erased delivered advice")
 		}
-		return decision.Verdict{Option: discoveryActOption, Confidence: .9}, nil
+		return decision.Verdict{Option: discoveryReconsiderOption, Confidence: .9}, nil
 	}, &recordSink{})
 	_, _, err := r.Run(context.Background(), "keep this same bounded task")
 	if err != nil || calls != 2 {

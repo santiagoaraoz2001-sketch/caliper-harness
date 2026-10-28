@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"specific-harness/internal/config"
 	"specific-harness/internal/decision"
+	"specific-harness/internal/pathutil"
 	"specific-harness/internal/serve"
 	"specific-harness/internal/tui/thirdparty/textarea"
 	"strings"
@@ -47,6 +48,7 @@ func (m *Model) openConnectionForm() {
 	}
 	for i := range f.Values {
 		f.Values[i] = newComposer()
+		f.Values[i].Placeholder = connectionLabels[i]
 		f.Values[i].SetHeight(1)
 		f.Values[i].SetWidth(max(1, m.Width-8))
 		f.Values[i].SetValue(values[i])
@@ -109,7 +111,7 @@ func (f *connectionForm) candidate(base config.Config) (config.Config, error) {
 		if err != nil {
 			return base, err
 		}
-		path, err = filepath.EvalSymlinks(path)
+		path, err = pathutil.EvalSymlinks(path)
 		if err != nil {
 			return base, err
 		}
@@ -287,6 +289,7 @@ func (m Model) connectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			index = (index + 1) % len(f.Catalog)
 		}
 		f.Values[3].SetValue(f.Catalog[index])
+		f.Err = ""
 		return m, nil, true
 	}
 	if msg.Type == tea.KeyTab {
@@ -402,7 +405,7 @@ func (m Model) connectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 					path := strings.TrimSpace(f.Values[4].Value())
 					if path != "" {
 						path, _ = filepath.Abs(path)
-						path, _ = filepath.EvalSymlinks(path)
+						path, _ = pathutil.EvalSymlinks(path)
 						if strings.TrimSpace(f.Values[3].Value()) == "" {
 							name = path
 						}
@@ -469,7 +472,7 @@ func (m Model) connectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		m.Setup.Serve = c.Serve
 		if m.Setup.Stage == 0 {
 			m.Setup.Model = c.Model
-			m.Setup.Pick = "added:" + c.Model.Server + ":" + c.Model.Name
+			m.Setup.Pick = setupModelKey(c.Model)
 			m.Setup.Added = append(m.Setup.Added, setupChoice{key: m.Setup.Pick, label: c.Model.Name, state: "Added connection · inference unchecked", model: c.Model})
 			m.Setup.Stage = 1
 		} else {

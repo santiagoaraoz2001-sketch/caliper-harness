@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -101,6 +102,9 @@ func TestScopedHostConfiguredCheckUsesOwningDefinition(t *testing.T) {
 			cfg.Auth.Mode = config.AuthAll
 			cfg.Recall.TopN = 0
 			cfg.Coding.CheckCommand = "printf host >> marker; pwd > checked-cwd"
+			if runtime.GOOS == "windows" {
+				cfg.Coding.CheckCommand = "printf host >> marker; pwd -W > checked-cwd"
+			}
 			if fail {
 				cfg.Coding.CheckCommand += "; exit 9"
 			}
@@ -176,7 +180,7 @@ func TestScopedHostConfiguredCheckUsesOwningDefinition(t *testing.T) {
 				wantRequests = 2 // bounded remediation request; failed check never admits review
 				want = outcome.Failed
 			}
-			if string(marker) != "host" || strings.TrimSpace(string(cwd)) != r.Workspace || approvals != 1 || requests != wantRequests || final != "PASS complete" || r.Outcome.Status != want || r.Continuation.Coding == nil || r.Continuation.Coding.Receipt.ExitCode == nil {
+			if string(marker) != "host" || filepath.Clean(strings.TrimSpace(string(cwd))) != r.Workspace || approvals != 1 || requests != wantRequests || final != "PASS complete" || r.Outcome.Status != want || r.Continuation.Coding == nil || r.Continuation.Coding.Receipt.ExitCode == nil {
 				t.Fatalf("scoped host marker=%q cwd=%q approvals=%d requests=%d final=%q outcome=%+v coding=%+v err=%v", marker, cwd, approvals, requests, final, r.Outcome, r.Continuation.Coding, runErr)
 			}
 			if !fail {
@@ -320,8 +324,8 @@ func TestScopedCreationWireExplicitFocusAndGuide(t *testing.T) {
 	if _, _, e = r.Run(context.Background(), "ONE_INTENT"); e != nil {
 		t.Fatal(e)
 	}
-	if r.Outcome.Status != outcome.Stopped {
-		t.Fatalf("preparation without a declared check qualified: %+v", r.Outcome)
+	if r.Outcome.Status != outcome.Completed || r.Continuation.Coding.Passed() || r.Continuation.Assignment != nil {
+		t.Fatalf("preparation did not finish unclaimed and unverified: %+v", r.Outcome)
 	}
 	if len(requests) != 7 || len(ids) != 3 {
 		t.Fatalf("requests%d ids%v outcome%+v", len(requests), ids, r.Outcome)

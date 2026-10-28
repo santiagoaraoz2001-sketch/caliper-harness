@@ -12,7 +12,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"specific-harness/internal/pathutil"
 	"strings"
+	"sync"
 	"time"
 
 	"specific-harness/internal/agent"
@@ -30,6 +32,7 @@ import (
 	"specific-harness/internal/tool"
 	"specific-harness/internal/tools"
 	"specific-harness/internal/tools/ask"
+	"specific-harness/internal/tools/bash"
 	"specific-harness/internal/tools/files"
 	graphTool "specific-harness/internal/tools/graph"
 	"specific-harness/internal/tools/judge"
@@ -49,24 +52,28 @@ func ModelParams(p config.ParamsConfig) llm.Params {
 // History continues a chat (nil = fresh); Btw pops interjected
 // user notes, one per step (nil = off).
 type Deps struct {
-	Tools        string // coding (default) or full exposure
-	Cfg          config.Config
-	Server       string
-	Model        string
-	MaxSteps     int
-	Window       int
-	Store        *store.Store
-	Session      agent.SessionLog
-	SessionID    string
-	AskYesNo     func(ctx context.Context, prompt string) bool
-	Ask          ask.Querier
-	In           io.Reader
-	Out          io.Writer
-	ReplyOut     io.Writer
-	OnToken      func(string)
-	History      []llm.Message
-	Continuation session.Continuation
-	Btw          func() string
+	Services         *bash.ServiceOwner
+	Tools            string // coding (default) or full exposure
+	Cfg              config.Config
+	Server           string
+	Model            string
+	MaxSteps         int
+	Window           int
+	Store            *store.Store
+	Session          agent.SessionLog
+	SessionID        string
+	AskYesNo         func(ctx context.Context, prompt string) bool
+	Ask              ask.Querier
+	In               io.Reader
+	Out              io.Writer
+	ReplyOut         io.Writer
+	OnToken          func(string)
+	OnRegistryChange func([]string)
+	History          []llm.Message
+	Continuation     session.Continuation
+	Btw              func() string
+	BtwNote          func() (session.UserNote, bool)
+	BtwAcknowledge   func(context.Context, session.UserNote) error
 }
 
 // New wires a ready Runner for prompt. Notes carry pre-prefixed
@@ -89,9 +96,24 @@ func New(d Deps, prompt string) (*agent.Runner, []string, error) {
 	if d.Tools != "" && d.Tools != "coding" && d.Tools != "full" && d.Tools != "workflow" {
 		return nil, notes, fmt.Errorf("tools must be coding, full or explicitly selected workflow")
 	}
+	if d.Continuation.ToolView != "" && d.Continuation.ToolView != "coding" && d.Continuation.ToolView != "full" && d.Continuation.ToolView != "workflow" {
+		return nil, notes, fmt.Errorf("invalid restored user tool view")
+	}
+	if d.Tools == "" {
+		d.Tools = d.Continuation.ToolView
+	}
+	if d.Tools != "" {
+		d.Continuation.ToolView = d.Tools
+	}
+	if d.Tools == "workflow" && d.Continuation.Workflow == nil {
+		return nil, notes, fmt.Errorf("explicit /workflow scope is required")
+	}
 	reg := tool.NewRegistry(pc)
 	var r *agent.Runner
 	tools.RegisterAt(reg, d.Cfg, d.In, d.Out, d.Ask, w, func() *tool.Registry { return r.Registry })
+	if d.Services != nil {
+		reg = bindServiceOwner(reg, d.Cfg, w.Path, d.Services)
+	}
 	judgeFunc := configuredJudge(d.Cfg)
 	if d.Cfg.Decision.Disabled {
 		notes = append(notes, "note: decision model disabled; progress advice and call recovery off; PAT readiness and authorize-risky non-free tools ask for your approval; summary compaction also asks for your approval.")
@@ -123,16 +145,10 @@ func New(d Deps, prompt string) (*agent.Runner, []string, error) {
 	if note != "" {
 		notes = append(notes, note)
 	}
-	ld := launchDeps(d.Cfg, d.Store, d.Server, d.Model, d.MaxSteps, d.Window, d.In, d.Out, w, behavior)
+	ld := launchDeps(d.Cfg, d.Store, d.Server, d.Model, d.MaxSteps, d.Window, d.In, d.Out, w, behavior, d.Services)
 	ld = bindLaunchAuth(d.Cfg, ld, gate, d.Session, d.SessionID)
 	ld.Log = logFn
 	ld.JudgmentContextChars = d.Cfg.Decision.JudgmentContextChars
-	// Auto-insert is auxiliary context: a failed read warns and the
-	// run continues without it (session-sweep precedent).
-	memories, recallErr := memory.QueryProject(context.Background(), d.Store, w.Path, "", prompt, d.Cfg.Recall.TopN, d.Cfg.Recall.MaxChars, d.Cfg.Recall.MinWord, pc)
-	if recallErr != nil {
-		notes = append(notes, fmt.Sprintf("warning: memory recall failed: %v", recallErr))
-	}
 	client := llm.New(d.Server, d.Model).WithPlainTimeout(time.Duration(d.Cfg.Model.PlainRequestTimeoutSeconds) * time.Second).WithRuntime(d.Cfg.Model.Runtime).WithToolProtocol(d.Cfg.Model.ToolProtocol).WithParams(ModelParams(d.Cfg.Params))
 	protocolNotice := "text compatibility; schema-first parser active"
 	if client.ToolProtocol() == "structured" {
@@ -146,14 +162,14 @@ func New(d Deps, prompt string) (*agent.Runner, []string, error) {
 	notes = append(notes, "note: "+notice)
 	r = &agent.Runner{Prompts: pc,
 		WorkspaceExcludes: workspaceExcludes(d.Cfg, d.Store),
-		Model:             client, Registry: reg, CodingRequired: true, Workspace: w.Path, CheckCommand: d.Cfg.Coding.CheckCommand,
+		Model:             client, Registry: reg, CodingRequired: true, CodingOnEffects: true, Workspace: w.Path, CheckCommand: d.Cfg.Coding.CheckCommand, CheckReport: d.Cfg.Coding.ReportContract(),
 		Exec:     gate.Wrap(agent.Direct),
 		MaxSteps: d.MaxSteps, MaxRunSeconds: int(d.Cfg.Agent.MaxRunSeconds), Out: d.ReplyOut,
 		SessionID:       d.SessionID,
 		Session:         d.Session,
 		MaxTokens:       d.Window,
 		ManualDecisions: d.Cfg.Decision.Disabled,
-		Judge:           judgeFunc, Threshold: d.Cfg.Decision.RiskThreshold,
+		Judge:           judgeFunc, JudgePreflight: configuredJudgePreflight(d.Cfg), Threshold: d.Cfg.Decision.RiskThreshold,
 		LoopRepeat: d.Cfg.Agent.LoopRepeat, LoopStall: d.Cfg.Agent.LoopStall,
 		ThinkingLoop:         ThinkingLoopPolicy(d.Cfg),
 		Ask:                  gate.Confirm,
@@ -163,19 +179,54 @@ func New(d Deps, prompt string) (*agent.Runner, []string, error) {
 		Prune:                pruneFromConfig(d.Cfg),
 		Behavior:             behavior,
 		BehaviorNote:         note,
-		Memories:             memories,
 		OnToken:              d.OnToken,
+		OnRegistryChange:     d.OnRegistryChange,
+		CheckTimeoutSeconds:  d.Cfg.Tools.Bash.MaxTimeout,
 		History:              d.History,
 		Continuation:         d.Continuation,
 		ModelKey:             d.Server + "|" + d.Model + "|" + d.Cfg.Model.Runtime + "|" + client.ToolProtocol(),
 		Btw:                  d.Btw,
+		BtwNote:              d.BtwNote,
+		BtwAcknowledge:       d.BtwAcknowledge,
 	}
 
 	r.StyleEnforcement, r.Styleguide = d.Cfg.Decision.StyleEnforcement && guide != "", guide
+	r.ProjectContext = projectContext(d.Cfg, d.Store, w.Path, client.CountTokens, &projectRecall{query: prompt, warn: func(err error) {
+		logFn("warning", fmt.Sprintf("memory recall refresh failed: %v", err))
+	}, publish: func(ctx context.Context, text string) error {
+		if r.Session != nil {
+			return r.Session.Append(ctx, r.SessionID, "recall", text)
+		}
+		return nil
+	}})
+	if r.BtwAcknowledge == nil && r.Session != nil {
+		r.BtwAcknowledge = func(ctx context.Context, note session.UserNote) error {
+			raw, err := json.Marshal(note)
+			if err != nil {
+				return err
+			}
+			return r.Session.Append(ctx, note.SessionID, "btw_ack", string(raw))
+		}
+	}
 	ld.ReviewGate = gate.Wrap
 	assigned := &launch.Assigned{Deps: ld, Root: w.Path, Command: d.Cfg.Coding.CheckCommand}
 	r.TaskComments = assigned.Comments
 	r.CommentAppend = func(ctx context.Context, text string) error { return assigned.AppendComment(ctx, text, r.SessionID) }
+	r.CommentAppendNote = func(ctx context.Context, note session.UserNote) error {
+		return assigned.AppendComment(ctx, note.Text, note.SessionID, note.ID)
+	}
+	assigned.Deps.ConfigureReviewer = func(review *agent.Runner) {
+		// The main runner is synchronously settling this exact claim. Sharing
+		// its queue here transfers the boundary consumer; fan-out workers never
+		// receive this callback and cannot steal another task's comments.
+		review.Btw = r.Btw
+		review.BtwNote = r.BtwNote
+		review.BtwAcknowledge = r.BtwAcknowledge
+		review.GenerationInterrupt = r.GenerationInterrupt
+		review.UserCommentPending = r.UserCommentPending
+		review.CommentAppend = r.CommentAppend
+		review.CommentAppendNote = r.CommentAppendNote
+	}
 	r.CommentReceipt = func(ctx context.Context, comment outcome.TaskComment) error {
 		if r.Session == nil {
 			return fmt.Errorf("task comment delivery needs a durable sink")
@@ -280,9 +331,6 @@ func New(d Deps, prompt string) (*agent.Runner, []string, error) {
 			return r.ProjectPhaseRegistry(view), nil
 		})
 	}
-	if d.Tools == "workflow" && d.Continuation.Workflow == nil {
-		return nil, notes, fmt.Errorf("explicit /workflow scope is required")
-	}
 	var viewErr error
 	r.Registry, _, viewErr = r.WorkflowView(d.Continuation.Workflow)
 	if viewErr != nil {
@@ -290,11 +338,11 @@ func New(d Deps, prompt string) (*agent.Runner, []string, error) {
 	}
 
 	view := d.Tools
-	if d.Continuation.Workflow != nil {
-		view = "workflow (selected node)"
-	}
 	if view == "" {
 		view = "coding plus project PAT/knowledge"
+	}
+	if d.Continuation.Workflow != nil {
+		view += " (selected workflow node)"
 	}
 	notes[len(notes)-1] += "; tools: " + view
 	return r, notes, nil
@@ -303,7 +351,7 @@ func New(d Deps, prompt string) (*agent.Runner, []string, error) {
 // registerOwning reuses the parent definitions for execution and list admission.
 func registerOwning(reg *tool.Registry, cfg config.Config, ld launch.Deps, judgeFunc auth.Judge, s *store.Store, logFn func(string, string), r *agent.Runner) error {
 	api := graph.NewWithReady(s, "v1", cfg.Sessions.Path, func(ctx context.Context, id string) (*plan.Approach, error) { return launch.Ready(ctx, ld, id) })
-	api = api.WithContractApproval(ld.ApproveContract)
+	api = api.WithContractApproval(ld.ApproveContract).WithDomainTokenCounter(modelTokenCounter(r.Model))
 	if r.Assigned != nil {
 		api = api.WithLifecycle(func(ctx context.Context, kind, id, to string) error {
 			if kind == "task" && (to == plan.TaskRunning || to == plan.TaskDone) {
@@ -371,7 +419,7 @@ func registerOwning(reg *tool.Registry, cfg config.Config, ld launch.Deps, judge
 				if !filepath.IsAbs(path) {
 					path = filepath.Join(ld.Workspace, path)
 				}
-				parent, err := filepath.EvalSymlinks(filepath.Dir(path))
+				parent, err := pathutil.EvalSymlinks(filepath.Dir(path))
 				if err == nil {
 					relative, err := filepath.Rel(ld.Workspace, filepath.Join(parent, filepath.Base(path)))
 					if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
@@ -619,7 +667,7 @@ func LaunchDeps(cfg config.Config, s *store.Store, server, model string, maxStep
 	d = bindLaunchAuth(cfg, d, gate, nil, "")
 	reg := tool.NewRegistry(pc)
 	tools.RegisterAt(reg, cfg, in, out, nil, w)
-	if err := registerOwning(reg, cfg, d, d.Judge, s, nil, &agent.Runner{Prompts: pc, CheckCommand: cfg.Coding.CheckCommand}); err != nil {
+	if err := registerOwning(reg, cfg, d, d.Judge, s, nil, &agent.Runner{Prompts: pc, CheckCommand: cfg.Coding.CheckCommand, CheckReport: cfg.Coding.ReportContract()}); err != nil {
 		return launch.Deps{Prompts: cfg.PromptCatalog}, err
 	}
 	if err := auth.ValidateRegistry(cfg.Auth, reg); err != nil {
@@ -627,8 +675,24 @@ func LaunchDeps(cfg config.Config, s *store.Store, server, model string, maxStep
 	}
 	return d, nil
 }
-func launchDeps(cfg config.Config, s *store.Store, server, model string, maxSteps, window int, in io.Reader, out io.Writer, w *files.Workspace, behavior string) launch.Deps {
-	return launch.Deps{Prompts: cfg.PromptCatalog,
+func launchDeps(cfg config.Config, s *store.Store, server, model string, maxSteps, window int, in io.Reader, out io.Writer, w *files.Workspace, behavior string, services ...*bash.ServiceOwner) launch.Deps {
+	counter := llm.New(server, model).WithRuntime(cfg.Model.Runtime).CountTokens
+	return launch.Deps{Prompts: cfg.PromptCatalog, CheckReport: cfg.Coding.ReportContract(),
+		KnowledgeLimits:     cfg.Tools.GraphQL,
+		ProjectContext:      projectContext(cfg, s, w.Path, counter),
+		SessionsDir:         cfg.Sessions.Path,
+		CheckTimeoutSeconds: cfg.Tools.Bash.MaxTimeout,
+		NewKnowledge: func(sessionRef string, readOnly bool) (tool.Definition, error) {
+			if sessionRef == "" {
+				return tool.Definition{}, fmt.Errorf("child knowledge requires its actual task session")
+			}
+			fields := []string{"knowledge"}
+			if !readOnly {
+				fields = append(fields, "appendKnowledge")
+			}
+			a := graph.New(s, "v1", cfg.Sessions.Path).WithDomainTokenCounter(counter).WithAllowedFields(fields...)
+			return graphTool.New(a, cfg.Tools.GraphQL, w.Path, sessionRef, s.Identity(), cfg.PromptCatalog)
+		},
 		WorkspaceExcludes: workspaceExcludes(cfg, s),
 		Workspace:         w.Path, Store: s, Behavior: behavior,
 		NewModel: func() agent.Model {
@@ -638,6 +702,9 @@ func launchDeps(cfg config.Config, s *store.Store, server, model string, maxStep
 			sub := tool.NewRegistry(cfg.PromptCatalog)
 			var current *tool.Registry
 			tools.RegisterAt(sub, cfg, in, out, nil, w, func() *tool.Registry { return current })
+			if len(services) > 0 && services[0] != nil {
+				sub = bindServiceOwner(sub, cfg, w.Path, services[0])
+			}
 			names := sub.Names()
 			for i, name := range names {
 				if name == "find" {
@@ -645,7 +712,7 @@ func launchDeps(cfg config.Config, s *store.Store, server, model string, maxStep
 					break
 				}
 			}
-			current = sub.View(append(names, "check"))
+			current = sub.View(append(names, "check", "graphql"))
 			return current
 		},
 		MaxSteps: maxSteps, MaxRunSeconds: int(cfg.Agent.MaxRunSeconds),
@@ -654,6 +721,7 @@ func launchDeps(cfg config.Config, s *store.Store, server, model string, maxStep
 		Sub:               cfg.Subagents,
 		Wf:                cfg.Workflows,
 		Judge:             configuredJudge(cfg),
+		JudgePreflight:    configuredJudgePreflight(cfg),
 		ManualReadiness:   cfg.Decision.Disabled,
 		Threshold:         cfg.Decision.RiskThreshold,
 		In:                in,
@@ -716,6 +784,8 @@ func compactionFromConfig(cfg config.Config) agent.Compaction {
 // bindLaunchAuth shares one human gate, authority cache and durable session across
 // main/CLI/TUI dispatch and every worker/reviewer/check call in that dispatch.
 func bindLaunchAuth(cfg config.Config, d launch.Deps, gate *auth.Gate, sink agent.SessionLog, id string) launch.Deps {
+	var association sync.Once
+	var associationErr error
 	if id == "" {
 		id = session.NewID()
 	}
@@ -725,6 +795,10 @@ func bindLaunchAuth(cfg config.Config, d launch.Deps, gate *auth.Gate, sink agen
 	gate.Record = func(ctx context.Context, event auth.ApprovalEvent) error {
 		if d.Store == nil || d.Store.Identity() == "" {
 			return fmt.Errorf("approval recording needs the owning open Store")
+		}
+		association.Do(func() { associationErr = sink.Append(ctx, id, "workspace", d.Workspace) })
+		if associationErr != nil {
+			return associationErr
 		}
 		event.Store, event.Workspace, event.Session = d.Store.Identity(), d.Workspace, id
 		raw, err := json.Marshal(event)
@@ -738,6 +812,7 @@ func bindLaunchAuth(cfg config.Config, d launch.Deps, gate *auth.Gate, sink agen
 		gate.Free = append(append([]string(nil), gate.Free...), "task_start", "launch", "workflow_plan", "workflow_approach", "workflow_task", "workflow_block", "workflow_ready", "workflow_transition")
 	}
 	d.AuthMode, d.Approve, d.Ask, d.ReviewGate = cfg.Auth.Mode, gate.Confirm, gate.Confirm, gate.Wrap
+	d.ConfirmReadiness = gate.ConfirmReadiness
 	d.ApproveContract = func(ctx context.Context, kind, ref string) error {
 		return gate.ApproveContract(ctx, kind, ref, func(c context.Context) (string, string, error) {
 			return plan.ContractSnapshot(plan.WithProject(c, d.Workspace), d.Store, kind, ref)
@@ -775,6 +850,14 @@ func configuredJudge(cfg config.Config) func(context.Context, decision.Request) 
 	}
 	c := decision.New(cfg.Decision.Server, cfg.Decision.Model, cfg.Decision.Device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(decision.SelectionFor(cfg.Decision)).WithPrompts(cfg.PromptCatalog).WithInputLimit(cfg.Decision.MaxInputTokens).WithParams(ModelParams(cfg.Params))
 	return c.Judge
+}
+
+func configuredJudgePreflight(cfg config.Config) func(decision.Request) error {
+	if cfg.Decision.Disabled {
+		return nil
+	}
+	c := decision.New(cfg.Decision.Server, cfg.Decision.Model, cfg.Decision.Device, time.Duration(cfg.Decision.TimeoutSeconds)*time.Second).WithSelection(decision.SelectionFor(cfg.Decision)).WithPrompts(cfg.PromptCatalog).WithInputLimit(cfg.Decision.MaxInputTokens).WithParams(ModelParams(cfg.Params))
+	return c.Preflight
 }
 
 // Only the advisory view omits execution prose from actually qualified done tasks.

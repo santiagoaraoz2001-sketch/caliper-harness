@@ -20,4 +20,7 @@ func TestExitAndQualification(t *testing.T) {
 	if Valid(Unknown, Passed) || Valid(Stopped, Passed) || Valid("invented", Unverified) || Valid(Completed, "invented") {
 		t.Fatal("invalid facts admitted")
 	}
+	if !Valid(Failed, Rejected) || Qualified(Failed, Rejected) || Valid(Failed, Passed) || Valid(Unknown, Rejected) || Valid(Stopped, Rejected) || Valid(Cancelled, Rejected) {
+		t.Fatal("known failed verification changed completion or incomplete-outcome authority")
+	}
 }

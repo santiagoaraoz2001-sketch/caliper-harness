@@ -57,7 +57,9 @@ func Valid(status Status, verification Verification) bool {
 	default:
 		return false
 	}
-	return status == Completed || verification != Passed && verification != Rejected
+	// A worker can fail on a settled failing check. Retain both facts without
+	// treating incomplete execution or a check pass as qualified completion.
+	return status == Completed || status == Failed && verification == Rejected || verification != Passed && verification != Rejected
 }
 
 // Report identifies an invoked workflow. Only owning-state readback can mark

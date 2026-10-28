@@ -325,6 +325,10 @@ func TestCodingChecksRefuseAndInvalidateTruthfully(t *testing.T) {
 				t.Logf("actual child Bash bytes=%q error=%v parent current=%v", b, err, r.Continuation.Coding.Passed())
 			}
 			if r.Outcome.Status != want || (r.Outcome.ExitCode() == 0) != (want == outcome.Completed) {
+				t.Logf("admission estimate=%d schema=%d measured=%v basis=%d/%d", r.Continuation.Estimate(), r.Continuation.SchemaBytes, r.Continuation.Measured, r.Continuation.BasisTokens, r.Continuation.BasisChars)
+				for i, entry := range r.Continuation.Entries {
+					t.Logf("entry%d kind=%s role=%s bytes=%d", i, entry.Kind, entry.Message.Role, entry.Message.Size())
+				}
 				t.Fatalf("status %+v want%v err%v", r.Outcome, want, e)
 			}
 			if strings.Contains(scenario, "configured") && authCalls != 1 {

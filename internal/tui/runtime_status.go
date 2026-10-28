@@ -89,7 +89,7 @@ func (m *Model) fetchRuntimeMetrics() tea.Cmd {
 		return runtimeMetricsMsg{Owner: owner, Seq: seq, Metrics: totals}
 	}
 }
-func (m Model) renderRuntimeStatus(w, h int) string {
+func (m *Model) renderRuntimeStatus(w, h int) string {
 	s := m.Chat.Runtime
 	if len(m.Chat.SessionIDs) > 0 && s.Attempts == 0 {
 		s.Incomplete = true
@@ -145,5 +145,5 @@ func (m Model) renderRuntimeStatus(w, h int) string {
 	if len(seen) == 0 {
 		rows = append(rows, "Unknown · no endpoint health checked")
 	}
-	return panel("Status", Wrap(strings.Join(rows, "\n"), BoxInner(w)), []string{"Read-only · /manage Models & Servers · Esc chat"}, w, h)
+	return panel("Status", Wrap(strings.Join(rows, "\n"), BoxInner(w)), []string{m.ownedHint("Read-only · /manage Models & Servers · /chat · " + m.escapeHint())}, w, h)
 }

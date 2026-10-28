@@ -196,6 +196,7 @@ func (m *Model) onSessionsOpened(msg sessionsOpenedMsg) {
 		return
 	}
 	m.Sessions.Detail = &SessionDetail{ID: msg.id, Events: msg.events}
+	m.alert("info", "opened session "+msg.id)
 }
 
 // sessionsCur is the selected row, or nil on an empty list.
@@ -355,7 +356,7 @@ func (m Model) sessionHints(vw bool, inner int) []string {
 }
 
 // renderSessions draws the list or the open stream with its hints.
-func (m Model) renderSessions(w, vh int) string {
+func (m *Model) renderSessions(w, vh int) string {
 	inner := BoxInner(w)
 	vw := m.Sessions.Detail != nil
 	hints := m.sessionHints(vw, inner)

@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"specific-harness/internal/pathutil"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -39,7 +40,7 @@ func Capture(caps config.BashConfig, catalogs ...*prompts.Catalog) (*Workspace, 
 	if e != nil {
 		return nil, fmt.Errorf("capture workspace: %w", e)
 	}
-	p, e = filepath.EvalSymlinks(p)
+	p, e = pathutil.EvalSymlinks(p)
 	if e != nil {
 		return nil, fmt.Errorf("capture workspace: %w", e)
 	}
@@ -214,7 +215,7 @@ func (w *Workspace) readDirectory(ctx context.Context, r *os.Root, p string, a t
 			if err != nil {
 				return tool.Result{}, err
 			}
-			if !entry.IsDir() || !matched {
+			if !entry.IsDir() || pathutil.IsLinkMode(entry.Type()) || !matched {
 				continue
 			}
 		}
@@ -232,10 +233,10 @@ func (w *Workspace) readDirectory(ctx context.Context, r *os.Root, p string, a t
 		}
 		kind := "other"
 		switch {
+		case pathutil.IsLinkMode(entry.Type()):
+			kind = "symlink"
 		case entry.IsDir():
 			kind = "dir"
-		case entry.Type()&os.ModeSymlink != 0:
-			kind = "symlink"
 		case entry.Type().IsRegular():
 			kind = "file"
 		}
@@ -339,7 +340,7 @@ func (w *Workspace) filePath(p string, discovery bool) (string, string, error) {
 	if e != nil {
 		return "", "", e
 	}
-	base, e = filepath.EvalSymlinks(base)
+	base, e = pathutil.EvalSymlinks(base)
 	if e != nil {
 		return "", "", e
 	}
@@ -347,7 +348,7 @@ func (w *Workspace) filePath(p string, discovery bool) (string, string, error) {
 	if !filepath.IsAbs(p) {
 		parentPath = filepath.Join(base, parentPath)
 	}
-	parent, e := filepath.EvalSymlinks(parentPath)
+	parent, e := pathutil.EvalSymlinks(parentPath)
 	if e != nil {
 		return "", "", e
 	}
@@ -380,6 +381,9 @@ func (w *Workspace) execute(ctx context.Context, name string, a tool.Args, cover
 	defer r.Close()
 	if name == "read" || name == "find_dir" {
 		info, err := r.Lstat(p)
+		if err == nil && pathutil.IsLinkMode(info.Mode()) {
+			return tool.Result{}, fmt.Errorf("%s is a final symlink or reparse point; supply its actual path", p)
+		}
 		if err == nil && info.IsDir() {
 			if navigationRequested(a) {
 				return tool.Result{}, fmt.Errorf("definition and outline require a file, not a directory")
@@ -509,6 +513,9 @@ func (w *Workspace) execute(ctx context.Context, name string, a tool.Args, cover
 			}
 			if !observed {
 				return tool.Result{}, fmt.Errorf("lines %d-%d not returned by current read; %s", start, end, prompts.Select(w.Prompts).Format("guidance.files.unobserved_range", p, start, min(end-start+1, int64(w.Caps.MaxLines)), end))
+			}
+			if replacement != "" && end < int64(len(lines)) && !strings.HasSuffix(replacement, "\n") {
+				return tool.Result{}, fmt.Errorf("line-range replacement would join untouched line %d; end new with a line separator (LF or CRLF), or use an exact old span for an intentional join; file unchanged", end+1)
 			}
 			deleted, inserted, scope = strings.Join(lines[int(start-1):int(end)], ""), replacement, fmt.Sprintf("inclusive lines %d-%d", start, end)
 			content = strings.Join(lines[:int(start-1)], "") + replacement + strings.Join(lines[int(end):], "")

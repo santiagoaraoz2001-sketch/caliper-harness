@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"specific-harness/internal/pathutil"
 	"strings"
 	"sync"
 	"time"
@@ -55,17 +56,22 @@ var schemaStmts = []string{
 )`,
 	`CREATE REL TABLE IF NOT EXISTS HAS_APPROACH(FROM Plan TO Approach)`,
 	`CREATE REL TABLE IF NOT EXISTS HAS_TASK(FROM Approach TO Task)`,
+	`CREATE NODE TABLE IF NOT EXISTS KnowledgeTarget(id STRING, project_root STRING, key STRING, PRIMARY KEY(id))`,
+	`CREATE REL TABLE IF NOT EXISTS KNOWLEDGE_REF(FROM MemoryEntry TO KnowledgeTarget, relation STRING, section STRING, source_section STRING, label STRING)`,
 }
 
 // schemaAlters add columns to existing tables. Kuzu ALTER has no IF NOT
 // EXISTS, so each runs only when TABLE_INFO shows the column missing —
 // replays stay clean without swallowing errors.
 var schemaAlters = []struct{ table, column, ddl string }{
+	{"KNOWLEDGE_REF", "source_section", `ALTER TABLE KNOWLEDGE_REF ADD source_section STRING`},
+	{"KNOWLEDGE_REF", "label", `ALTER TABLE KNOWLEDGE_REF ADD label STRING`},
 	{"MemoryEntry", "project_root", `ALTER TABLE MemoryEntry ADD project_root STRING`},
 	{"MemoryEntry", "key", `ALTER TABLE MemoryEntry ADD key STRING`},
 	{"MemoryEntry", "previous_id", `ALTER TABLE MemoryEntry ADD previous_id STRING`},
 	{"MemoryEntry", "task_id", `ALTER TABLE MemoryEntry ADD task_id STRING`},
 	{"MemoryEntry", "file_path", `ALTER TABLE MemoryEntry ADD file_path STRING`},
+	{"MemoryEntry", "file_sha256", `ALTER TABLE MemoryEntry ADD file_sha256 STRING`},
 	{"Plan", "project_root", `ALTER TABLE Plan ADD project_root STRING`},
 	{"Task", "check_command", `ALTER TABLE Task ADD check_command STRING`},
 	{"Task", "acceptance_command", `ALTER TABLE Task ADD acceptance_command STRING`},
@@ -231,12 +237,12 @@ func canonicalPath(path string) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
 	}
-	parent, err := filepath.EvalSymlinks(filepath.Dir(path))
+	parent, err := pathutil.EvalSymlinks(filepath.Dir(path))
 	if err != nil {
 		return "", err
 	}
 	path = filepath.Join(parent, filepath.Base(path))
-	resolved, err := filepath.EvalSymlinks(path)
+	resolved, err := pathutil.EvalSymlinks(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return path, nil
 	}
@@ -357,14 +363,19 @@ func (s *Store) QueryContext(ctx context.Context, query string, params map[strin
 
 func queryRows(conn *kuzu.Connection, query string, params map[string]any) ([]map[string]any, error) {
 	res, err := run(conn, query, params)
+	if res != nil {
+		defer res.Close()
+	}
 	if err != nil {
 		return nil, err
 	}
-	defer res.Close()
 	var rows []map[string]any
 	for res.HasNext() {
 		t, err := res.Next()
 		if err != nil {
+			if t != nil {
+				t.Close()
+			}
 			return nil, err
 		}
 		m, err := t.GetAsMap()
@@ -402,21 +413,29 @@ func (s *database) writer() {
 			req.done <- err
 			continue
 		}
-		setTimeout(conn, ctx)
 		execute := func() error {
+			// Reader drainage and allocation backoff may consume the deadline.
+			// Recheck at the actual native boundary, including bare statements.
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			setTimeout(conn, ctx)
 			if req.update != nil {
 				return s.transactContext(conn, ctx, req.update)
 			}
 			return s.writeStatement(conn, req.query, req.params)
 		}
+		// Native COMMIT may auto-checkpoint. Drain existing readers before the
+		// write starts; allowing new readers while checkpoint holds native cleanup
+		// locks can otherwise starve both sides. The existing writer owns this gate.
+		s.readers.Lock()
 		err := execute()
 		var settlement *TransactionError
 		cleanupFailed := errors.As(err, &settlement) && settlement.maintenanceErr != nil
-		if !cleanupFailed && isAllocationFailure(err) && ctx.Err() == nil {
-			// Buffer-pool exhaustion can be transient (pages pinned by
-			// concurrent readers); the serialized writer retries once.
+		if !cleanupFailed && isAllocationFailure(err) && settlement != nil && settlement.RollbackConfirmed() && ctx.Err() == nil {
+			// Retry only a transaction whose rollback is confirmed. A failed
+			// commit or implicit statement may have effects and is never replayed.
 			time.Sleep(100 * time.Millisecond)
-			setTimeout(conn, ctx)
 			err = execute()
 		}
 		if errors.As(err, &settlement) && settlement.maintenanceErr != nil {
@@ -424,6 +443,7 @@ func (s *database) writer() {
 			err = errors.Join(err, unavailable)
 		}
 		conn.SetTimeout(0)
+		s.readers.Unlock()
 		req.done <- err
 	}
 }
@@ -440,10 +460,12 @@ func run(conn *kuzu.Connection, query string, params map[string]any) (*kuzu.Quer
 		return conn.Query(query)
 	}
 	stmt, err := conn.Prepare(query)
+	if stmt != nil {
+		defer stmt.Close()
+	}
 	if err != nil {
 		return nil, err
 	}
-	defer stmt.Close()
 	return conn.Execute(stmt, params)
 }
 

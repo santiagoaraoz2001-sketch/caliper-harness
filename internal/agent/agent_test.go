@@ -155,7 +155,7 @@ func TestRunPersistsEvents(t *testing.T) {
 	if final != "done: hi" {
 		t.Fatalf("final=%q", final)
 	}
-	wantKinds := []string{"prompt", "context", "context", "reply", "tool", "call_resolution", "result", "context", "reply", "done", "evidence", "continuation"}
+	wantKinds := []string{"prompt", "context", "context", "reply", "tool", "call_resolution", "result", "context", "consumed", "reply", "done", "evidence", "continuation"}
 	if len(sink.kinds) != len(wantKinds) {
 		t.Fatalf("kinds=%v", sink.kinds)
 	}

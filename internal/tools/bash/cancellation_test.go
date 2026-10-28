@@ -63,6 +63,9 @@ func TestCancellationRetainsCappedOutput(t *testing.T) {
 			if !errors.Is(err, cause) || !res.Failed || !res.Truncated || !strings.HasPrefix(res.Text, "RETAINED-") || strings.Contains(res.Text, "abcdefghijklmnopqrstuvwxyz-abcdefghijklmnopqrstuvwxyz") {
 				t.Fatalf("partial capped result lost: %+v, %v", res, err)
 			}
+			if strings.Contains(err.Error(), "(max ") != timeout {
+				t.Fatalf("timeout recovery advice must describe a deadline, not user cancellation: %v", err)
+			}
 		})
 	}
 }

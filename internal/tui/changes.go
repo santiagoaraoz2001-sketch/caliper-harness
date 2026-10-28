@@ -83,19 +83,36 @@ func (m *Model) openDiffChat(args []string) {
 	m.Files.Capture = &ev
 	m.Files.Viewer = &FileView{Title: ev.Path, Logical: append([]string(nil), viewerBody(ev)...)}
 	m.navigate(ViewFiles, ev.Path)
+	m.alert("info", m.captureNotice())
 }
 
 func (m Model) captureNotice() string {
 	if ev := m.Files.Capture; ev != nil {
 		status := "captured file"
 		if ev.Op == "delete" {
-			status = "deleted · removed-line excerpt"
+			status = fmt.Sprintf("deleted · retained %d of at least %d prior lines", len(viewerBody(*ev)), ev.RemovedN)
 		} else if ev.ReadError != "" {
 			status = "read failed; last known capture · " + ev.ReadError
 		} else if ev.Truncated {
 			status = "partial captured file"
 		}
-		return fmt.Sprintf("Observed #%d · %s · %s · /changes history", ev.Seq, ev.At.Format("15:04:05"), status)
+		return fmt.Sprintf("Observed #%d · %s · %s · /changes history", ev.Seq, ev.At.Format("2006-01-02T15:04:05Z07:00"), status)
+	}
+	if m.Files.Viewer != nil {
+		return m.Files.Viewer.Notice
+	}
+	return ""
+}
+
+// Capture identity travels with the exact quote; no lookup of current disk content.
+func (m Model) activeCaptureNotice() string {
+	if m.Tabs[m.Active].at.view == ViewFiles {
+		return m.captureNotice()
+	}
+	if (m.Tabs[m.Active].at.view == ViewDiff || m.Tabs[m.Active].at.view == ViewChanges) && m.Diff.Viewer != nil {
+		copy := m
+		copy.Files.Capture = &m.Diff.Viewer.Ev
+		return copy.captureNotice()
 	}
 	return ""
 }

@@ -170,7 +170,7 @@ func TestOutcomeCLIParentRefusalCannotBeMasked(t *testing.T) {
 			} // allow the claim, decline the actual launch
 			raw, err := cmd.CombinedOutput()
 			var exit *exec.ExitError
-			if !errors.As(err, &exit) || exit.ExitCode() != 1 || calls != 3 || !strings.Contains(string(raw), "Everything succeeded.") || !strings.Contains(string(raw), "required workflow unresolved") {
+			if !errors.As(err, &exit) || exit.ExitCode() != 1 || calls != 3 || !strings.Contains(string(raw), "Everything succeeded.") || (!strings.Contains(string(raw), "required workflow unresolved") && !strings.Contains(string(raw), "Model completion claims are unverified")) {
 				t.Fatalf("actual refused parent falsely completed: calls=%d err=%v output=%s", calls, err, raw)
 			}
 		})

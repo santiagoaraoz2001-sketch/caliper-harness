@@ -14,8 +14,10 @@ import (
 )
 
 type updateState struct {
-	busy   bool
-	cancel context.CancelFunc
+	busy     bool
+	cancel   context.CancelFunc
+	ctx      context.Context
+	progress appupdate.Progress
 }
 type updateCheckedMsg struct {
 	manager  appupdate.Manager
@@ -27,6 +29,11 @@ type updatePreparedMsg struct {
 	manager   appupdate.Manager
 	selection *appupdate.Selection
 }
+type updateProgressMsg struct {
+	ctx      context.Context
+	progress appupdate.Progress
+}
+
 type updateFinishedMsg struct {
 	version  string
 	err      error
@@ -48,7 +55,7 @@ func (m *Model) checkUpdate(explicit bool) tea.Cmd {
 		return nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	*m.Updater = updateState{busy: true, cancel: cancel}
+	*m.Updater = updateState{busy: true, cancel: cancel, ctx: ctx}
 	current := m.Version
 	timeout := time.Duration(m.Cfg.Serve.ProbeTimeoutSeconds) * time.Second
 	return func() tea.Msg {
@@ -85,7 +92,7 @@ func (m *Model) updateChecked(msg updateCheckedMsg) tea.Cmd {
 		}
 		return nil
 	}
-	if !msg.explicit && (m.Chat.Dialog != nil || m.Chat.Running || m.Wf.Busy != "") {
+	if !msg.explicit && (m.Chat.Dialog != nil || m.Chat.Running || m.Wf.Busy != "" || m.Tests.Busy != "") {
 		m.AddSysLine(fmt.Sprintf("Caliper %s is available. Use /update when ready; current work continues.", msg.release.Version))
 		return nil
 	}
@@ -97,7 +104,17 @@ func (m *Model) updateChecked(msg updateCheckedMsg) tea.Cmd {
 		m.Chat.Dialog = &Dialog{Kind: "auth", Prompt: fmt.Sprintf("Caliper %s is available. Download the complete update for your next launch? [y/N] Previous versions and your work are preserved.", msg.release.Version), Answer: answer}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	*m.Updater = updateState{busy: true, cancel: cancel}
+	*m.Updater = updateState{busy: true, cancel: cancel, ctx: ctx}
+	var prog *tea.Program
+	if m.Shared != nil {
+		prog = m.Shared.Prog
+	}
+	manager := msg.manager
+	manager.Progress = func(p appupdate.Progress) {
+		if prog != nil {
+			prog.Send(updateProgressMsg{ctx: ctx, progress: p})
+		}
+	}
 	return func() tea.Msg {
 		defer cancel()
 		select {
@@ -108,7 +125,7 @@ func (m *Model) updateChecked(msg updateCheckedMsg) tea.Cmd {
 				return updateFinishedMsg{declined: true}
 			}
 		}
-		selected, e := msg.manager.Prepare(ctx, *msg.release)
+		selected, e := manager.Prepare(ctx, *msg.release)
 		if e != nil {
 			return updateFinishedMsg{err: e}
 		}
@@ -170,4 +187,30 @@ func (m *Model) updatePrepared(msg updatePreparedMsg) tea.Cmd {
 		}
 	}
 	return m.updateFinished(updateFinishedMsg{version: msg.selection.Version, err: e})
+}
+
+// Progress is a single replaceable display row. Never append chunks to the
+// transcript, and never let a late event resurrect a completed attempt.
+func (m *Model) updateProgress(msg updateProgressMsg) {
+	if m.Updater == nil || !m.Updater.busy || m.Updater.ctx != msg.ctx {
+		return
+	}
+	m.Updater.progress = msg.progress
+}
+func (m Model) updateProgressLine() string {
+	if m.Updater == nil || !m.Updater.busy || m.Updater.progress.Phase == "" {
+		return ""
+	}
+	p := m.Updater.progress
+	line := "Update: " + p.Phase
+	if p.Phase == "Downloading update" {
+		line += fmt.Sprintf(" %.1f MiB", float64(p.Bytes)/(1<<20))
+		if p.TotalBytes > 0 {
+			line += fmt.Sprintf(" / %.1f MiB", float64(p.TotalBytes)/(1<<20))
+		}
+	}
+	if p.Phase == "Verifying installed files" && p.TotalFiles > 0 {
+		line += fmt.Sprintf(" %d/%d files", p.Files, p.TotalFiles)
+	}
+	return line + fmt.Sprintf(" (%s elapsed)", p.Elapsed.Round(time.Second))
 }

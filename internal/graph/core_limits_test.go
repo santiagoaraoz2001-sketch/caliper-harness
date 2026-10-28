@@ -138,7 +138,7 @@ func TestGraphCoreEssentialSessionReceipt(t *testing.T) {
 	defer s.Close()
 	dir := t.TempDir()
 	api := New(s, "v", dir)
-	id := strings.Repeat("<&", 60)
+	id := strings.Repeat("&", 120)
 	q := `mutation($id:ID!,$body:String!){a:addSessionEvent(sessionId:$id,kind:"event",text:$body){text} b:createPlan(title:"",goal:"bad"){id}}`
 	vars := map[string]any{"id": id, "body": strings.Repeat("large ", 2048)}
 	g := config.Defaults().Tools.GraphQL

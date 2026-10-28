@@ -69,7 +69,7 @@ func TestRunningTaskCommentUIRoutesExactOwner(t *testing.T) {
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(Model)
 	actual, _ = plan.GetTask(s, task.ID)
-	if actual.AttemptLog != before || len(m.Comment) != 0 {
-		t.Fatal("closed comment silently rerouted")
+	if actual.AttemptLog == before || len(m.Comment) != 0 || actual.State != plan.TaskCancelled {
+		t.Fatal("late feedback lost or silently reopened work")
 	}
 }

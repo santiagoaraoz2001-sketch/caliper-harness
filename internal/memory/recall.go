@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"specific-harness/internal/prompts"
 	"strings"
@@ -21,6 +22,8 @@ var stopwords = map[string]bool{
 	"not": true, "of": true, "on": true, "or": true, "that": true, "the": true,
 	"this": true, "to": true, "was": true, "what": true, "when": true, "which": true,
 	"with": true, "you": true, "your": true,
+	"user": true, "project": true, "note": true, "notes": true, "memory": true, "before": true, "after": true, "please": true, "like": true, "tell": true, "about": true, "could": true, "would": true, "should": true, "want": true, "need": true, "using": true, "use": true, "without": true, "just": true, "only": true,
+	"change": true, "changed": true, "changes": true, "check": true, "checks": true, "command": true, "commands": true, "file": true, "files": true, "line": true, "lines": true, "task": true, "tasks": true, "tool": true, "tools": true, "work": true, "working": true, "question": true, "questions": true,
 }
 
 // words splits lowercased alphanumeric words of at least min length,
@@ -37,15 +40,29 @@ func words(text string, min int) map[string]bool {
 	return out
 }
 
-// rooted matches inflections: either word contains the other, so
-// refund finds refunds. Both words cleared the length floor.
+// Match inflections, not arbitrary substrings ("line" must not match "pipeline").
 func rooted(ew map[string]bool, w string) bool {
 	for e := range ew {
-		if strings.Contains(e, w) || strings.Contains(w, e) {
+		if len([]rune(w)) == 1 && []rune(w)[0] > 127 && strings.Contains(e, w) {
 			return true
+		}
+		for _, suffix := range []string{"s", "es", "ed", "ing"} {
+			if e == w+suffix || w == e+suffix {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+var recallPaths = regexp.MustCompile(`(?i)(?:[a-z]:[\\/]|/)[^\s]+`)
+var recallNegation = regexp.MustCompile(`(?i)\b(?:do not|don't|must not|without|never|no)\s+(?:run|running|edit|editing|change|changing|modify|modifying|execute|executing|build|building|test|testing|check|checking)\b[^,.!?;\n]*(?:,\s*(?:run|edit|change|modify|execute|build|test|check|use)\b[^,.!?;\n]*)*`)
+
+// Negated action constraints and generated labels are not positive memory intent.
+// Exact file locators are handled separately, not tokenized as generic topics.
+func recallQuery(query string) string {
+	query = recallPaths.ReplaceAllString(query, " ")
+	return recallNegation.ReplaceAllString(query, " ")
 }
 
 type scoredEntry struct {
@@ -54,11 +71,15 @@ type scoredEntry struct {
 }
 
 func rank(entries []*Entry, query string, minWord int) []scoredEntry {
-	queryWords := words(query, minWord)
+	positiveQuery := recallNegation.ReplaceAllString(query, " ")
+	queryWords := words(recallQuery(positiveQuery), minWord)
 	scored := make([]scoredEntry, len(entries))
 	for i, e := range entries {
 		scored[i].entry = e
-		entryWords := words(e.Key+"\n"+e.FilePath+"\n"+e.Body, minWord)
+		if e.FilePath != "" && strings.Contains(strings.ToLower(strings.ReplaceAll(positiveQuery, `\`, "/")), strings.ToLower(strings.ReplaceAll(e.FilePath, `\`, "/"))) {
+			scored[i].score++
+		}
+		entryWords := words(e.Key+"\n"+recallPaths.ReplaceAllString(e.Body, " "), minWord)
 		for w := range queryWords {
 			if entryWords[w] || rooted(entryWords, w) {
 				scored[i].score++
@@ -82,102 +103,89 @@ func Rank(entries []*Entry, query string, minWord int) []*Entry {
 	return out
 }
 
-// Recall ranks entries against the query and formats the top matches:
-// at most topN, complete returned text within maxChars Unicode runes.
-// topN <= 0 disables; maxChars <= 0 lifts the cap. Prefer whole labelled
-// blocks, then whole compact bodies if labels cannot fit. Budget omissions
-// end in a separate ellipsis line; routine topN selection does not add one.
-// If no whole body fits, return the top head plus an ellipsis (cap1: only …).
+// Recall keeps historical provenance and a stable locator inside the same budget.
+// A budget too small for provenance omits memory instead of presenting bare text
+// as a new user instruction. Raw records remain accessible through GraphQL.
 func Recall(entries []*Entry, query string, topN, maxChars, minWord int, catalogs ...*prompts.Catalog) string {
-	if topN <= 0 {
-		return ""
-	}
-	ranked := rank(entries, query, minWord)
-	var matches []*Entry
-	for _, scored := range ranked {
-		if scored.score == 0 {
-			break
-		}
-		matches = append(matches, scored.entry)
-	}
-	if len(matches) == 0 {
-		return ""
-	}
-	for _, compact := range []bool{false, true} {
-		if text := recallBlocks(matches, topN, maxChars, compact, catalogs...); text != "" {
-			return text
-		}
-	}
-	body := []rune(matches[0].Body)
-	n := maxChars - 1 // reserve the one-rune truncation disclosure
-	if n < 0 {
-		n = 0
-	}
-	if n > len(body) {
-		n = len(body)
-	}
-	return string(body[:n]) + "…"
+	_, text := SelectRecall(entries, nil, query, topN, maxChars, minWord, catalogs...)
+	return text
 }
 
-// Keep whole blocks in rank order, skipping oversized ones. Selection is
-// repeated only when a budget omission needs space for its newline+marker.
-// The private selector uses -1 for unlimited; zero is an exhausted budget.
-func recallBlocks(entries []*Entry, topN, maxChars int, compact bool, catalogs ...*prompts.Catalog) string {
-	pc := prompts.Select(catalogs...)
-	prefix := pc.Text("continuation.recall_prefix")
-	if compact {
-		prefix = ""
+// RecallRecord retains only a selected, possibly truncated body. Its original
+// score survives truncation so a cached fallback does not need to re-match text
+// which may have been outside the retained fragment.
+type RecallRecord struct {
+	Entry *Entry
+	Score int
+}
+
+// SelectRecall shares Recall's ranking and budget with structured context
+// owners. Cached records are used only when fresh selection is unavailable.
+func SelectRecall(entries []*Entry, cached []RecallRecord, query string, topN, maxChars, minWord int, catalogs ...*prompts.Catalog) ([]RecallRecord, string) {
+	if topN <= 0 {
+		return nil, ""
 	}
-	pick := func(limit int) ([]string, bool) {
-		var blocks []string
-		used, omitted := utf8.RuneCountInString(prefix), false
-		for _, e := range entries {
-			if len(blocks) >= topN {
-				break
-			}
-			block := e.Body
-			if !compact {
-				label := e.Kind
-				if e.Key != "" {
-					label += fmt.Sprintf(" key=%q", e.Key)
-				}
-				if e.FilePath != "" {
-					label += fmt.Sprintf(" file=%q", e.FilePath)
-				}
-				block = fmt.Sprintf("- [%s] %s", label, e.Body)
-			}
-			size := utf8.RuneCountInString(block)
-			if len(blocks) > 0 {
-				size++ // the joining newline is part of returned text
-			}
-			if limit >= 0 && used+size > limit {
-				omitted = true
+	candidates := rank(entries, query, minWord)
+	for _, record := range cached {
+		candidates = append(candidates, scoredEntry{entry: record.Entry, score: record.Score})
+	}
+	if len(cached) > 0 {
+		sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].score > candidates[j].score })
+	}
+	prefix := prompts.Select(catalogs...).Text("continuation.recall_prefix")
+	var out strings.Builder
+	out.WriteString(prefix)
+	used, count := utf8.RuneCountInString(prefix), 0
+	selected := []RecallRecord{}
+	seen := map[string]bool{}
+	for _, scored := range candidates {
+		if scored.score == 0 || count >= topN {
+			break
+		}
+		e := scored.entry
+		// Domain articles are retrieved as whole bounded sections through their
+		// explicit graph links, not cropped into the ordinary fact-recall budget.
+		if ProjectGuide(e.Key) {
+			continue
+		}
+		if len(cached) > 0 && e.ID != "" && seen[e.ID] {
+			continue
+		}
+		label := e.Kind
+		if e.Key != "" {
+			label += fmt.Sprintf(" key=%q", e.Key)
+		} else if e.ID != "" {
+			label += fmt.Sprintf(" id=%q", e.ID)
+		}
+		if e.FilePath != "" {
+			label += fmt.Sprintf(" file=%q", e.FilePath)
+		}
+		header := "- [" + label + "] "
+		if count > 0 {
+			header = "\n" + header
+		}
+		headerSize := utf8.RuneCountInString(header)
+		body := []rune(e.Body)
+		if maxChars > 0 && used+headerSize+len(body) > maxChars {
+			room := maxChars - used - headerSize - 1
+			if room < 1 {
 				continue
 			}
-			blocks = append(blocks, block)
-			used += size
+			body = append(body[:room], '…')
 		}
-		return blocks, omitted
+		out.WriteString(header)
+		out.WriteString(string(body))
+		bounded := *e
+		bounded.Body = string(body)
+		selected = append(selected, RecallRecord{Entry: &bounded, Score: scored.score})
+		seen[e.ID] = true
+		used += headerSize + len(body)
+		count++
 	}
-	limit := maxChars
-	if limit <= 0 {
-		limit = -1
+	if count == 0 {
+		return nil, ""
 	}
-	blocks, omitted := pick(limit)
-	if omitted && len(blocks) > 0 {
-		if maxChars < 2 {
-			return ""
-		}
-		blocks, _ = pick(maxChars - 2)
-	}
-	if len(blocks) == 0 {
-		return ""
-	}
-	text := prefix + strings.Join(blocks, "\n")
-	if omitted {
-		text += "\n…"
-	}
-	return text
+	return selected, out.String()
 }
 
 // Query recalls legacy global entries. Project-bound callers use QueryProject
@@ -194,14 +202,24 @@ func Query(s *store.Store, kind, query string, topN, maxChars, minWord int, cata
 // legacy global entries. Guides remain available on demand; old versions and
 // other projects never compete for the caller's existing recall budget.
 func QueryProject(ctx context.Context, s *store.Store, root, kind, query string, topN, maxChars, minWord int, catalogs ...*prompts.Catalog) (string, error) {
-	if root == "" {
-		return "", fmt.Errorf("project recall requires a captured workspace")
-	}
-	if err := ctx.Err(); err != nil {
+	entries, err := ProjectRecallEntries(ctx, s, root, kind, query, topN, minWord)
+	if err != nil {
 		return "", err
 	}
+	return Recall(entries, query, topN, maxChars, minWord, catalogs...), nil
+}
+
+// ProjectRecallEntries retains immutable identities until the caller has
+// reconciled other current context owners. Recall still owns ranking/formatting.
+func ProjectRecallEntries(ctx context.Context, s *store.Store, root, kind, query string, topN, minWord int) ([]*Entry, error) {
+	if root == "" {
+		return nil, fmt.Errorf("project recall requires a captured workspace")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if topN <= 0 || len(words(query, minWord)) == 0 {
-		return "", nil
+		return nil, nil
 	}
 	q := `MATCH (m:MemoryEntry) WHERE (
 coalesce(m.project_root,'') = '' OR (
@@ -214,19 +232,19 @@ AND NOT EXISTS { MATCH (n:MemoryEntry) WHERE n.previous_id = m.id }
 		q += " AND m.kind = $kind"
 		params["kind"] = kind
 	}
-	q += ` RETURN m.id AS id, m.kind AS kind, m.body AS body, m.key AS key, m.file_path AS file_path,
+	q += ` RETURN m.id AS id, m.kind AS kind, m.body AS body, m.key AS key, m.file_path AS file_path, m.project_root AS project_root,
 m.created_at AS created_at, m.session_ref AS ref ORDER BY created_at DESC, id`
 	rows, err := s.QueryContext(ctx, q, params)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	entries := make([]*Entry, 0, len(rows))
 	for _, row := range rows {
 		entry, err := entryOf(row)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		entries = append(entries, entry)
 	}
-	return Recall(entries, query, topN, maxChars, minWord, catalogs...), nil
+	return entries, nil
 }

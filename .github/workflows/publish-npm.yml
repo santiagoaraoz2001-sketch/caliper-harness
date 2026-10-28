@@ -7,7 +7,7 @@ on:
       release_tag:
         description: Existing stable release or draft to validate (never publishes)
         required: true
-        default: v0.2.1
+        default: v0.2.3
 permissions:
   contents: read
 concurrency:
@@ -44,6 +44,12 @@ jobs:
           node -e 'if (!/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(process.env.RELEASE_TAG)) throw new Error("Expected stable vX.Y.Z release tag")'
           release_id=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json databaseId --jq .databaseId)
           gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" > "$RUNNER_TEMP/release.json"
+          tag_commit=''
+          is_draft=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).draft)' "$RUNNER_TEMP/release.json")
+          if [ "$is_draft" = false ]; then
+            tag_commit=$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)
+          fi
+          node scripts/check-npm-release.cjs source "$RUNNER_TEMP/release.json" "$(git rev-parse HEAD)" "$tag_commit"
           mkdir "$RUNNER_TEMP/release-metadata"
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.sha256' --pattern '*.parts.json' --dir "$RUNNER_TEMP/release-metadata"
           node scripts/check-npm-release.cjs release "$RELEASE_TAG" "$RUNNER_TEMP/release.json" "$RUNNER_TEMP/release-metadata" "$CHECK_MODE"

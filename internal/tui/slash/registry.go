@@ -39,6 +39,7 @@ func Commands() []Command {
 		{Name: "workflow", Desc: "explicitly focus one owning workflow node", Usage: "/workflow [root|qualified-ref|UUID]"},
 		{Name: "workflows", Desc: "approach launches + retries", Usage: "/workflows", View: "workflows"},
 		{Name: "files", Desc: "browse files", Usage: "/files", View: "files"},
+		{Name: "tests", Desc: "project test suites, guidance and independent results", Usage: "/tests", View: "tests"},
 		{Name: "settings", Desc: "edit configuration", Usage: "/settings", View: "settings"},
 		{Name: "status", Desc: "read-only runtime dashboard", Usage: "/status", View: "status"},
 		{Name: "manage", Desc: "Models & Servers; /manage assisted for a setup prompt", Usage: "/manage [assisted]", View: "manage"},
@@ -109,7 +110,7 @@ func (r *Registry) Parse(input string) (Command, []string, bool) {
 	if !ok {
 		return Command{}, nil, false
 	}
-	if c.Name == "models" || c.Name == "changes" {
+	if c.Name == "models" || c.Name == "changes" || c.Name == "btw" {
 		rest := strings.TrimLeft(strings.TrimPrefix(strings.TrimLeft(input, " \t\r\n"), fields[0]), " \t")
 		if rest != "" {
 			return c, []string{rest}, true
@@ -162,7 +163,7 @@ func (r *Registry) Help() string {
 		title string
 		names []string
 	}{
-		{"VIEWS", []string{"chat", "diff", "plans", "sessions", "decisions", "workflows", "files", "settings", "status", "manage"}},
+		{"VIEWS", []string{"chat", "diff", "plans", "sessions", "decisions", "workflows", "files", "tests", "settings", "status", "manage"}},
 		{"MODELS", []string{"models"}},
 		{"RUN", []string{"new", "stop", "retry", "btw", "tools", "workflow"}},
 		{"AUTH", []string{"auth"}},

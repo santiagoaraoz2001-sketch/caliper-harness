@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"path/filepath"
 	"strings"
@@ -56,8 +57,8 @@ func TestNewSessionRecallsProjectKnowledgeAsData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(r.Memories, body) || strings.Contains(r.Memories, "foreign secret") {
-		t.Fatalf("startup lost project scope: %q", r.Memories)
+	if r.Memories != "" {
+		t.Fatal("main startup retained a second automatic recall owner")
 	}
 	def, ok := r.Registry.Lookup("recall")
 	if !ok {
@@ -66,8 +67,8 @@ func TestNewSessionRecallsProjectKnowledgeAsData(t *testing.T) {
 	// The registered tool retains its captured workspace after cwd changes.
 	t.Chdir(t.TempDir())
 	result, err := def.Execute(ctx, tool.Args{"query": "palette color", "kind": "note"})
-	if err != nil || result.Text != r.Memories {
-		t.Fatalf("startup and on-call recall differ: %q %v vs %q", result.Text, err, r.Memories)
+	if err != nil || !strings.Contains(result.Text, body) || strings.Contains(result.Text, "foreign secret") {
+		t.Fatalf("captured recall lost project scope: %q %v", result.Text, err)
 	}
 	model := &recalledRequest{}
 	r.Model = model
@@ -76,7 +77,8 @@ func TestNewSessionRecallsProjectKnowledgeAsData(t *testing.T) {
 	for _, message := range model.messages {
 		if strings.Contains(message.Content, body) {
 			count++
-			if message.Role != "user" || message.Content != r.Memories {
+			var packet projectContextPacket
+			if message.Role != "user" || !strings.HasPrefix(message.Content, projectContextMarker) || json.Unmarshal([]byte(strings.TrimPrefix(message.Content, projectContextMarker)), &packet) != nil || packet.Recall != result.Text {
 				t.Fatalf("source content acquired system authority: %+v", message)
 			}
 		}
@@ -87,5 +89,5 @@ func TestNewSessionRecallsProjectKnowledgeAsData(t *testing.T) {
 	if count != 1 || r.Continuation.Assignment != nil {
 		t.Fatalf("memory should reach next model request once without a task claim: count=%d assignment=%+v", count, r.Continuation.Assignment)
 	}
-	t.Logf("actual request memory: %d bytes, %d Unicode runes; source content in one user-role data block", len(r.Memories), utf8.RuneCountInString(r.Memories))
+	t.Logf("actual request memory: %d bytes, %d Unicode runes; source content in one user-role data block", len(result.Text), utf8.RuneCountInString(result.Text))
 }

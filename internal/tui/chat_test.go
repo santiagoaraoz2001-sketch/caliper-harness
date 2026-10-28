@@ -84,7 +84,7 @@ func TestCommentQueues(t *testing.T) {
 		t.Errorf("comment=%+v", m.Comment)
 	}
 	m = submit(m, "/comment")
-	if len(m.Alerts) != 1 {
+	if lastAlert(m).Kind != "err" {
 		t.Errorf("bare /comment must err: %+v", m.Alerts)
 	}
 }
@@ -139,7 +139,7 @@ func TestNewClearsAlerts(t *testing.T) {
 func TestClearClearsAlerts(t *testing.T) {
 	m := submit(New(testCfg(), "test"), "/bogus")
 	m = submit(m, "/clear")
-	if len(m.Alerts) != 0 {
+	if len(m.Alerts) != 1 || !strings.Contains(m.Alerts[0].Text, "context retained") {
 		t.Errorf("alerts=%+v", m.Alerts)
 	}
 }

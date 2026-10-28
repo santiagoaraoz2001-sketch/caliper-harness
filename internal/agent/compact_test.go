@@ -235,7 +235,7 @@ func TestCompactEmptySummaryStopsLoud(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(final, "stopped: compaction summary came back empty") {
+	if !strings.Contains(final, "stopped: compaction summary is empty") {
 		t.Fatalf("final=%q", final)
 	}
 }
@@ -326,11 +326,12 @@ func TestBudgetStopSurvivesTriggerOff(t *testing.T) {
 }
 
 func TestRealCompactionTemplateRenders(t *testing.T) {
-	out, err := plan.Render("../../templates", "compaction.tmpl", map[string]any{"Words": 75, "Range": "user: hi"})
+	scope := "Replaceable history precedes retained entry 3 of 5 (zero-based)."
+	out, err := plan.Render("../../templates", "compaction.tmpl", map[string]any{"Words": 75, "Range": scope})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(out, "75") || strings.Contains(out, "user: hi") || !strings.Contains(out, "continuation checkpoint") {
+	if strings.Contains(out, "75") || !strings.Contains(out, scope) || !strings.Contains(out, "historical checkpoint") {
 		t.Errorf("template output missing pieces: %q", out)
 	}
 }
@@ -369,7 +370,7 @@ func TestEnforcementGuidanceReplayAndCompactProvenance(t *testing.T) {
 	if !found {
 		t.Fatal("durable enforcement advice lost on replay")
 	}
-	model := &scriptModel{replies: []string{"summary"}}
+	model := &scriptModel{replies: []string{"Observed source read; verification still pending."}}
 	r := Runner{Judge: acceptCompaction, Threshold: .7, Model: model, MaxTokens: 32768, TemplatesDir: testTemplateDir(t), Compaction: testCompaction()}
 	r.Compaction.Keep = 0
 	next, _, ran, err := r.Compact(context.Background(), c)

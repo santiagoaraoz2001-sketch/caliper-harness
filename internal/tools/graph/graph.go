@@ -29,6 +29,17 @@ func New(a *api.API, limits config.GraphQLConfig, root, sessionRef, storeID stri
 	d := tool.Definition{Prompts: pc, Name: "graphql", Label: "graphql", Desc: pc.Text("tools.graphql.description"),
 		Purpose: pc.Text("tools.graphql.purpose"),
 		Params:  []tool.Param{{Name: "query", Type: tool.TypeString, Required: true, Desc: pc.Text("tools.graphql.parameters.query")}, {Name: "operation_name", Type: tool.TypeString, Desc: pc.Text("tools.graphql.parameters.operation_name")}, {Name: "variables", Type: tool.TypeString, Desc: pc.Text("tools.graphql.parameters.variables")}}}
+	d.GraphQLFields = scoped.AllowedFields()
+	if d.GraphQLFields != nil {
+		d.Desc = pc.Text("tools.graphql.knowledge_read_description")
+		d.Purpose = pc.Text("tools.graphql.knowledge_read")
+		for _, field := range d.GraphQLFields {
+			if field == "appendKnowledge" {
+				d.Desc = pc.Text("tools.graphql.knowledge_write_description")
+				d.Purpose = pc.Text("tools.graphql.knowledge_write")
+			}
+		}
+	}
 	d.Execute = func(ctx context.Context, args tool.Args) (tool.Result, error) {
 		query, _ := args["query"].(string)
 		op, _ := args["operation_name"].(string)
@@ -54,9 +65,18 @@ func New(a *api.API, limits config.GraphQLConfig, root, sessionRef, storeID stri
 		text, err := scoped.ExecBounded(ctx, query, op, vars, limits)
 		var schemaErrors gqlerror.List
 		if errors.As(err, &schemaErrors) && len(schemaErrors) > 0 && len(schemaErrors[0].Path) == 0 {
-			err = fmt.Errorf("%w; %s", err, pc.Format("guidance.graph.schema", api.ModelReference(query, op)))
+			err = fmt.Errorf("%w; %s", err, pc.Format("guidance.graph.schema", schemaReference(query, op, schemaErrors)))
 		}
-		return tool.Result{Text: string(text), Failed: err != nil}, err
+		var receipt struct {
+			Effects []api.Effect `json:"effects"`
+		}
+		changed := false
+		if json.Unmarshal(text, &receipt) == nil {
+			for _, effect := range receipt.Effects {
+				changed = changed || effect.Status == "applied"
+			}
+		}
+		return tool.Result{Text: string(text), Failed: err != nil, StateChanged: changed}, err
 	}
 	d.Bind = func(ctx context.Context, args tool.Args) (tool.Definition, tool.Args, error) {
 		bound := d

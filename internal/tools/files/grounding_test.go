@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"specific-harness/internal/config"
+	"specific-harness/internal/testfs"
 	"specific-harness/internal/tool"
 	"strconv"
 	"strings"
@@ -226,11 +227,11 @@ func TestReadGroundingDirectoryAliasesAndBoundaries(t *testing.T) {
 	if e := os.Mkdir(filepath.Join(dir, "real"), 0700); e != nil {
 		t.Fatal(e)
 	}
-	if e := os.Symlink("real", filepath.Join(dir, "alias")); e != nil {
+	if e := testfs.Symlink("real", filepath.Join(dir, "alias")); e != nil {
 		t.Fatal(e)
 	}
 	rootAlias := filepath.Join(t.TempDir(), "root")
-	if e := os.Symlink(dir, rootAlias); e != nil {
+	if e := testfs.Symlink(dir, rootAlias); e != nil {
 		t.Fatal(e)
 	}
 	raw := "one\ntwo\n"
@@ -257,7 +258,7 @@ func TestReadGroundingDirectoryAliasesAndBoundaries(t *testing.T) {
 			t.Fatal(e)
 		}
 		r, e := invokeDefinitions(t, writer, "write", map[string]string{"path": "real/a", "content": content, "expected_hash": digest(b)})
-		if e != nil || !r.Changed || r.FileEffect.Path != "real/a" {
+		if e != nil || !r.Changed || r.FileEffect.Path != filepath.Join("real", "a") {
 			t.Fatal(r, e)
 		}
 	}
@@ -265,18 +266,19 @@ func TestReadGroundingDirectoryAliasesAndBoundaries(t *testing.T) {
 		t.Fatalf("alias restore retained authority: %+v %v", r, e)
 	}
 	read("alias/a")
-	if r, e := edit("real/a"); e != nil || !r.Changed || r.FileEffect.Path != "real/a" {
+	if r, e := edit("real/a"); e != nil || !r.Changed || r.FileEffect.Path != filepath.Join("real", "a") {
 		t.Fatal(r, e)
 	}
-	if e := os.Symlink("a", filepath.Join(dir, "real", "file-link")); e != nil {
-		t.Fatal(e)
-	}
+	fileLink := testfs.FileSymlink(t, "a", filepath.Join(dir, "real", "file-link"))
 	outside := t.TempDir()
 	os.WriteFile(filepath.Join(outside, "secret"), []byte("SECRET\n"), 0600)
-	if e := os.Symlink(outside, filepath.Join(dir, "escape")); e != nil {
+	if e := testfs.Symlink(outside, filepath.Join(dir, "escape")); e != nil {
 		t.Fatal(e)
 	}
 	for _, path := range []string{"alias/file-link", "escape/secret"} {
+		if path == "alias/file-link" && !fileLink {
+			continue
+		}
 		if r, e := invokeDefinitions(t, reader, "read", map[string]string{"path": path}); e == nil || r.Text != "" {
 			t.Fatalf("boundary read admitted: %+v %v", r, e)
 		}
@@ -290,7 +292,7 @@ func TestReadGroundingDirectoryAliasesAndBoundaries(t *testing.T) {
 		t.Fatal("outside creation", e)
 	}
 	r, e := invokeDefinitions(t, writer, "write", map[string]string{"path": "alias/new", "content": ""})
-	if e != nil || !r.Changed || !r.FileEffect.Created || r.FileEffect.Path != "real/new" {
+	if e != nil || !r.Changed || !r.FileEffect.Created || r.FileEffect.Path != filepath.Join("real", "new") {
 		t.Fatal(r, e)
 	}
 	b, e := os.ReadFile(filepath.Join(dir, "real", "new"))

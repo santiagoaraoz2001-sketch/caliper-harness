@@ -3,9 +3,9 @@ package launch
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -153,9 +153,58 @@ func TestReadyCheckQuestionShape(t *testing.T) {
 func TestCoherenceContextKeepsCompleteBrief(t *testing.T) {
 	p := &plan.Plan{Goal: "g"}
 	tasks := []*plan.Task{{Title: "t", Prompt: strings.Repeat("p", 4000), Verify: "late verification"}}
-	got := coherenceContext(p, tasks)
-	if !strings.Contains(got, tasks[0].Prompt) || !strings.Contains(got, "late verification") {
+	got := coherenceContext(p, &plan.Approach{ID: "scope", Title: "full game, not only scaffold"}, tasks)
+	if !strings.Contains(got, tasks[0].Prompt) || !strings.Contains(got, "late verification") || !strings.Contains(got, "full game, not only scaffold") {
 		t.Error("complete readiness facts lost")
+	}
+}
+
+func TestReadinessJudgesCollectiveApproachScopeNotOnlyTaskRelevance(t *testing.T) {
+	s, _, d := gateDeps(t, 1)
+	goal := `{"outcome":"playable game","articles":["scaffold","working game kernel"]}`
+	p, err := plan.CreatePlan(s, "collective scope", goal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	brief, _ := json.Marshal(plan.ApproachBrief{Coverage: []plan.ArticleRef{{Index: 0, Text: "scaffold"}, {Index: 1, Text: "working game kernel"}}, Strategy: "Implement both scaffold and playable kernel"})
+	a, err := plan.CreateApproach(s, p.ID, string(brief))
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := plan.CreateTask(s, a.ID, "increment", "implement scaffold")
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := func(target string) {
+		t.Helper()
+		if _, err := plan.SetTaskBlock(s, task.ID, "absent", target, "implementation steps", "actual behavioral assertions", "test both requested behaviors", "execute declared checks", "echo suite", "echo acceptance"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set("scaffold only")
+	complete, calls := false, 0
+	d.Judge = func(_ context.Context, q decision.Request) (decision.Verdict, error) {
+		calls++
+		if !strings.Contains(q.Context, string(brief)) || !strings.Contains(q.Context, goal) || !strings.Contains(q.Context, a.ID) {
+			t.Fatal("readiness omitted exact owning approach/plan")
+		}
+		option := q.Options[1]
+		if complete {
+			option = q.Options[0]
+		}
+		return decision.Verdict{Option: option, Confidence: 1}, nil
+	}
+	if _, err = Ready(t.Context(), d, a.ID); err == nil {
+		t.Fatal("rejected collective scope admitted")
+	}
+	current, _ := plan.GetApproach(s, a.ID)
+	if current.State != plan.ApproachDraft {
+		t.Fatal("failed readiness mutated approach")
+	}
+	set("scaffold and working game kernel")
+	complete = true
+	if _, err = Ready(t.Context(), d, a.ID); err != nil || calls != 2 {
+		t.Fatal("complete single-task scope cannot proceed", err, calls)
 	}
 }
 
@@ -247,27 +296,24 @@ func TestReadyUncertaintyShowsExactJudgedContext(t *testing.T) {
 		judged = r
 		return decision.Verdict{Option: servesGoal, Confidence: .622}, nil
 	}
-	d.Ask = func(_ context.Context, p string) bool { asks++; prompt = p; return false }
+	d.ConfirmReadiness = func(_ context.Context, id, snapshot, brief, p string) (bool, error) {
+		asks++
+		prompt = p
+		expected, err := plan.ReadinessSnapshot(s, aid)
+		if err != nil || id != aid || snapshot == "" || snapshot != expected || brief != judged.Context {
+			t.Fatalf("readiness lost judged owner/snapshot/raw context: id=%q snapshot=%q expected=%q err=%v", id, snapshot, expected, err)
+		}
+		return false, nil
+	}
 	if _, err := Ready(context.Background(), d, aid); err == nil {
 		t.Fatal("decline admitted")
 	}
 	if judges != 1 || asks != 1 {
 		t.Fatalf("judge/ask=%d/%d", judges, asks)
 	}
-	_, rows, ok := strings.Cut(prompt, "Judged context (quoted rows; escapes are literal characters):\n")
-	if !ok {
-		t.Fatalf("judged context absent: %q", prompt)
-	}
-	var decoded []string
-	for _, row := range strings.Split(rows, "\n") {
-		value, err := strconv.Unquote(row)
-		if err != nil {
-			t.Fatal(err)
-		}
-		decoded = append(decoded, value)
-	}
-	if strings.Join(decoded, "\n") != judged.Context {
-		t.Fatalf("not exact judged context: %q", prompt)
+	_, displayed, ok := strings.Cut(prompt, "Complete judged brief:\n")
+	if !ok || displayed != plan.DisplayText(judged.Context) {
+		t.Fatalf("judged facts missing or display changed ordinary text: %q", prompt)
 	}
 	for _, field := range []string{"Plan goal: g", x.Title, x.Prompt, "current: current\x1b[31m\x7f\u0085 雪\nsecond row", "target: target", "sketch: sketch", "acceptance: acceptance 0", "tests: tests", "verify: verify", "check_command: true"} {
 		if !strings.Contains(judged.Context, field) {

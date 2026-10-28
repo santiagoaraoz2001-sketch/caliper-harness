@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"specific-harness/internal/testfs"
 	"specific-harness/internal/tool"
 	"strings"
 	"testing"
@@ -12,7 +13,7 @@ import (
 func TestBoundDiscoveryWorkspaceScope(t *testing.T) {
 	requireRG(t)
 	root, outside := fixture(t), fixture(t)
-	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+	if err := testfs.Symlink(outside, filepath.Join(root, "escape")); err != nil {
 		t.Fatal(err)
 	}
 	rel, err := filepath.Rel(root, outside)
@@ -95,7 +96,7 @@ func TestBoundDiscoveryIgnoresFollowConfig(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(outside, "outside-only.txt"), []byte("OUTSIDE_ONLY\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+	if err := testfs.Symlink(outside, filepath.Join(root, "escape")); err != nil {
 		t.Fatal(err)
 	}
 	configPath := filepath.Join(t.TempDir(), "rg.conf")

@@ -36,20 +36,22 @@ type WfRow struct {
 // WorkflowsState is the T6.8 monitor: activity-sorted rows, selection,
 // a complete-toggle, a pending dive, and one in-flight run.
 type WorkflowsState struct {
-	Rows     []WfRow
-	Sel      int
-	ShowDone bool
-	Dive     string
-	Busy     string
-	cancel   context.CancelFunc
-	ctx      context.Context
-	Err      string
+	Rows           []WfRow
+	Sel            int
+	ShowDone       bool
+	HiddenComplete int
+	Dive           string
+	Busy           string
+	cancel         context.CancelFunc
+	ctx            context.Context
+	Err            string
 }
 
 // wfLoadedMsg carries a finished refresh; wfDoneMsg one finished run.
 type wfLoadedMsg struct {
-	rows []WfRow
-	err  error
+	rows           []WfRow
+	hiddenComplete int
+	err            error
 }
 
 type wfDoneMsg struct {
@@ -98,6 +100,7 @@ func (m *Model) refreshWorkflows() tea.Cmd {
 			return wfLoadedMsg{err: err}
 		}
 		var rows []WfRow
+		hiddenComplete := 0
 		for _, p := range plans {
 			approaches, err := plan.PlanApproaches(s, p.ID)
 			if err != nil {
@@ -110,6 +113,7 @@ func (m *Model) refreshWorkflows() tea.Cmd {
 				}
 				row := wfRow(p.Title, a, tasks)
 				if a.State == plan.ApproachComplete && row.Total > 0 && row.Done == row.Total && !showDone {
+					hiddenComplete++
 					continue
 				}
 				rows = append(rows, row)
@@ -118,7 +122,7 @@ func (m *Model) refreshWorkflows() tea.Cmd {
 		sort.SliceStable(rows, func(i, j int) bool {
 			return wfWeight(rows[i].State) < wfWeight(rows[j].State)
 		})
-		return wfLoadedMsg{rows: rows}
+		return wfLoadedMsg{rows: rows, hiddenComplete: hiddenComplete}
 	}
 }
 
@@ -185,6 +189,7 @@ func (m *Model) onWorkflowsLoaded(msg wfLoadedMsg) {
 		keep = m.Wf.Rows[m.Wf.Sel].Approach
 	}
 	m.Wf.Rows = msg.rows
+	m.Wf.HiddenComplete = msg.hiddenComplete
 	m.Wf.Sel = 0
 	for i, r := range msg.rows {
 		if r.Approach == keep {
@@ -220,7 +225,7 @@ func (m *Model) wfLaunch(r WfRow, resume bool) tea.Cmd {
 		m.alert("info", "compaction owns the model slot — wait or stop it first")
 		return nil
 	}
-	if m.Chat.Running || m.Wf.Busy != "" {
+	if m.Chat.Running || m.Wf.Busy != "" || m.Tests.Busy != "" {
 		m.alert("info", "a workflow run is already in flight — wait for it to settle")
 		return nil
 	}
@@ -348,6 +353,9 @@ func (m *Model) wfDive(r *WfRow) tea.Cmd {
 // workflowsKey drives the floor: arrows move, enter dives, l
 // launches, p pauses or resumes, c toggles complete rows.
 func (m Model) workflowsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
+	if (msg.Type == tea.KeyEnter || msg.Type == tea.KeyRunes) && strings.TrimSpace(m.Input.Value()) != "" {
+		return m, nil, false
+	}
 	switch msg.Type {
 	case tea.KeyEnter:
 		if r := m.wfCur(); !msg.Alt && r != nil {
@@ -392,7 +400,7 @@ func (m Model) workflowsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
-func (m Model) renderWorkflows(w, vh int) string {
+func (m *Model) renderWorkflows(w, vh int) string {
 	inner := BoxInner(w)
 	done := "hidden"
 	if m.Wf.ShowDone {
@@ -409,7 +417,11 @@ func (m Model) renderWorkflows(w, vh int) string {
 			body = append(body, ErrSt.Render(l))
 		}
 	} else if len(m.Wf.Rows) == 0 {
-		body = append(body, Muted.Render("no approaches yet — build one with the workflow_* tools or graph"))
+		text := "no approaches yet — select /workflow to plan work"
+		if m.Wf.HiddenComplete > 0 {
+			text = "no active approaches — c shows completed work"
+		}
+		body = append(body, Muted.Render(text))
 	} else {
 		namew := max(12, min(36, inner-48))
 		body = append(body, Muted.Render(fmt.Sprintf("  %-*s %-12s %s", namew, "Approach", "State", "Qualified / Attempts")))

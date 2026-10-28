@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"specific-harness/internal/agent"
 	"specific-harness/internal/llm"
 	"specific-harness/internal/session"
 	"strings"
@@ -15,11 +14,16 @@ func TestToolsPublicSlashPreservesTaskAndHistory(t *testing.T) {
 	if m.Chat.Tools != "full" || m.Chat.Context.Coding.TaskID != "owned" || m.Chat.Context.Entries[0].Message.Content != "intent" {
 		t.Fatal("view switched task/history")
 	}
-	for _, name := range agent.ToolNames("full") {
-		if !strings.Contains(m.Chat.Lines[len(m.Chat.Lines)-1].Text, name) {
-			t.Fatal("active names omit", name)
-		}
+	if !strings.Contains(m.Chat.Lines[len(m.Chat.Lines)-1].Text, "next request") {
+		t.Fatal("unprepared registry presented as active")
 	}
+	m.Chat.Running = true
+	m.onEvent(eventMsg{seq: m.Chat.Seq, kind: "registry", text: `["read","graphql","plan"]`})
+	m = submit(m, "/tools")
+	if !strings.Contains(m.Chat.Lines[len(m.Chat.Lines)-1].Text, "current prepared registry: read, graphql, plan") {
+		t.Fatal("menu differs from observed registry")
+	}
+	m.Chat.Running = false
 	if !strings.Contains(m.footer(), "tools: full") {
 		t.Fatal("missing persistent indicator")
 	}

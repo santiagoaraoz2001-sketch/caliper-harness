@@ -32,7 +32,7 @@ func TestGuidedDraftMethodAndStartInstructionsMatchEffects(t *testing.T) {
 		t.Errorf("draft method instruction misstates its effect: %s", draft.Purpose)
 	}
 	role := f.d.Prompts.Text("system.task.prepare")
-	if !strings.Contains(role, "Answer the latest plan question") || !strings.Contains(role, "Draft all Task briefs for this Approach") || !strings.Contains(role, "claim a Task") || !strings.Contains(role, "fresh paired") || strings.Contains(role, `plan(invoke="EXECUTE")`) || strings.Contains(role, "execution question is advertised, it claims") {
+	if !strings.Contains(role, "Answer the latest host-published plan question") || !strings.Contains(role, "Draft all Task briefs for this Approach") || !strings.Contains(role, "claim a Task") || !strings.Contains(role, "that task and attempt") || !strings.Contains(role, "obtain missing or stale checks") || strings.Contains(role, `plan(invoke="EXECUTE")`) || strings.Contains(role, "execution question is advertised, it claims") {
 		t.Errorf("global role confuses the current draft, ordinary coding and actual Task claim: %s", role)
 	}
 	f.call(tool.Args{"validation": "regression fails before repair and passes after; project suite passes"})

@@ -26,7 +26,7 @@ func TestProgressCoverageBashOnlyNativeBoundary(t *testing.T) {
 		confidence float64
 		guidance   bool
 	}{
-		{"continue", 0, .99, false}, {"uncertain", 1, .499, false}, {"nudge", 1, .5, true},
+		{"continue", 0, .99, false}, {"uncertain", 1, .499, false}, {"reconsider", 2, .5, true},
 	} {
 		t.Run(verdict.name, func(t *testing.T) {
 			m := &discoveryModel{}

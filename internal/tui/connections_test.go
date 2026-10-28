@@ -119,7 +119,7 @@ func (offlineTransport) RoundTrip(*http.Request) (*http.Response, error) { retur
 
 func TestChangingJudgeKeepsOldOwnedSidecarVisible(t *testing.T) {
 	m := settingsModel(t)
-	p, err := serve.Start(serve.Recipe{Name: "old-judge-fixture", Argv: []string{"sleep", "30"}}, filepath.Join(t.TempDir(), "owner.log"))
+	p, err := serve.Start(serve.Recipe{Name: "old-judge-fixture", Argv: napCmd("30")}, filepath.Join(t.TempDir(), "owner.log"))
 	if err != nil {
 		t.Fatal(err)
 	}

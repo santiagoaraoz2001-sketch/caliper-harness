@@ -59,8 +59,10 @@ func TestOwningWorkflowCommandDialog(t *testing.T) {
 					}
 					json.NewDecoder(r.Body).Decode(&body)
 					text := "worker completed"
-					if strings.HasPrefix(body.Messages[len(body.Messages)-1].Content, "Review ") {
-						text = "PASS: actual true check"
+					for _, message := range body.Messages {
+						if message.Role == "user" && strings.HasPrefix(message.Content, "Review ") {
+							text = "PASS: actual true check"
+						}
 					}
 					if body.Stream {
 						w.Header().Set("Content-Type", "text/event-stream")

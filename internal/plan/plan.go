@@ -339,7 +339,7 @@ func ListPlans(s stateStore, state string) ([]*Plan, error) {
 		q += ` WHERE p.state = $state`
 		params["state"] = state
 	}
-	q += ` RETURN p.id AS id, p.title AS title, p.goal AS goal, p.state AS state, p.created_at AS created_at ORDER BY created_at`
+	q += ` RETURN p.id AS id, p.title AS title, p.goal AS goal, p.state AS state, p.created_at AS created_at, p.project_root AS project_root ORDER BY created_at`
 	rows, err := s.Query(q, params)
 	if err != nil {
 		return nil, err
@@ -991,6 +991,47 @@ func ReadinessSnapshot(s *store.Store, id string) (snapshot string, err error) {
 	})
 	return
 }
+
+// ReadinessBriefSnapshot binds a displayed/judged brief to the same atomic
+// readiness snapshot. Concurrent edits cannot relabel old prose with a new hash.
+func ReadinessBriefSnapshot(s *store.Store, id string, p *Plan, a *Approach, tasks []*Task) (snapshot string, err error) {
+	err = s.Update(func(tx *store.Tx) error {
+		actual, err := ApproachPlan(tx, id)
+		if err != nil {
+			return err
+		}
+		if p == nil || actual.ID != p.ID || actual.Goal != p.Goal || actual.State != p.State {
+			return fmt.Errorf("plan changed before readiness presentation")
+		}
+		approach, err := GetApproach(tx, id)
+		if err != nil {
+			return err
+		}
+		if a == nil || approach.ID != a.ID || approach.Title != a.Title || approach.State != a.State || approach.NeedsReady != a.NeedsReady {
+			return fmt.Errorf("approach changed before readiness presentation")
+		}
+		current, err := ApproachTasks(tx, id)
+		if err != nil {
+			return err
+		}
+		if len(current) != len(tasks) {
+			return fmt.Errorf("tasks changed before readiness presentation")
+		}
+		byID := map[string]*Task{}
+		for _, task := range tasks {
+			byID[task.ID] = task
+		}
+		for _, task := range current {
+			prior := byID[task.ID]
+			if prior == nil || task.State != prior.State || !task.SameBrief(prior) {
+				return fmt.Errorf("task changed before readiness presentation")
+			}
+		}
+		snapshot, err = readySnapshot(tx, id)
+		return err
+	})
+	return
+}
 func readySnapshot(s stateStore, id string) (string, error) {
 	a, err := GetApproach(s, id)
 	if err != nil {
@@ -1022,11 +1063,11 @@ func readySnapshot(s stateStore, id string) (string, error) {
 	}
 	sort.Strings(revisionIDs)
 	b, err := json.Marshal(struct {
-		Revisions                                          []string
-		PlanID, Goal, PlanState, ApproachID, ApproachState string
-		NeedsReady                                         bool
-		Tasks                                              []brief
-	}{revisionIDs, p.ID, p.Goal, p.State, a.ID, a.State, a.NeedsReady, briefs})
+		Revisions                                                         []string
+		PlanID, Goal, PlanState, ApproachID, ApproachTitle, ApproachState string
+		NeedsReady                                                        bool
+		Tasks                                                             []brief
+	}{revisionIDs, p.ID, p.Goal, p.State, a.ID, a.Title, a.State, a.NeedsReady, briefs})
 	if err != nil {
 		return "", err
 	}
@@ -1065,7 +1106,7 @@ func CheckProject(s stateStore, kind, id, root string) error {
 		return err
 	}
 	if len(rows) != 1 || stringField(rows[0], "root") != root {
-		return fmt.Errorf("%s %q is missing, unbound or outside captured project — bind an unscoped plan explicitly", kind, id)
+		return fmt.Errorf("%s %q is missing, unbound or outside captured project. For an existing unscoped plan only, run from the intended workspace: graph mutation bindPlanProject(id:\"<actual plan ID>\"){id projectRoot}. A plan bound to another project cannot be rebound", kind, id)
 	}
 	return nil
 }
@@ -1153,7 +1194,7 @@ func claimTaskContext(ctx context.Context, s *store.Store, id, snapshot, command
 		if err = tx.Write(`MATCH(t:Task) WHERE t.id=$id SET t.attempts=$n`, map[string]any{"id": id, "n": out.Attempts}); err != nil {
 			return err
 		}
-		return setTaskOutcome(tx, out)
+		return freezeExecutionReport(tx, out, executionReportContext(ctx))
 	})
 	return out, err
 }

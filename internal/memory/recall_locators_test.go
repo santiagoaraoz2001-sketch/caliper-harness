@@ -30,7 +30,7 @@ func TestRecallLocatorsAndUnicode(t *testing.T) {
 			}
 			for _, limit := range []int{1, 8, 30} {
 				got = Recall([]*Entry{tc.entry}, tc.query, 3, limit, 2)
-				if got == "" || !utf8.ValidString(got) || utf8.RuneCountInString(got) > limit {
+				if !utf8.ValidString(got) || utf8.RuneCountInString(got) > limit {
 					t.Fatalf("existing budget %d violated: %q", limit, got)
 				}
 			}

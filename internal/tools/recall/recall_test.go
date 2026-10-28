@@ -44,7 +44,7 @@ func TestRecallToolNoMatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := `no memories match "aardvark migration"`; res.Text != want {
+	if want := `no matching memories available within recall budget for "aardvark migration"`; res.Text != want {
 		t.Errorf("got %q want %q", res.Text, want)
 	}
 }
@@ -55,7 +55,7 @@ func TestRecallToolKindFilter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(res.Text, "no memories match") {
+	if !strings.Contains(res.Text, "no matching memories available within recall budget") {
 		t.Errorf("kind filter must exclude the decision: %q", res.Text)
 	}
 }

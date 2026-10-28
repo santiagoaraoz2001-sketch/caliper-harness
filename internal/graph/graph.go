@@ -11,14 +11,18 @@ import (
 	"github.com/vektah/gqlparser/v2/gqlerror"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"specific-harness/internal/config"
+	"specific-harness/internal/memory"
+	"specific-harness/internal/pathutil"
 	"strings"
 	"time"
 
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/executor"
+	"github.com/vektah/gqlparser/v2/ast"
 
-	"specific-harness/internal/graph/generated"
+	"specific-harness/internal/graph/execution"
 	"specific-harness/internal/plan"
 	"specific-harness/internal/session"
 	"specific-harness/internal/store"
@@ -26,10 +30,12 @@ import (
 
 // API executes GraphQL operations against one store.
 type API struct {
+	allowedFields   map[string]bool
 	exec            *executor.Executor
 	scope           *projectScope
 	lifecycle       func(context.Context, string, string, string) error
 	approveContract func(context.Context, string, string) error
+	domainTokens    memory.TokenCounter
 }
 
 // New builds the executable schema over s. Version is served by the
@@ -40,7 +46,7 @@ func New(s *store.Store, version, sessionsDir string) *API {
 
 // NewWithReady explicitly wires the owning readiness gate; nil refuses Ready.
 func NewWithReady(s *store.Store, version, sessionsDir string, ready func(context.Context, string) (*plan.Approach, error)) *API {
-	es := generated.NewExecutableSchema(generated.Config{
+	es := execution.NewExecutableSchema(execution.Config{
 		Resolvers: &Resolver{store: s, version: version, sessionsDir: sessionsDir, ready: ready},
 	})
 	exec := executor.New(es)
@@ -129,6 +135,21 @@ func (a *API) ExecBounded(ctx context.Context, query, opName string, vars map[st
 	b := &requestBudget{limits: limits}
 	ctx = context.WithValue(ctx, budgetKey{}, b)
 	result, err := a.execute(ctx, query, opName, vars, b)
+	if len(result.Data) > 0 && string(result.Data) != "null" {
+		basis, domainErr := a.admitDomains(ctx, b, result.Data)
+		result.DomainBudgetBasis = basis
+		if domainErr != nil {
+			remaining, paths, omissionErr := omitDomains(b, result.Data)
+			result.Data, result.DataOmitted = remaining, true
+			if omissionErr != nil {
+				domainErr = errors.Join(domainErr, fmt.Errorf("selected data omitted: %w", omissionErr))
+			} else {
+				domainErr = fmt.Errorf("domain values omitted at %s: %w", paths, domainErr)
+			}
+			result.Errors = append(result.Errors, domainErr.Error())
+			err = errors.Join(err, domainErr)
+		}
+	}
 	data, _ := json.Marshal(result)
 	if len(data) > limits.MaxResultBytes {
 		result.Data = nil
@@ -162,6 +183,37 @@ func (a *API) execute(ctx context.Context, query, opName string, vars map[string
 	if errs != nil {
 		return Result{Errors: []string{errs.Error()}}, errs
 	}
+	if a.allowedFields != nil {
+		var check func(ast.SelectionSet) error
+		check = func(set ast.SelectionSet) error {
+			for _, selection := range set {
+				switch field := selection.(type) {
+				case *ast.Field:
+					if !a.allowedFields[field.Name] {
+						return fmt.Errorf("GraphQL operation %s unavailable in this role; use help(topic=\"schema.graphql\")", field.Name)
+					}
+				case *ast.InlineFragment:
+					if err := check(field.SelectionSet); err != nil {
+						return err
+					}
+				case *ast.FragmentSpread:
+					if fragment := op.Doc.Fragments.ForName(field.Name); fragment != nil {
+						if err := check(fragment.SelectionSet); err != nil {
+							return err
+						}
+					}
+				}
+			}
+			return nil
+		}
+		// Inspect every root operation, including aliases, fragments and skipped
+		// fields, before dispatching any effect. Nested result fields are not roots.
+		for _, operation := range op.Doc.Operations {
+			if err := check(operation.SelectionSet); err != nil {
+				return Result{Errors: []string{err.Error()}}, err
+			}
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return Result{Errors: []string{err.Error()}}, err
 	}
@@ -180,6 +232,9 @@ func (a *API) execute(ctx context.Context, query, opName string, vars map[string
 			kind = "Mutation"
 		}
 		for _, f := range graphql.CollectFields(op, op.Operation.SelectionSet, []string{kind}) {
+			if f.Name == "__schema" || f.Name == "__type" {
+				return Result{Errors: []string{"model introspection uses role-visible help: help(topic=\"schema.graphql\"); returned types use schema.graphql.<Type>"}}, fmt.Errorf("model introspection unavailable; use help(topic=\"schema.graphql\")")
+			}
 			if !ModelFieldAllowed(f.Name) {
 				return Result{Errors: []string{"model GraphQL cannot access unassociated sessions or author host/global receipts; use project knowledge"}}, fmt.Errorf("model GraphQL field %s is not permitted", f.Name)
 			}
@@ -234,11 +289,37 @@ func (a *API) Scoped(root, sessionRef string, modelCaller bool) (*API, error) {
 	if root == "" || !filepath.IsAbs(root) {
 		return nil, fmt.Errorf("GraphQL needs an absolute captured project root")
 	}
-	physical, err := filepath.EvalSymlinks(root)
+	physical, err := pathutil.EvalSymlinks(root)
 	if err != nil {
 		return nil, fmt.Errorf("GraphQL project capture: %w", err)
 	}
-	return &API{exec: a.exec, scope: &projectScope{root: physical, sessionRef: sessionRef, model: modelCaller, lifecycle: a.lifecycle, approveContract: a.approveContract}}, nil
+	value := *a
+	value.scope = &projectScope{root: physical, sessionRef: sessionRef, model: modelCaller, lifecycle: a.lifecycle, approveContract: a.approveContract}
+	return &value, nil
+}
+
+// WithAllowedFields narrows child-role root operations without changing main APIs.
+func (a *API) WithAllowedFields(names ...string) *API {
+	value := *a
+	value.allowedFields = map[string]bool{}
+	for _, name := range names {
+		if a.allowedFields == nil || a.allowedFields[name] {
+			value.allowedFields[name] = true
+		}
+	}
+	return &value
+}
+
+func (a *API) AllowedFields() []string {
+	if a.allowedFields == nil {
+		return nil
+	}
+	fields := make([]string, 0, len(a.allowedFields))
+	for name := range a.allowedFields {
+		fields = append(fields, name)
+	}
+	sort.Strings(fields)
+	return fields
 }
 func scope(ctx context.Context) (*projectScope, error) {
 	s, _ := ctx.Value(projectScopeKey{}).(*projectScope)

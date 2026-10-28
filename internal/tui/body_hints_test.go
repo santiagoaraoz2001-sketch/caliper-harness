@@ -9,7 +9,7 @@ import (
 )
 
 func TestR13BodyHintsActualEscape(t *testing.T) {
-	for _, id := range []ViewID{ViewPlans, ViewDiff, ViewSessions, ViewFiles, ViewDecisions, ViewWorkflows} {
+	for _, id := range []ViewID{ViewPlans, ViewDiff, ViewSessions, ViewFiles, ViewDecisions, ViewWorkflows, ViewStatus} {
 		t.Run(string(id), func(t *testing.T) {
 			m := New(testCfg(), "test")
 			m.Width, m.Height = 160, 40
@@ -21,7 +21,7 @@ func TestR13BodyHintsActualEscape(t *testing.T) {
 				t.Fatalf("contradictory alert hint:\n%s", before)
 			}
 			m = key(m, "esc")
-			if m.Tabs[m.Active].at.view != id || len(m.Alerts) != 0 {
+			if m.Tabs[m.Active].at.view != id || !m.alertHidden {
 				t.Fatal("first Escape did not only dismiss the alert")
 			}
 			if !strings.Contains(ansi.Strip(m.View()), "esc chat") {

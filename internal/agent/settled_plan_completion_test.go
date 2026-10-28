@@ -128,15 +128,25 @@ func TestSettledPlanQuestionSurvivesRetainedAssignment(t *testing.T) {
 		settlement:   &TaskSettlement{TaskID: "task", Attempt: 1, State: "done", Qualified: true},
 		Continuation: session.Continuation{Workflow: &session.WorkflowScope{Store: "owner", Kind: "task", ID: "task"}, Assignment: &session.Assignment{Store: "owner", TaskID: "task", Attempt: 1}}}
 	r.begin("continue selected work")
-	if err := r.refreshWorkflow(); err != nil {
+	if err := r.refreshWorkflow(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	found := false
+	def, _ := reg.Lookup("plan")
+	found := 0
 	for _, entry := range r.Continuation.Entries {
-		found = found || entry.Kind == "guidance" && strings.Contains(entry.Message.Content, question)
+		if entry.Kind == "schema" && entry.Message.Role == "user" && entry.Message.Content == r.workflowHeader+"\n"+def.Schema() {
+			found++
+		}
 	}
-	if !found {
-		t.Fatal("retained settled assignment suppressed current planning question")
+	if found != 1 {
+		t.Fatalf("retained settled assignment needs exactly one current schema, got %d", found)
+	}
+	n := len(r.Continuation.Entries)
+	if err := r.refreshWorkflow(t.Context()); err != nil || len(r.Continuation.Entries) != n {
+		t.Fatalf("settled current question duplicated: %v", err)
+	}
+	if r.Continuation.Assignment == nil || r.Continuation.Assignment.TaskID != "task" || r.settlement == nil || !r.settlement.Qualified {
+		t.Fatal("publication changed the retained qualified assignment")
 	}
 }
 
@@ -181,6 +191,9 @@ func TestSettledPlanUnqualifiedNeverClosesParents(t *testing.T) {
 			if err != nil || r.Outcome.Status != outcome.Stopped || settlements == 0 {
 				t.Fatalf("unqualified outcome=%+v settlements=%d error=%v", r.Outcome, settlements, err)
 			}
+			if name != "managed-stop" && !strings.Contains(r.Evidence, "unverified") {
+				t.Fatalf("missing authoritative outcome: %s", r.Evidence)
+			}
 			if len(m.seen) > 3 {
 				t.Fatal("unqualified claim silently resumed or repeated review")
 			}
@@ -204,7 +217,7 @@ func TestSettledPlanScopeUsesOnlyCurrentQualifiedAssignment(t *testing.T) {
 		reg.Register(tool.Definition{Name: "plan", Purpose: "Qualified Task: NEXT"})
 		return reg, "", nil
 	}
-	if err := r.refreshWorkflow(); err != nil || !seen || r.Continuation.Workflow != nil {
+	if err := r.refreshWorkflow(t.Context()); err != nil || !seen || r.Continuation.Workflow != nil {
 		t.Fatalf("derived view missing or focus invented: %v %t %+v", err, seen, r.Continuation.Workflow)
 	}
 	r.assignedClaim = false

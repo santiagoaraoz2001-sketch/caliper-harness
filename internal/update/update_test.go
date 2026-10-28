@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"specific-harness/internal/testfs"
 	"strings"
 	"testing"
 )
@@ -130,7 +131,7 @@ func TestArchiveTraversalRefused(t *testing.T) {
 func TestArchiveSymlinkEscapeBeforeMkdir(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
-	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
+	if err := testfs.Symlink(outside, filepath.Join(root, "link")); err != nil {
 		t.Skipf("native symlink creation unavailable: %v", err)
 	}
 	e := extract(bytes.NewReader(archiveBytes(t, map[string]string{"link/created/file": "bad"})), root)

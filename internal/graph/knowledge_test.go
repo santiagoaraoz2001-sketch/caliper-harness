@@ -16,7 +16,9 @@ import (
 
 func projectAPI(t *testing.T, s *store.Store, root string) *API {
 	t.Helper()
-	a, e := New(s, "test", t.TempDir()).Scoped(root, "real-session", true)
+	// These graph ownership/projection fixtures explicitly supply a tokenizer.
+	// Domain boundary and native tokenizer behavior have separate tests.
+	a, e := New(s, "test", t.TempDir()).WithDomainTokenCounter(func(context.Context, string) (int, error) { return 100, nil }).Scoped(root, "real-session", true)
 	if e != nil {
 		t.Fatal(e)
 	}

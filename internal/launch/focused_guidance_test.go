@@ -81,7 +81,7 @@ func TestFocusedGuidanceMatchesArgumentsAndOwningReceipts(t *testing.T) {
 	transition, _ := planView.Lookup("workflow_transition")
 	raw, _ := json.Marshal(map[string]string{"kind": "plan", "to": "active"})
 	args, repair := tool.ValidateJSON(transition, string(raw))
-	if args != nil || !strings.Contains(repair, "Current arguments: to") || !strings.Contains(repair, `unsupported argument "kind"`) {
+	if args != nil || !strings.Contains(repair, "Current arguments: to") || !strings.Contains(repair, `unsupported arguments "kind"`) {
 		t.Fatalf("hidden kind no longer refused: %v %q", args, repair)
 	}
 	before, _ := plan.GetPlan(s, p.ID)
@@ -128,7 +128,7 @@ func TestFocusedGuidanceMatchesArgumentsAndOwningReceipts(t *testing.T) {
 	assertPurpose(readyView, "launch", a.ID, "invoke")
 	assertPurpose(readyView, "workflow_status", a.ID, "invoke")
 	status := execute(readyView, "workflow_status", map[string]any{"invoke": "run"})
-	if !strings.Contains(status.Text, a.ID) || !strings.Contains(status.Text, plan.TaskQueued) || status.Workflow == nil || status.Workflow.Qualified || !status.Failed || children != 0 {
+	if !strings.Contains(status.Text, a.ID) || !strings.Contains(status.Text, plan.TaskQueued) || status.Workflow == nil || status.Workflow.Qualified || status.Failed || children != 0 {
 		t.Fatalf("status actual %q children%d", status.Text, children)
 	}
 	// Scope projection does not mutate shared full definitions or original receipts.

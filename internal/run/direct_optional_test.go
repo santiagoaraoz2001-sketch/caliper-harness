@@ -44,6 +44,7 @@ func TestOptionalPlanDirectActualWriteCheck(t *testing.T) {
 				}
 			}
 			judgments := 0
+			judgedPhases := []string{}
 			r.Judge = func(_ context.Context, q decision.Request) (decision.Verdict, error) {
 				judgments++
 				if len(q.Options) != 3 || q.Options[0] != r.Prompts.Text("decision.discovery.continue") {
@@ -57,7 +58,12 @@ func TestOptionalPlanDirectActualWriteCheck(t *testing.T) {
 				if err := json.Unmarshal([]byte(q.Context), &p); err != nil {
 					t.Fatal(err)
 				}
-				if p.PlanningActive || p.CurrentClaim || p.Assigned || string(p.Facts) != "null" || p.Checkpoint.Phase != "VALIDATE" || p.Checkpoint.PATStep != "not-selected" {
+				wantPhase := "EXECUTE"
+				if r.Continuation.Coding.Passed() {
+					wantPhase = "VALIDATE"
+				}
+				judgedPhases = append(judgedPhases, p.Checkpoint.Phase)
+				if p.PlanningActive || p.CurrentClaim || p.Assigned || string(p.Facts) != "null" || p.Checkpoint.Phase != wantPhase || p.Checkpoint.PATStep != "not-selected" {
 					t.Fatalf("ordinary check invented PAT ownership: %+v", p)
 				}
 				return decision.Verdict{Option: q.Options[0], Confidence: .99}, nil
@@ -83,8 +89,8 @@ func TestOptionalPlanDirectActualWriteCheck(t *testing.T) {
 					t.Fatal("Continue injected a model message")
 				}
 			}
-			if judgments != 1 || !directRole {
-				t.Fatalf("ordinary phase supervision or role missing: judgments=%d directRole=%t", judgments, directRole)
+			if judgments != 2 || !directRole || strings.Join(judgedPhases, ",") != "EXECUTE,VALIDATE" {
+				t.Fatalf("ordinary phase supervision or role missing: judgments=%d directRole=%t phases=%v", judgments, directRole, judgedPhases)
 			}
 			entries, e := memory.Knowledge(context.Background(), s, r.Workspace, "working/direct", "", 1, 4096, true)
 			if e != nil || len(entries) != 1 || entries[0].Body != "actual product fact" {
@@ -146,10 +152,16 @@ func TestOptionalDirectFinalCheckAndInvalidation(t *testing.T) {
 				if err != nil || !r.Continuation.Coding.Passed() || r.Outcome.Status != outcome.Completed {
 					t.Fatal(r.Outcome, err)
 				}
-			} else if r.Continuation.Coding.Passed() || r.Outcome.Status == outcome.Completed {
+			} else if r.Continuation.Coding.Passed() || mode != "denied" && r.Outcome.Status == outcome.Completed {
 				t.Fatal("invalid work qualified", r.Outcome)
 			}
 			if mode == "denied" {
+				if r.Outcome.Status != outcome.Completed || !strings.Contains(r.Evidence, "correctness/test count unverified") {
+					t.Fatal("denied effects were presented as verified work", r.Outcome, r.Evidence)
+				}
+				if _, err := os.Stat("marker"); !os.IsNotExist(err) {
+					t.Fatal("denied check executed")
+				}
 				if _, err := os.Stat("direct.txt"); !os.IsNotExist(err) {
 					t.Fatal("denied write executed")
 				}

@@ -137,6 +137,7 @@ func TestNonFiniteEveryConfigFloat(t *testing.T) {
 }
 
 func TestFiniteDomainBoundariesRoundTrip(t *testing.T) {
+	isolatedUser(t)
 	cases := []struct {
 		name string
 		set  func(*Config)

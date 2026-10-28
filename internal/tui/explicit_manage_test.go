@@ -103,7 +103,7 @@ func TestExplicitManageActiveJudgeReusesIdentityButNeverTrustPermission(t *testi
 			m.Serve.Rows = []ServeRow{{Ep: serve.Endpoint{URL: "http://external", Model: tc.model}, IsModel: true, Sidecar: true, Health: serve.Health{Up: true, Decision: &h}, Recipe: &serve.Recipe{Runtime: "system_one"}}}
 			if tc.checkpoint {
 				m.Serve.Rows[0].Asset = &serve.Asset{ID: "snapshot-directory", Path: "/models/active", Runtime: "system_one", Format: "safetensors", Complete: true}
-				row := serveModelRow(m, 0, m.Serve.Rows[0], 100)
+				row := m.serveModelItem(m.Serve.Rows[0]).Label + " " + m.serveModelItem(m.Serve.Rows[0]).Value
 				if !strings.Contains(row, "active/judge") || strings.Contains(row, "snapshot-directory") {
 					t.Fatalf("active native model displayed as snapshot: %s", row)
 				}

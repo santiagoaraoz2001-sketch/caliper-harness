@@ -2,6 +2,7 @@ package bundle
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"specific-harness/internal/pathutil"
 	"strings"
 	"sync"
 )
@@ -50,6 +52,15 @@ func VerifyManifest(root string) (checked int, failures []Failure, err error) {
 // order, and progress (when set) is called once per finished file with a
 // strictly increasing done count, never concurrently.
 func VerifyManifestProgress(root string, progress func(done, total int)) (checked int, failures []Failure, err error) {
+	return VerifyManifestContext(context.Background(), root, progress)
+}
+
+// VerifyManifestContext preserves the inventory contract while allowing an update
+// cancellation to stop between files and between hash reads.
+func VerifyManifestContext(ctx context.Context, root string, progress func(done, total int)) (checked int, failures []Failure, err error) {
+	if err := ctx.Err(); err != nil {
+		return 0, nil, err
+	}
 	manifest := filepath.Join(root, ManifestFile)
 	file, err := os.Open(manifest)
 	if err != nil {
@@ -59,6 +70,9 @@ func VerifyManifestProgress(root string, progress func(done, total int)) (checke
 	var entries []manifestEntry
 	reader := bufio.NewReader(file)
 	for {
+		if err := ctx.Err(); err != nil {
+			return 0, nil, err
+		}
 		line, readErr := reader.ReadString('\n')
 		line = strings.TrimRight(line, "\r\n")
 		if line != "" {
@@ -92,7 +106,7 @@ func VerifyManifestProgress(root string, progress func(done, total int)) (checke
 		go func() {
 			defer wait.Done()
 			for index := range jobs {
-				failure, failed, err := entries[index].check(root, base)
+				failure, failed, err := entries[index].checkContext(ctx, root, base)
 				outcomes[index] = manifestOutcome{failure, failed, err}
 				if progress != nil {
 					progressMu.Lock()
@@ -103,11 +117,19 @@ func VerifyManifestProgress(root string, progress func(done, total int)) (checke
 			}
 		}()
 	}
+schedule:
 	for index := range entries {
-		jobs <- index
+		select {
+		case jobs <- index:
+		case <-ctx.Done():
+			break schedule
+		}
 	}
 	close(jobs)
 	wait.Wait()
+	if err := ctx.Err(); err != nil {
+		return 0, nil, err
+	}
 	for _, outcome := range outcomes {
 		if outcome.err != nil {
 			return 0, nil, outcome.err
@@ -146,11 +168,18 @@ func parseManifestLine(line string) (manifestEntry, error) {
 }
 
 func (entry manifestEntry) check(root, base string) (Failure, bool, error) {
+	return entry.checkContext(context.Background(), root, base)
+}
+
+func (entry manifestEntry) checkContext(ctx context.Context, root, base string) (Failure, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return Failure{}, false, err
+	}
 	name, err := containedIn(root, base, entry.rel)
 	if err != nil {
 		return Failure{}, false, err
 	}
-	sum, err := hashFile(name)
+	sum, err := hashFileContext(ctx, name)
 	if os.IsNotExist(err) {
 		return Failure{Path: entry.rel, Kind: FailureMissing}, true, nil
 	}
@@ -203,6 +232,13 @@ func manifestRel(listed string) (string, error) {
 var hashBuffers = sync.Pool{New: func() any { b := make([]byte, 1024*1024); return &b }}
 
 func hashFile(name string) (string, error) {
+	return hashFileContext(context.Background(), name)
+}
+
+func hashFileContext(ctx context.Context, name string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	info, err := os.Stat(name)
 	if err != nil {
 		return "", err
@@ -218,7 +254,7 @@ func hashFile(name string) (string, error) {
 	hash := sha256.New()
 	buffer := hashBuffers.Get().(*[]byte)
 	defer hashBuffers.Put(buffer)
-	if _, err := io.CopyBuffer(hash, file, *buffer); err != nil {
+	if _, err := io.CopyBuffer(hash, manifestContextReader{ctx, file}, *buffer); err != nil {
 		return "", fmt.Errorf("cannot hash installed file %s: %w", name, err)
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
@@ -292,7 +328,7 @@ func repairableProfile(rel string) string {
 }
 
 func resolvedBase(root string) (string, error) {
-	base, err := filepath.EvalSymlinks(root)
+	base, err := pathutil.EvalSymlinks(root)
 	if err != nil {
 		return "", err
 	}
@@ -313,7 +349,7 @@ func containedIn(root, base, rel string) (string, error) {
 	target := filepath.Join(base, filepath.FromSlash(rel))
 	probe := target
 	for {
-		resolved, err := filepath.EvalSymlinks(probe)
+		resolved, err := pathutil.EvalSymlinks(probe)
 		if err == nil {
 			within, err := filepath.Rel(base, resolved)
 			if err != nil || within == ".." || strings.HasPrefix(within, ".."+string(filepath.Separator)) {
@@ -407,4 +443,17 @@ func writeRepairedInventory(root string, original []byte, profiles map[string]bo
 		fmt.Fprintf(&data, "%s  ./%s\n", entries[rel], rel)
 	}
 	return os.WriteFile(filepath.Join(root, ManifestFile), []byte(data.String()), 0644)
+}
+
+// Keep the shared hash buffer and bound cancellation latency by one file read.
+type manifestContextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r manifestContextReader) Read(b []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(b)
 }

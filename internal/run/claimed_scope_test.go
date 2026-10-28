@@ -100,6 +100,31 @@ func TestClaimedTaskScopeNativeCoding(t *testing.T) {
 				if !body.Stream {
 					t.Error("native request did not stream")
 				}
+				// Compaction uses the same model endpoint, with a distinct document
+				// request. It must not consume a scripted coding step or be tested
+				// as a role/tool advertisement. Match the actual catalog template.
+				compactTemplate, err := running.Prompts.Render("templates.compaction", map[string]any{"Words": "COMPACTION_WORD_TARGET", "Range": "COMPACTION_RANGE_BOUNDARY"})
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				compactPrefix, _, _ := strings.Cut(compactTemplate, "COMPACTION_RANGE_BOUNDARY")
+				if len(body.Messages) > 0 && compactPrefix != "" && strings.HasPrefix(body.Messages[0].Content, compactPrefix) {
+					if len(body.Messages) != 2 || body.Messages[0].Role != "system" || body.Messages[1].Role != "user" || len(body.Tools) != 0 {
+						t.Fatal("compaction lost its two-role, no-tools request contract")
+					}
+					currentRequest := "observe and check"
+					if restoring {
+						currentRequest = "read provenance"
+					}
+					if !strings.Contains(body.Messages[1].Content, "reference-only=") || !strings.Contains(body.Messages[1].Content, currentRequest) {
+						t.Errorf("compaction source lost provenance or current request %q (restoring=%t)", currentRequest, restoring)
+					}
+					t.Log("answered factual compaction document request separately from coding role")
+					b, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "Historical preparation and tool exchanges occurred; retain the original requirements, user note, current request and recorded owner receipts."}, "finish_reason": "stop"}}})
+					fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", b)
+					return
+				}
 				if variant.preparation && preparationStage < 2 {
 					delta := map[string]any{"content": "UNSUPPORTED_PREPARATION_SUCCESS", "reasoning": "invented preparation diagnosis"}
 					finish := "stop"
@@ -142,7 +167,14 @@ func TestClaimedTaskScopeNativeCoding(t *testing.T) {
 					}
 				}
 				if !review {
-					base, behavior, intent := "", 0, 0
+					base, behavior, intent, current := "", 0, 0, 0
+					originalIntent, currentRequest := "observe and check", "observe and check"
+					if variant.preparation {
+						originalIntent = "previous user intent"
+					}
+					if restoring {
+						currentRequest = "read provenance"
+					}
 					for _, m := range body.Messages {
 						if m.Role == "system" && strings.HasPrefix(m.Content, "You are a professional software engineer") {
 							base = m.Content
@@ -150,8 +182,11 @@ func TestClaimedTaskScopeNativeCoding(t *testing.T) {
 						if m.Role == "system" && m.Content == "CLAIMED_ROLE_BEHAVIOR_κ" {
 							behavior++
 						}
-						if m.Role == "user" && m.Content == "observe and check" {
+						if m.Role == "user" && m.Content == originalIntent {
 							intent++
+						}
+						if m.Role == "user" && m.Content == currentRequest {
+							current++
 						}
 					}
 					guides := 0
@@ -170,8 +205,8 @@ func TestClaimedTaskScopeNativeCoding(t *testing.T) {
 					if wantGuides == 1 && !strings.Contains(base, "Bound task check: "+running.CheckCommand) {
 						t.Error("claimed task check missing or mislabeled")
 					}
-					if behavior != 1 || intent != 1 {
-						t.Errorf("prefix ownership behavior=%d intent=%d", behavior, intent)
+					if behavior != 1 || intent != 1 || current != 1 {
+						t.Errorf("prefix ownership behavior=%d original-intent=%d current-request=%d", behavior, intent, current)
 					}
 					if !restoring && !frozen && requests > 0 && !settled {
 						if !strings.Contains(base, task.ID) || !strings.Contains(base, "attempt1") || !strings.Contains(base, "Keep this claimed brief") || !strings.Contains(base, "independent review") {
@@ -199,11 +234,24 @@ func TestClaimedTaskScopeNativeCoding(t *testing.T) {
 						}
 					}
 					if variant.postclaim && claimed && requests == 1 {
-						tail := body.Messages[len(body.Messages)-1].Content
+						calls, receipts := 0, 0
 						// A successful claim already carries the execution receipt; it
-						// should not provoke an extra bookkeeping nudge.
-						if !strings.Contains(tail, "claimed task "+task.ID) || strings.Contains(tail, "Harness bookkeeping request:") || strings.Contains(tail, "grants no coding/check/review authority") {
-							t.Errorf("successful claim lost its receipt or added redundant advice: %s", tail)
+						// remains correlated when current host context follows it.
+						for _, message := range body.Messages {
+							for _, call := range message.ToolCalls {
+								if message.Role == "assistant" && call.ID == "call-0-0" && call.Name == "task_start" {
+									calls++
+								}
+							}
+							if message.Role == "tool" && message.ToolCallID == "call-0-0" && strings.Contains(message.Content, "claimed task "+task.ID) {
+								receipts++
+							}
+							if strings.Contains(message.Content, "Harness bookkeeping request:") || strings.Contains(message.Content, "grants no coding/check/review authority") {
+								t.Errorf("successful claim added redundant advice: %s", message.Content)
+							}
+						}
+						if calls != 1 || receipts != 1 {
+							t.Errorf("successful claim lost exact correlation: calls=%d receipts=%d", calls, receipts)
 						}
 					}
 					if !names["graphql"] || !names["help"] {
@@ -499,6 +547,7 @@ func TestClaimSchemaPreservesMeasuredDensity(t *testing.T) {
 	next := make(chan observation, 1)
 	release := make(chan struct{})
 	var running *agent.Runner
+	requests := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.URL.Path != "/chat/completions" {
 			t.Errorf("unexpected model route %s", req.URL.Path)
@@ -514,7 +563,8 @@ func TestClaimSchemaPreservesMeasuredDensity(t *testing.T) {
 			t.Error("protected claim group must not become compaction source")
 			return
 		}
-		if len(body.Messages[len(body.Messages)-1].ToolCalls) == 0 && body.Messages[len(body.Messages)-1].Role == "user" {
+		requests++
+		if requests == 1 {
 			first <- body
 			args, _ := json.Marshal(map[string]string{"task": task.ID})
 			chunk, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"reasoning_content": thinking.String(), "tool_calls": []any{map[string]any{"index": 0, "id": "density-claim", "type": "function", "function": map[string]string{"name": "task_start", "arguments": string(args)}}}}, "finish_reason": "tool_calls"}}, "usage": map[string]int{"prompt_tokens": 1000, "completion_tokens": 2000}})

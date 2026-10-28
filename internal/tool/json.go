@@ -157,9 +157,6 @@ func (r *Registry) NativeDefinitions() ([]llm.ToolDefinition, error) {
 		if !ok || n == "" || d.Name != n || strings.TrimSpace(n) != n {
 			return nil, fmt.Errorf("invalid tool declaration %q", n)
 		}
-		if d.Advertisement != nil {
-			d = *d.Advertisement
-		}
 		props := map[string]any{}
 		required := []string{}
 		for _, p := range d.Params {
@@ -198,7 +195,7 @@ func (r *Registry) NativeDefinitions() ([]llm.ToolDefinition, error) {
 		def.Type = "function"
 		def.Function.Name = d.Name
 		def.Function.Description = d.Desc + " " + d.Purpose
-		if (d.Name == "plan" && r.tools[n].Advertisement == nil) || len(d.Example) > 0 || len(d.Params) == 0 {
+		if d.Name == "plan" || len(d.Example) > 0 || len(d.Params) == 0 {
 			def.Function.Description += "\n" + d.CallTemplate()
 		}
 		def.Function.Parameters = map[string]any{"type": "object", "properties": props, "required": required, "additionalProperties": false}

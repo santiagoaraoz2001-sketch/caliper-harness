@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"specific-harness/internal/pathutil"
 	"strings"
 )
 
@@ -67,7 +68,7 @@ func Root() string {
 	if err != nil {
 		return ""
 	}
-	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+	if resolved, err := pathutil.EvalSymlinks(executable); err == nil {
 		executable = resolved
 	}
 	return RootAt(executable)

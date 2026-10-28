@@ -15,6 +15,7 @@ import (
 	"specific-harness/internal/agent"
 	"specific-harness/internal/llm"
 	"specific-harness/internal/outcome"
+	"specific-harness/internal/session"
 	"specific-harness/internal/tool"
 )
 
@@ -75,9 +76,18 @@ func TestOutputLimitContinuationsRetainPrefixAndExecuteOnce(t *testing.T) {
 	}})
 	sink := &nativeRecordingSink{}
 	r := &agent.Runner{Model: llm.New(srv.URL, "fixture").WithRuntime("mlx"), Registry: reg, Session: sink, SessionID: "owned", MaxSteps: 3, Prune: agent.Prune{OutputsAgeTokens: 50000}}
+	projected := 0
+	r.ProjectContext = func(_ context.Context, c *session.Continuation, _ string) error {
+		projected++
+		c.Add("evidence", "user", fmt.Sprintf("current project identity version %d", projected), false)
+		return nil
+	}
 	final, _, err := r.Run(t.Context(), "retain original objective")
 	if err != nil || r.Outcome.Status != outcome.Completed || final != "done" || !reflect.DeepEqual(effects, []string{"first", "second"}) || len(requests) != 4 {
 		t.Fatalf("continuation/effects final=%q err=%v outcome=%+v effects=%v requests=%d", final, err, r.Outcome, effects, len(requests))
+	}
+	if projected != 2 {
+		t.Fatalf("project context refreshed during unfinished response: %d", projected)
 	}
 	for _, name := range effects {
 		if raw, err := os.ReadFile(filepath.Join(dir, name)); err != nil || string(raw) != "one actual effect" {
@@ -85,7 +95,7 @@ func TestOutputLimitContinuationsRetainPrefixAndExecuteOnce(t *testing.T) {
 		}
 	}
 	for i := 1; i <= 2; i++ {
-		if string(requests[i]["messages"]) != string(requests[0]["messages"]) || len(requests[i]["response_prefix"]) == 0 {
+		if string(requests[i]["messages"]) != string(requests[0]["messages"]) || string(requests[i]["tools"]) != string(requests[0]["tools"]) || len(requests[i]["response_prefix"]) == 0 {
 			t.Fatalf("length request %d changed original context or omitted literal prefix: %s", i+1, requests[i])
 		}
 	}
@@ -97,7 +107,7 @@ func TestOutputLimitContinuationsRetainPrefixAndExecuteOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	n := len(messages)
-	if n < 3 || messages[n-3].Reasoning != unfinished+"now acting" || len(messages[n-3].ToolCalls) != 2 || messages[n-2].ToolCallID != "stable-one" || messages[n-1].ToolCallID != "stable-two" {
+	if n < 4 || messages[n-4].Reasoning != unfinished+"now acting" || len(messages[n-4].ToolCalls) != 2 || messages[n-3].ToolCallID != "stable-one" || messages[n-2].ToolCallID != "stable-two" || messages[n-1].Content != "current project identity version 2" {
 		t.Fatalf("assembled thought/call/result association lost: %+v", messages)
 	}
 }

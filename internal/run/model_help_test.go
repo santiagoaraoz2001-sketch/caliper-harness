@@ -15,6 +15,7 @@ import (
 	"specific-harness/internal/config"
 	"specific-harness/internal/launch"
 	"specific-harness/internal/plan"
+	"specific-harness/internal/prompts"
 	"specific-harness/internal/session"
 	"specific-harness/internal/tool"
 )
@@ -247,6 +248,9 @@ func TestChildHelpSeesLateAssignedCheck(t *testing.T) {
 			hasCheck := false
 			for _, d := range body.Tools {
 				hasCheck = hasCheck || d.Function.Name == "check"
+				if d.Function.Name == "bash" {
+					t.Error("reviewer exposed free-form shell")
+				}
 			}
 			if !hasCheck {
 				t.Error("late reviewer check hidden")
@@ -263,8 +267,38 @@ func TestChildHelpSeesLateAssignedCheck(t *testing.T) {
 			}
 			reviewer++
 		} else {
+			hasCheck := false
+			for _, d := range body.Tools {
+				hasCheck = hasCheck || d.Function.Name == "check"
+				if d.Function.Name == "plan" || d.Function.Name == "launch" {
+					t.Errorf("worker exposed planner/delegation tool %s", d.Function.Name)
+				}
+			}
+			if !hasCheck {
+				t.Error("owning worker check hidden")
+			}
+			if worker == 0 {
+				system := ""
+				for _, message := range body.Messages {
+					if message.Role == "system" {
+						system += message.Content + "\n"
+					}
+				}
+				pc := prompts.Builtin()
+				if strings.Contains(system, pc.Text("system.coding.direct")) || !strings.Contains(system, pc.Text("system.coding.requirements")) {
+					t.Error("claimed worker received ordinary planner onboarding instead of execution requirements")
+				}
+				if strings.Count(system, pc.Text("system.coding.knowledge")) != 1 {
+					t.Error("worker knowledge guidance missing or duplicated")
+				}
+				if !strings.Contains(system, task.Prompt) || !strings.Contains(system, task.Target) || !strings.Contains(system, task.AcceptanceCommand) || !strings.Contains(system, task.CheckCommand) {
+					t.Error("worker frozen contract missing from actual system request")
+				}
+			}
 			if worker == 0 {
 				call("bash", `{"cmd":"printf actual > artifact"}`)
+			} else if worker == 1 {
+				call("check", `{}`)
 			}
 			worker++
 		}
@@ -289,7 +323,7 @@ func TestChildHelpSeesLateAssignedCheck(t *testing.T) {
 		t.Fatalf("owning qualification %+v %v", actual, e)
 	}
 	checked, e := os.ReadFile(checkMarker)
-	if e != nil || string(checked) != "checkedchecked" || worker != 2 || reviewer != 3 {
+	if e != nil || string(checked) != "checkedchecked" || worker != 3 || reviewer != 3 {
 		t.Fatalf("actual check/review worker%d reviewer%d checks%q error%v", worker, reviewer, checked, e)
 	}
 }

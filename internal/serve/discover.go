@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"specific-harness/internal/pathutil"
 	"strings"
 )
 
@@ -66,7 +67,7 @@ func Discover(roots []ModelRoot, explicit []string) ([]Asset, []string) {
 			}
 			return
 		}
-		canonical, err := filepath.EvalSymlinks(path)
+		canonical, err := pathutil.EvalSymlinks(path)
 		if err == nil {
 			canonical, err = filepath.Abs(canonical)
 		}

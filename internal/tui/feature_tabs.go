@@ -53,10 +53,14 @@ func (m *Model) tabPlace() place {
 func (m *Model) saveTabPresentation() {
 	s := &tabEditor{m.Input, m.Drafts, m.Draft, m.HistIdx, m.HistDraft, m.PickerHide}
 	t := &m.Tabs[m.Active]
-	if m.settingsActive() && m.Settings.Editing != nil {
+	if m.testsActive() && m.Tests.Editing {
+		m.testsEditor = s
+	} else if m.settingsActive() && m.Settings.Editing != nil {
 		m.settingsEditor = s
 	} else {
-		m.chatEditor = s
+		if i := m.chatTabIndex(); i >= 0 {
+			m.Tabs[i].editor = s
+		}
 	}
 	if t.feature == ViewDiff || t.feature == ViewChanges {
 		b := &diffBookmark{}
@@ -71,11 +75,20 @@ func (m *Model) saveTabPresentation() {
 	}
 }
 func (m *Model) restoreTabEditor() {
-	s := m.chatEditor
+	var s *tabEditor
+	if i := m.chatTabIndex(); i >= 0 {
+		s = m.Tabs[i].editor
+	}
 	if m.settingsActive() && m.Settings.Editing != nil {
 		s = m.settingsEditor
 	}
-	if s != nil {
+	if m.testsActive() && m.Tests.Editing {
+		s = m.testsEditor
+	}
+	if s == nil {
+		m.Input = newComposer()
+		m.Drafts, m.Draft, m.HistIdx, m.HistDraft, m.PickerHide = [3]string{}, 0, 0, "", false
+	} else {
 		m.Input, m.Drafts, m.Draft, m.HistIdx, m.HistDraft, m.PickerHide = s.input, s.drafts, s.draft, s.histIdx, s.histDraft, s.pickerHide
 	}
 	m.PickerIdx = 0

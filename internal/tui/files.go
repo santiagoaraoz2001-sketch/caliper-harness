@@ -47,6 +47,7 @@ type filesOpenedMsg struct {
 	ticket uint64
 	title  string
 	lines  []string
+	notice string
 	err    error
 }
 
@@ -164,43 +165,52 @@ func (m *Model) readSelectedFile(root, rel string, rootErr error) tea.Cmd {
 	ticket, cap, lineCap := m.Files.Ticket, m.Cfg.Tools.Bash.MaxBytes, m.Cfg.UI.MaxFileViewLines
 	return func() tea.Msg {
 		var lines []string
+		var notice string
 		err := rootErr
 		if err == nil {
-			lines, err = readFile(root, rel, cap, lineCap)
+			lines, notice, err = readFileBounded(root, rel, cap, lineCap)
 		}
-		return filesOpenedMsg{root: root, title: rel, ticket: ticket, lines: lines, err: err}
+		return filesOpenedMsg{root: root, title: rel, ticket: ticket, lines: lines, notice: notice, err: err}
 	}
 }
 
 // readFile loads one root-relative file: binary refuses loud,
 // long files cap with a flag.
 func readFile(root, rel string, caps ...int) ([]string, error) {
+	lines, notice, err := readFileBounded(root, rel, caps...)
+	if notice != "" {
+		lines = append(lines, "…"+notice)
+	}
+	return lines, err
+}
+
+func readFileBounded(root, rel string, caps ...int) ([]string, string, error) {
 	cap, lineCap := config.Defaults().Tools.Bash.MaxBytes, config.Defaults().UI.MaxFileViewLines
 	if len(caps) > 1 {
 		lineCap = caps[1]
 	}
 	if lineCap <= 0 {
-		return nil, fmt.Errorf("ui.max_file_view_lines must be positive")
+		return nil, "", fmt.Errorf("ui.max_file_view_lines must be positive")
 	}
 	if len(caps) != 0 {
 		cap = caps[0]
 	}
 	if cap <= 0 {
-		return nil, fmt.Errorf("max_bytes must be positive")
+		return nil, "", fmt.Errorf("max_bytes must be positive")
 	}
 	f, err := os.Open(filepath.Join(root, rel))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer f.Close()
 	raw, err := io.ReadAll(io.LimitReader(f, int64(cap)))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var probe [1]byte
 	n, err := f.Read(probe[:])
 	if err != nil && err != io.EOF {
-		return nil, err
+		return nil, "", err
 	}
 	omitted := n != 0
 	if omitted {
@@ -214,17 +224,19 @@ func readFile(root, rel string, caps ...int) ([]string, error) {
 	}
 	for _, b := range raw[:min(512, len(raw))] {
 		if b == 0 {
-			return nil, fmt.Errorf("%s is binary — no text view", rel)
+			return nil, "", fmt.Errorf("%s is binary — no text view", rel)
 		}
 	}
 	lines := strings.Split(string(raw), "\n")
+	notice := ""
 	if len(lines) > lineCap {
-		lines = append(lines[:lineCap], "…more lines capped")
+		lines = lines[:lineCap]
+		notice = "partial file; more lines omitted"
 	}
 	if omitted {
-		lines = append(lines, "…bytes omitted at max_bytes; increase tools.bash.max_bytes to view more")
+		notice = "partial file; bytes omitted at max_bytes; increase tools.bash.max_bytes to view more"
 	}
-	return lines, nil
+	return lines, notice, nil
 }
 
 // onFilesOpened lands the viewer, loud on failure.
@@ -242,7 +254,7 @@ func (m *Model) onFilesOpened(msg filesOpenedMsg) {
 		anchor = layoutLines(m.Files.Viewer.Logical, BoxInner(m.Width)).topLine(m.Files.Viewer.Scroll)
 	}
 	m.Files.Err = ""
-	m.Files.Viewer = &FileView{Title: msg.title, Logical: msg.lines, Scroll: layoutLines(msg.lines, BoxInner(m.Width)).gotoLine(anchor, m.filesAvail(m.Width, viewHeight(*m)))}
+	m.Files.Viewer = &FileView{Title: msg.title, Notice: msg.notice, Logical: msg.lines, Scroll: layoutLines(msg.lines, BoxInner(m.Width)).gotoLine(anchor, m.filesAvail(m.Width, viewHeight(*m)))}
 }
 
 // filesCur is the selected entry, or nil on an empty list.
@@ -310,7 +322,7 @@ func (m Model) filesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
-func (m Model) renderFiles(w, vh int) string {
+func (m *Model) renderFiles(w, vh int) string {
 	inner := BoxInner(w)
 	title := itemTitle("Files", m.Files.Sel, len(m.Files.Files))
 	hints := m.filesHintRows(w, m.Files.Viewer != nil, m.Files.ShowHidden)
@@ -331,6 +343,9 @@ func (m Model) renderFiles(w, vh int) string {
 		avail := m.filesAvail(w, vh)
 		top := layout.clamp(v.Scroll, avail)
 		title = fmt.Sprintf("File · lines %d-%d/%d", layout.topLine(top), layout.topLine(top+max(0, avail-1)), len(v.Logical))
+		if m.captureNotice() != "" {
+			title += " retained"
+		}
 	}
 	return panel(title, body, hints, w, vh)
 }
@@ -374,7 +389,7 @@ func (m Model) renderFileViewer(w, vh int) []string {
 	if notice := m.captureNotice(); notice != "" {
 		for _, l := range Wrap(notice, BoxInner(w)) {
 			style := Guidance
-			if m.Files.Capture.Truncated || m.Files.Capture.ReadError != "" || m.Files.Capture.Op == watch.OpDelete {
+			if m.Files.Capture == nil || m.Files.Capture.Truncated || m.Files.Capture.ReadError != "" || m.Files.Capture.Op == watch.OpDelete {
 				style = WarnSt.Bold(false)
 			}
 			lines = append(lines, style.Render(l))

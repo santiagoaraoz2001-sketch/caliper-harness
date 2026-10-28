@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"specific-harness/internal/checkreport"
 	"specific-harness/internal/llm"
 	"specific-harness/internal/outcome"
 	"specific-harness/internal/prompts"
@@ -201,6 +202,7 @@ func RoundFor(a *Assignment, commentID string) *TaskRound {
 }
 
 type Entry struct {
+	UserNoteID       string      `json:"user_note_id,omitempty"` // durable queue identity, not authority
 	Round            *TaskRound  `json:"round,omitempty"`
 	PreparationScope string      `json:"preparation_scope,omitempty"` // append-site owner/project identity, never authority
 	Message          llm.Message `json:"message"`
@@ -214,23 +216,27 @@ type WorkflowScope = tool.WorkflowScope
 // Continuation is the bounded conversation, independent of the full raw log.
 // Prompt is the latest measured request, not current occupancy or cumulative cost.
 type Continuation struct {
-	Workflow    *WorkflowScope `json:"workflow,omitempty"`
-	Assignment  *Assignment    `json:"assignment,omitempty"`
-	Coding      *CodingState   `json:"coding,omitempty"`
-	SchemaBytes int            `json:"schema_bytes,omitempty"`
-	SchemaKey   string         `json:"schema_key,omitempty"`
-	Version     int            `json:"version"`
-	Entries     []Entry        `json:"entries"`
-	Compactions int            `json:"compactions"`
-	Revision    int            `json:"revision"`
-	Prompt      int            `json:"prompt"`
-	Measured    bool           `json:"measured"`
-	BasisTokens int            `json:"basis_tokens,omitempty"`
-	BasisChars  int            `json:"basis_chars,omitempty"`
-	ModelKey    string         `json:"model_key,omitempty"`
+	// ToolView is an explicit user exposure choice, never inferred from selected nodes or role registries.
+	ToolView     string         `json:"tool_view,omitempty"`
+	PendingNotes []UserNote     `json:"pending_notes,omitempty"`
+	Workflow     *WorkflowScope `json:"workflow,omitempty"`
+	Assignment   *Assignment    `json:"assignment,omitempty"`
+	Coding       *CodingState   `json:"coding,omitempty"`
+	SchemaBytes  int            `json:"schema_bytes,omitempty"`
+	SchemaKey    string         `json:"schema_key,omitempty"`
+	Version      int            `json:"version"`
+	Entries      []Entry        `json:"entries"`
+	Compactions  int            `json:"compactions"`
+	Revision     int            `json:"revision"`
+	Prompt       int            `json:"prompt"`
+	Measured     bool           `json:"measured"`
+	BasisTokens  int            `json:"basis_tokens,omitempty"`
+	BasisChars   int            `json:"basis_chars,omitempty"`
+	ModelKey     string         `json:"model_key,omitempty"`
 }
 
 func (c Continuation) Clone() Continuation {
+	c.PendingNotes = append([]UserNote(nil), c.PendingNotes...)
 	if c.Assignment != nil {
 		value := *c.Assignment
 		c.Assignment = &value
@@ -241,10 +247,17 @@ func (c Continuation) Clone() Continuation {
 	}
 	if c.Coding != nil {
 		value := *c.Coding
+		value.Report = value.Report.Clone()
 		c.Coding = &value
 		if value.Receipt != nil {
 			receipt := *value.Receipt
+			receipt.Report = receipt.Report.Clone()
 			c.Coding.Receipt = &receipt
+			if receipt.Prerequisites != nil {
+				observations := *receipt.Prerequisites
+				observations.Observations = append([]checkreport.PrerequisiteObservation(nil), observations.Observations...)
+				c.Coding.Receipt.Prerequisites = &observations
+			}
 			if receipt.Acceptance != nil {
 				acceptance := *receipt.Acceptance
 				c.Coding.Receipt.Acceptance = &acceptance
@@ -328,6 +341,19 @@ func (c Continuation) Snapshot() Continuation {
 
 // Validate checks shape, provenance and complete native correlation. Storage uses the same JSONL format without a scanner-derived size ceiling.
 func (c Continuation) Validate() error {
+	if c.ToolView != "" && c.ToolView != "coding" && c.ToolView != "full" && c.ToolView != "workflow" {
+		return fmt.Errorf("invalid user tool view")
+	}
+	if c.ToolView == "workflow" && c.Workflow == nil {
+		return fmt.Errorf("explicit workflow tool view requires selected scope")
+	}
+	notes := map[string]bool{}
+	for _, note := range c.PendingNotes {
+		if note.ID == "" || note.SessionID == "" || strings.TrimSpace(note.Text) == "" || notes[note.ID] {
+			return fmt.Errorf("invalid pending user note")
+		}
+		notes[note.ID] = true
+	}
 	if w := c.Workflow; w != nil && (w.Store == "" || !(w.Kind == "root" && w.ID == "" || w.ID != "" && (w.Kind == "plan" || w.Kind == "approach" || w.Kind == "task"))) {
 		return fmt.Errorf("invalid workflow scope identity")
 	}
@@ -349,7 +375,7 @@ func (c Continuation) Validate() error {
 	}
 	intent, task := 0, 0
 	for _, e := range c.Entries {
-		if e.PreparationScope != "" && (e.Kind != "guidance" && e.Kind != "history" || e.Message.Role != "user" || e.Unread || len(e.Message.ToolCalls) != 0 || e.Message.ToolCallID != "" || e.Message.Name != "") {
+		if e.PreparationScope != "" && (e.Kind != "guidance" && e.Kind != "schema" && e.Kind != "history" || e.Message.Role != "user" || e.Unread || len(e.Message.ToolCalls) != 0 || e.Message.ToolCallID != "" || e.Message.Name != "") {
 			return fmt.Errorf("invalid preparation-guidance provenance")
 		}
 		if r := e.Round; r != nil && (r.Store == "" || r.Workspace == "" || r.TaskID == "" || r.Attempt <= 0 || e.Kind != "note" && e.Kind != "guidance" && e.Kind != "history") {
@@ -363,17 +389,17 @@ func (c Continuation) Validate() error {
 			intent++
 		case "task":
 			task++
-		case "history", "note", "output", "schema", "summary", "failure", "evidence", "guidance":
+		case "history", "note", "answer", "output", "schema", "summary", "failure", "evidence", "guidance":
 		default:
 			return fmt.Errorf("invalid continuation kind %q", e.Kind)
 		}
 		if e.Kind == "history" && e.Message.Role == "assistant" {
 			role = "assistant"
 		}
-		if e.Message.Role == "tool" && (e.Kind == "output" || e.Kind == "failure" || e.Kind == "history") {
+		if e.Message.Role == "tool" && (e.Kind == "output" || e.Kind == "answer" || e.Kind == "failure" || e.Kind == "history") {
 			role = "tool"
 		}
-		if e.Message.Role != role || (e.Unread && e.Kind != "output" && e.Kind != "schema" && e.Kind != "failure") {
+		if e.Message.Role != role || (e.Unread && e.Kind != "output" && e.Kind != "answer" && e.Kind != "schema" && e.Kind != "failure") {
 			return fmt.Errorf("invalid continuation role/unread")
 		}
 	}
@@ -421,8 +447,44 @@ func RestoreWithPrompts(events []Event, window int, pc *prompts.Catalog, modelKe
 	if invalid {
 		notice += "; newer invalid snapshot ignored"
 	}
+	// Queue receipts can precede the latest continuation. Reconcile the whole
+	// existing archive by stable identity, so a crash before capture loses none.
+	queued, acknowledged := map[string]UserNote{}, map[string]UserNote{}
+	var queueOrder []string
+	for _, event := range events {
+		if event.Kind != "btw_queued" && event.Kind != "btw_ack" {
+			continue
+		}
+		var note UserNote
+		if err := json.Unmarshal([]byte(event.Text), &note); err != nil || note.ID == "" {
+			return c, notice, fmt.Errorf("invalid durable user-note receipt")
+		}
+		if event.Kind == "btw_queued" {
+			if prior, ok := queued[note.ID]; ok && prior != note {
+				return c, notice, fmt.Errorf("user-note identity has conflicting text")
+			}
+			if _, ok := queued[note.ID]; !ok {
+				queueOrder = append(queueOrder, note.ID)
+			}
+			queued[note.ID] = note
+		} else {
+			if prior, ok := acknowledged[note.ID]; ok && prior != note {
+				return c, notice, fmt.Errorf("user-note acknowledgement conflicts")
+			}
+			acknowledged[note.ID] = note
+		}
+	}
+	rawTextResults := map[int]bool{}
 	for _, e := range events[start:] {
 		switch e.Kind {
+		case "consumed":
+			var receipt ConsumptionReceipt
+			if json.Unmarshal([]byte(e.Text), &receipt) != nil || !c.consume(receipt, rawTextResults) {
+				// A corrupt, stale or legacy projection cannot prove processing.
+				if !strings.Contains(notice, "unconfirmed consumption retained") {
+					notice += "; unconfirmed consumption retained unread"
+				}
+			}
 		case "coding":
 			if err := json.Unmarshal([]byte(e.Text), &c.Coding); err != nil {
 				return c, notice, err
@@ -455,6 +517,10 @@ func RestoreWithPrompts(events []Event, window int, pc *prompts.Catalog, modelKe
 			c.Add("reply", "assistant", e.Text, false)
 		case "btw":
 			c.Add("note", "user", "USER COMMENT: "+e.Text, false)
+		case "btw_received":
+			// Capture is not delivery. A later continuation replaces this fallback
+			// with the committed note; interruption still preserves the user's intent.
+			c.Add("note", "user", "Undelivered user comment: "+e.Text, false)
 		case "task_comment":
 			var comment outcome.TaskComment
 			if err := json.Unmarshal([]byte(e.Text), &comment); err != nil {
@@ -469,7 +535,15 @@ func RestoreWithPrompts(events []Event, window int, pc *prompts.Catalog, modelKe
 				c.Entries[len(c.Entries)-1].Round = RoundFor(a, comment.ID)
 			}
 		case "result":
+			rawTextResults[len(c.Entries)] = true
 			c.Add("output", "user", e.Text, true)
+		case "ask_answer":
+			n := len(c.Entries)
+			if n > 0 && c.Entries[n-1].Kind == "output" && c.Entries[n-1].Message.Content == e.Text {
+				c.Entries[n-1].Kind = "answer"
+			} else {
+				c.Add("answer", "user", e.Text, false)
+			}
 		case "error", "failed", "stopped", "cancelled":
 			c.Add("failure", "user", e.Kind+": "+e.Text, false)
 		case "enforcement":
@@ -477,6 +551,7 @@ func RestoreWithPrompts(events []Event, window int, pc *prompts.Catalog, modelKe
 		case "evidence":
 			c.Add("evidence", "user", e.Text, false)
 		case "compact":
+			clear(rawTextResults) // Conservative reconstruction changes entry indices.
 			keep, entries := c.Protected(3), c.Entries
 			c.Entries = nil
 			for i, entry := range entries {
@@ -495,6 +570,32 @@ func RestoreWithPrompts(events []Event, window int, pc *prompts.Catalog, modelKe
 	c.settleCrashTail()
 	if err := c.validateGroups(); err != nil {
 		return c, notice, err
+	}
+	for _, note := range c.PendingNotes {
+		if _, ok := queued[note.ID]; !ok {
+			queued[note.ID] = note
+			queueOrder = append(queueOrder, note.ID)
+		}
+	}
+	c.PendingNotes = nil
+	for _, id := range queueOrder {
+		note := queued[id]
+		ack, acknowledgedNote := acknowledged[id]
+		if acknowledgedNote && ack != note {
+			return c, notice, fmt.Errorf("user-note acknowledgement does not match queued intent")
+		}
+		if !acknowledgedNote {
+			c.PendingNotes = append(c.PendingNotes, note)
+			continue
+		}
+		found := false
+		for _, entry := range c.Entries {
+			found = found || entry.UserNoteID == id
+		}
+		if !found {
+			c.Add("note", "user", "USER COMMENT: "+note.Text, false)
+			c.Entries[len(c.Entries)-1].UserNoteID = id
+		}
 	}
 	c.Invalidate()
 	if len(modelKey) == 0 || modelKey[0] != c.ModelKey {
@@ -534,13 +635,16 @@ func (c Continuation) Protected(schemasKeep int) []bool {
 	for i := len(c.Entries) - 1; i >= 0; i-- {
 		e := c.Entries[i]
 		switch e.Kind {
-		case "injected", "intent", "task", "note", "failure", "evidence", "guidance":
+		case "injected", "intent", "task", "note", "answer", "failure", "evidence", "guidance":
 			keep[i] = true
 		case "schema":
 			schemas++
 			keep[i] = schemas <= schemasKeep
 		}
 		keep[i] = keep[i] || e.Unread
+		// Native Ask replies are authenticated tool results; preserve the whole
+		// correlated call/result group even after the answer has been consumed.
+		keep[i] = keep[i] || e.Message.Role == "tool" && e.Message.Name == "ask"
 	}
 	for i := 0; i < len(c.Entries); {
 		end := c.GroupEnd(i)

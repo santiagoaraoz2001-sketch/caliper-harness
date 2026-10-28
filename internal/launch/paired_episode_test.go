@@ -127,11 +127,16 @@ func TestPairedLaunchBehaviorBeforeSuite(t *testing.T) {
 				t.Fatalf("missing actual behavior receipt: %+v", records)
 			}
 			if body == "broken" {
-				if *check.Acceptance.ExitCode == 0 || check.ExitCode != nil || len(m.prompts) != 1 || actual.State != plan.TaskFailed || actual.Qualified() || !result.Failed {
+				owner := resultOf(actual)
+				restored := codingFromCheck(d, &owner, actual)
+				if restored.Receipt == nil || restored.Receipt.Status != "passed" || restored.Receipt.Acceptance.Status != "failed" || restored.Passed() || restored.Validate() != nil {
+					t.Fatalf("readback lost independent statuses: %+v", restored.Receipt)
+				}
+				if *check.Acceptance.ExitCode == 0 || check.ExitCode == nil || *check.ExitCode != 0 || len(m.prompts) != 1 || actual.State != plan.TaskFailed || actual.Qualified() || !result.Failed {
 					t.Fatalf("failed behavior assertion masked by suite/PASS: %+v %+v", actual, check)
 				}
-				if _, err = os.Stat(filepath.Join(dir, "suite-marker")); !os.IsNotExist(err) {
-					t.Fatalf("suite ran after failed acceptance: %v", err)
+				if _, err = os.Stat(filepath.Join(dir, "suite-marker")); err != nil {
+					t.Fatalf("independent suite did not run after failed acceptance: %v", err)
 				}
 				return
 			}

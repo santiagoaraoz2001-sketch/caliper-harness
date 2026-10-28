@@ -186,7 +186,7 @@ func TestFilesRefreshConfiguredBoundedRead(t *testing.T) {
 		t.Fatalf("read failed: %q", m.Files.Err)
 	}
 	text := strings.Join(m.Files.Viewer.Logical, "\n")
-	if !utf8.ValidString(text) || !strings.Contains(text, "bytes omitted") || strings.Contains(text, "more lines capped") || len(text) > 200 {
+	if !utf8.ValidString(text) || !strings.Contains(m.Files.Viewer.Notice, "bytes omitted") || strings.Contains(text, "more lines capped") || len(text) > 200 {
 		t.Fatalf("unbounded/false result bytes=%d prefix=%q", len(text), text[:min(120, len(text))])
 	}
 }

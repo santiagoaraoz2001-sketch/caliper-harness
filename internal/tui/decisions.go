@@ -171,7 +171,7 @@ func (m Model) decisionsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	return m, nil, true
 }
 
-func (m Model) renderDecisions(w, vh int) string {
+func (m *Model) renderDecisions(w, vh int) string {
 	lines, hints, page := m.decisionsLayout(w, vh)
 	start := min(max(0, m.Decisions.scroll), max(0, len(lines)-page))
 	end := min(len(lines), start+page)

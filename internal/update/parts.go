@@ -28,12 +28,20 @@ type ArchivePart struct {
 }
 
 func (m Manager) downloadArchive(ctx context.Context, r Release, dst io.Writer, want string) error {
+	if err := m.phase(ctx, "Downloading update"); err != nil {
+		return err
+	}
+	dst = progressWriter{ctx, dst, m.progress}
 	if r.ArchiveURL != "" {
 		response, e := m.get(ctx, r.ArchiveURL)
 		if e != nil {
 			return e
 		}
 		defer response.Body.Close()
+		if m.progress != nil {
+			m.progress.value.TotalBytes = max(0, response.ContentLength)
+			m.progress.emit(true)
+		}
 		_, e = io.Copy(dst, response.Body)
 		return e
 	}
@@ -50,6 +58,18 @@ func (m Manager) downloadArchive(ctx context.Context, r Release, dst io.Writer, 
 	archive := "caliper-" + r.Version + "-" + m.Platform + ".tar.gz"
 	if manifest.Format != 1 || manifest.Archive != archive || !strings.EqualFold(manifest.SHA256, want) || len(manifest.Parts) == 0 {
 		return fmt.Errorf("invalid split-archive manifest")
+	}
+	if m.progress != nil {
+		var total int64
+		for _, part := range manifest.Parts {
+			if part.Bytes <= 0 || total > (1<<63-1)-part.Bytes {
+				total = 0
+				break
+			}
+			total += part.Bytes
+		}
+		m.progress.value.TotalBytes = total
+		m.progress.emit(true)
 	}
 	base, e := url.Parse(r.PartsURL)
 	if e != nil {

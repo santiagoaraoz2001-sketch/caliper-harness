@@ -104,6 +104,7 @@ func TestCheckDeclaredBetaNonzeroCannotBeOverridden(t *testing.T) {
 	declareFixtureCheck(t, s, aid, ids, command)
 	m := &outcomeModel{reply: "worker artifact", review: "PASS falsely reported"}
 	d := depsFor(s, m)
+	d.Wf.MaxRetries = 2 // A deterministic failed check must not repeat implementation.
 	// Even current verification-off cannot erase an explicit admitted command.
 	if _, err := Launch(context.Background(), d, aid); err != nil {
 		t.Fatal(err)
@@ -116,7 +117,10 @@ func TestCheckDeclaredBetaNonzeroCannotBeOverridden(t *testing.T) {
 	if err = json.Unmarshal([]byte(task.AttemptLog), &records); err != nil {
 		t.Fatal(err)
 	}
-	if task.Qualified() || task.State != plan.TaskFailed || task.Execution != outcome.Completed || task.Verification != outcome.Rejected || task.Result != "worker artifact" || m.calls != 1 || len(records) != 2 || records[1].Command != command || records[1].ExitCode == nil || *records[1].ExitCode != 1 || !strings.Contains(records[1].Output, "declared reviewer-only approval is false") {
+	check := ownedAttemptRecords(t, records, "check", 1, 1)[0]
+	ownedAttemptRecords(t, records, "execution", 1, 1)
+	ownedAttemptRecords(t, records, "execution_contract", 1, 1)
+	if task.Qualified() || task.State != plan.TaskFailed || task.Execution != outcome.Failed || task.Verification != outcome.Rejected || task.Result != "worker artifact" || m.calls != 1 || task.Attempts != 1 || len(records) != 3 || check.Command != command || check.ExitCode == nil || *check.ExitCode != 1 || !strings.Contains(check.Output, "declared reviewer-only approval is false") {
 		t.Fatalf("deterministic failed receipt lost: %+v records%+v calls%d", task, records, m.calls)
 	}
 }
@@ -186,10 +190,15 @@ func TestCheckReceiptBoundaries(t *testing.T) {
 			if e = json.Unmarshal([]byte(task.AttemptLog), &records); e != nil {
 				t.Fatal(e)
 			}
-			if len(records) < 2 {
-				t.Fatalf("missing receipt: %+v", task)
+			if mode == "missing-tool" {
+				ownedAttemptRecords(t, records, "check", task.Attempts, 0)
+				execution := ownedAttemptRecords(t, records, "execution", task.Attempts, 1)[0]
+				if task.Qualified() || task.Verification != outcome.Unverified || task.Result != "" || m.calls != 0 || task.Execution != outcome.Failed || !strings.Contains(execution.Error, "worker needs registered Bash") {
+					t.Fatalf("missing tool fabricated execution: task=%+v calls=%d record=%+v", task, m.calls, execution)
+				}
+				return
 			}
-			check := records[1]
+			check := ownedAttemptRecords(t, records, "check", task.Attempts, 1)[0]
 			if check.Kind != "check" || check.Command != command || check.Attempt != task.Attempts || (mode != "missing-tool" && (check.Started == "" || check.Ended == "")) {
 				t.Fatalf("receipt identity: %+v", check)
 			}
@@ -201,9 +210,6 @@ func TestCheckReceiptBoundaries(t *testing.T) {
 			}
 			if task.Qualified() || task.Verification != outcome.Unverified || check.ExitCode != nil || task.Result != "worker artifact" {
 				t.Fatalf("incomplete check qualified/lost work: %+v %+v", task, check)
-			}
-			if mode == "missing-tool" && (check.Started != "" || check.Ended != "" || !strings.Contains(check.Error, "neither episode command executed")) {
-				t.Fatalf("fabricated missing-tool execution: %+v", check)
 			}
 			if mode == "timeout" || mode == "cancel" {
 				if check.Output != "BEFORE" {

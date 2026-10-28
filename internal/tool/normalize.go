@@ -58,22 +58,6 @@ func argumentName(d Definition, name string) string {
 	return name
 }
 
-// planningVocabulary mirrors the data arguments the plan tool advertises
-// across its per-question schemas (run.planningDefinition) plus captured
-// entry spellings. The current question changes each turn, so a field from
-// an earlier question is stale context, not an unknown meaning. The invoke
-// and more discriminators are excluded: an action or branch choice is
-// never stale-safe to drop.
-var planningVocabulary = map[string]bool{
-	"title": true, "outcome": true, "rules": true, "articles": true,
-	"proof": true, "strategy": true, "objective": true, "approach": true,
-	"task": true, "current": true, "target": true, "acceptance": true,
-	"tests": true, "acceptance_command": true, "check_command": true,
-	"execution": true, "validation": true, "verify": true,
-	"field": true, "value": true, "feedback": true,
-	"prompt": true, "method": true, "goal": true,
-}
-
 func normalizeFields(d Definition, input map[string]any) (map[string]any, string) {
 	out := make(map[string]any, len(input))
 	keys := make([]string, 0, len(input))
@@ -83,9 +67,6 @@ func normalizeFields(d Definition, input map[string]any) (map[string]any, string
 	sort.Strings(keys)
 	for _, key := range keys {
 		canonical, value := argumentName(d, key), input[key]
-		if d.Name == "plan" && !d.hasParam(canonical) && planningVocabulary[canonical] {
-			continue // Stale field from another planning question; required checks still govern.
-		}
 		if prior, present := out[canonical]; present {
 			equal := reflect.DeepEqual(prior, value)
 			for _, p := range d.Params {

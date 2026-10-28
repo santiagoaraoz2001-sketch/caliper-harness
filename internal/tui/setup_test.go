@@ -211,3 +211,103 @@ func TestSetupViewsFitAndDiscloseLongReview(t *testing.T) {
 		}
 	}
 }
+
+// A retained initial choice is not an explicit draft. Keep both models visible:
+// removing the old row would let the fallback index hide this regression.
+func TestSetupRebasesUntouchedCodingAndPreservesExplicitDraft(t *testing.T) {
+	for _, mode := range []string{"untouched", "arrow-draft", "accepted-draft"} {
+		t.Run(mode, func(t *testing.T) {
+			m := setupFixture(t, 100, 30)
+			m.Cfg.Model.Name, m.Cfg.Model.Server, m.Cfg.Model.Runtime = "existing-local-model", "http://127.0.0.1:8080/v1", "openai"
+			m.Setup = SetupState{}
+			m.OpenSetup()
+			for _, name := range []string{"staged-coder", "catalog-selected-model"} {
+				row := m.Serve.Rows[0]
+				row.Ep.Model = name
+				m.Serve.Rows = append(m.Serve.Rows, row)
+			}
+			m.Setup.Check.SetValue("printf retained-check")
+			want := "catalog-selected-model"
+			if mode != "untouched" {
+				m = viewportKey(m, tea.KeyDown)
+				if mode == "accepted-draft" {
+					m = viewportKey(m, tea.KeyEnter)
+				}
+				want = "staged-coder"
+			}
+			m = submit(m, "/manage")
+			m.Serve.Sel = 2
+			m = key(m, "u")
+			if m.Cfg.Model.Name != "catalog-selected-model" {
+				t.Fatal("Manage selection did not commit", m.Cfg.Model)
+			}
+			m.OpenSetup()
+			if m.Setup.Stage == 0 && m.setupChoices()[m.setupIndex(m.setupChoices())].model.Name != want {
+				t.Fatal("wrong retained Setup selection", m.Setup.Pick)
+			}
+			for i := 0; i < 4 && m.setupActive(); i++ {
+				m = viewportKey(m, tea.KeyEnter)
+			}
+			effective, used, err := config.Load(m.CfgPath)
+			if err != nil || !used || m.Setup.Err != "" || effective.Model.Name != want || effective.Model.Server != "http://127.0.0.1:8080/v1" || effective.Model.Runtime != "openai" || effective.Coding.CheckCommand != "printf retained-check" {
+				t.Fatalf("wrong saved effective role/draft: %+v error=%v setup=%s", effective.Model, err, m.Setup.Err)
+			}
+			if m.Cfg.Model.Name != want || m.Setup.ModelBaseKey != setupModelKey(effective.Model) {
+				t.Fatal("saved baseline or live role stale")
+			}
+		})
+	}
+}
+
+func TestSetupRebasesUntouchedJudgeAndPreservesExplicitDraft(t *testing.T) {
+	for _, mode := range []string{"untouched", "disabled", "arrow-draft", "accepted-draft", "disabled-draft"} {
+		t.Run(mode, func(t *testing.T) {
+			m := setupFixture(t, 100, 30)
+			m.Cfg.Model.Name, m.Cfg.Model.Server, m.Cfg.Model.Runtime = "existing-local-model", "http://127.0.0.1:8080/v1", "openai"
+			m.Cfg.Decision.Model, m.Cfg.Decision.Server, m.Cfg.Decision.Runtime, m.Cfg.Decision.Disabled = "existing-local-model", m.Cfg.Model.Server, "openai", false
+			m.Setup = SetupState{}
+			m.OpenSetup()
+			for _, name := range []string{"staged-judge", "catalog-selected-judge"} {
+				row := m.Serve.Rows[0]
+				row.Ep.Model = name
+				m.Serve.Rows = append(m.Serve.Rows, row)
+			}
+			m = viewportKey(m, tea.KeyEnter)
+			want, disabled := "catalog-selected-judge", mode == "disabled"
+			if mode == "arrow-draft" || mode == "accepted-draft" {
+				m = viewportKey(m, tea.KeyDown)
+				if mode == "accepted-draft" {
+					m = viewportKey(m, tea.KeyEnter)
+				}
+				want = "staged-judge"
+			}
+			if mode == "disabled-draft" {
+				m.Setup.Judge.Disabled = true
+				want = "existing-local-model"
+			}
+			m.Setup.Check.SetValue("printf retained-check")
+			m = submit(m, "/manage")
+			m.Serve.Sel = 2
+			m.serveUseJudge()
+			if m.Settings.DecisionDraft == nil {
+				t.Fatal("no explicit judge selection")
+			}
+			m.Settings.DecisionDraft.Disabled = disabled
+			if cmd := m.applyDecisionSelection(); cmd != nil {
+				t.Fatal("external fixture requested activation")
+			}
+			m.saveSettings()
+			if mode == "disabled-draft" {
+				disabled = true
+			}
+			m.OpenSetup()
+			for i := 0; i < 4 && m.setupActive(); i++ {
+				m = viewportKey(m, tea.KeyEnter)
+			}
+			effective, used, err := config.Load(m.CfgPath)
+			if err != nil || !used || m.Setup.Err != "" || effective.Decision.Model != want || effective.Decision.Disabled != disabled || effective.Decision.Server != m.Cfg.Model.Server || effective.Decision.Runtime != "openai" || effective.Model.Name != "existing-local-model" || effective.Coding.CheckCommand != "printf retained-check" {
+				t.Fatalf("wrong effective judge/drafts: %+v error=%v setup=%s", effective.Decision, err, m.Setup.Err)
+			}
+		})
+	}
+}

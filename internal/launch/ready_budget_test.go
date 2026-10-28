@@ -54,7 +54,7 @@ func TestReadinessBudgetMatchesActualRequest(t *testing.T) {
 }
 
 func TestReadinessEditableOptionsAndCompleteBytes(t *testing.T) {
-	_, _, d := gateDeps(t, 1)
+	_, aid, d := gateDeps(t, 1)
 	yaml := prompts.Builtin().YAML()
 	yaml = strings.Replace(yaml, servesGoal, "all requested tasks are bounded and serve the goal", 1)
 	yaml = strings.Replace(yaml, offGoal, "at least one task needs scope or behavior revision", 1)
@@ -75,10 +75,14 @@ func TestReadinessEditableOptionsAndCompleteBytes(t *testing.T) {
 		got = q
 		return decision.Verdict{Option: q.Options[1], Confidence: 1}, nil
 	}
-	if err = checkCoherence(context.Background(), d, "actual-approach", p, tasks); err == nil {
+	if err = checkCoherence(context.Background(), d, aid, p, tasks); err == nil {
 		t.Fatal("edited second option must still refuse")
 	}
-	req, size, err := coherenceRequest(d, p, tasks)
+	a, err := plan.GetApproach(d.Store, aid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, size, err := coherenceRequest(d, p, a, tasks)
 	if err != nil {
 		t.Fatal(err)
 	}

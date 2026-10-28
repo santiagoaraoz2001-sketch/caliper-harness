@@ -11,11 +11,11 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"specific-harness/internal/tui/thirdparty/textarea"
 
-	"specific-harness/internal/agent"
 	"specific-harness/internal/config"
 	"specific-harness/internal/hw"
 	"specific-harness/internal/session"
 	"specific-harness/internal/tools/ask"
+	"specific-harness/internal/tools/bash"
 	"specific-harness/internal/tui/slash"
 )
 
@@ -37,6 +37,7 @@ const (
 	ViewStatus    ViewID = "status"
 	ViewManage    ViewID = "manage"
 	ViewSetup     ViewID = "setup"
+	ViewTests     ViewID = "tests"
 )
 
 // View describes a tab-placeable view: its promise plus the task
@@ -63,6 +64,7 @@ var Views = []View{
 	{ViewStatus, "Status", "read-only runtime dashboard", "T6.5"},
 	{ViewManage, "Models & Servers", "saved connections and runtime controls", "T6.5"},
 	{ViewSetup, "Setup", "configure this project", ""},
+	{ViewTests, "Tests", "design, configure and run project tests", ""},
 }
 
 func viewByID(id ViewID) View {
@@ -97,7 +99,8 @@ type Tab struct {
 	// chat is this tab's own conversation: history, stream, run
 	// state. m.Chat mirrors the active tab's chat; switchTab,
 	// newTab, and closeTab carry it across on every tab change.
-	chat Chat
+	chat   Chat
+	editor *tabEditor
 }
 
 // Alert is one alert-line entry: err, warn, or info.
@@ -109,15 +112,17 @@ type Alert struct {
 // Shared crosses the Model value boundary: background goroutines
 // reach the program through this one pointer.
 type Shared struct {
-	Prog *tea.Program
+	Prog     *tea.Program
+	Services *bash.ServiceOwner
 }
 
 // Model is the app: tabs, slash input, completion, alerts, footer.
 type Model struct {
+	alertHidden         bool
 	chatTab             uint64
 	nextTab             uint64
-	chatEditor          *tabEditor
 	settingsEditor      *tabEditor
+	testsEditor         *tabEditor
 	Tabs                []Tab
 	Active              int
 	Input               textarea.Model
@@ -153,6 +158,7 @@ type Model struct {
 	Files               FilesState
 	Settings            SettingsState
 	Setup               SetupState
+	Tests               TestsState
 	CfgPath             string
 	lastTool            string
 	lastToolAt          time.Time
@@ -195,7 +201,7 @@ func New(cfg config.Config, version string) Model {
 		Server:        cfg.Model.Server,
 		ModelName:     cfg.Model.Name,
 		ReducedMotion: os.Getenv("CALIPER_HARNESS_REDUCED_MOTION") == "1" || os.Getenv("SPECIFIC_HARNESS_REDUCED_MOTION") == "1",
-		Shared:        &Shared{},
+		Shared:        &Shared{Services: &bash.ServiceOwner{}},
 		Width:         80,
 		Height:        24,
 		HistIdx:       -1,
@@ -369,6 +375,7 @@ func (m *Model) acceptPicker(s []string) {
 }
 
 func (m *Model) alert(kind, text string) {
+	m.alertHidden = false
 	m.Alerts = append(m.Alerts, Alert{kind, text})
 	if len(m.Alerts) > m.Cfg.UI.MaxAlerts {
 		m.Alerts = m.Alerts[len(m.Alerts)-m.Cfg.UI.MaxAlerts:]
@@ -418,6 +425,10 @@ func (m *Model) openMenu(name string) {
 // authChat switches the auth mode: yolo, risky, or all. It takes
 // effect on the next run; the in-flight gate is already built.
 func (m *Model) authChat(args []string) {
+	if m.Tests.Busy != "" {
+		m.alert("info", "change authorization after the test command settles")
+		return
+	}
 	if len(args) == 0 {
 		m.openMenu("auth")
 		return
@@ -470,6 +481,17 @@ func (m *Model) submit(raw string) tea.Cmd {
 	}
 	// An armed settings edit eats plain text: enter applies, a slash
 	// command disarms and runs normally.
+	if m.testsActive() && m.Tests.Editing {
+		if command {
+			_, _, command = m.Reg.Parse(input)
+		}
+		if command {
+			m.cancelTestEdit()
+		} else {
+			m.applyTestEdit(raw)
+			return nil
+		}
+	}
 	if m.settingsActive() && m.Settings.Editing != nil {
 		// Registered slash commands escape an edit; other slash text is a value (e.g. an absolute path).
 		if command {
@@ -522,6 +544,9 @@ func (m *Model) submit(raw string) tea.Cmd {
 		if ViewID(c.View) == ViewDiff {
 			m.Diff.History, m.Diff.Filter = false, ""
 		}
+		if ViewID(c.View) == ViewTests {
+			return m.refreshTests()
+		}
 		if ViewID(c.View) == ViewPlans {
 			return m.refreshPlans(target)
 		}
@@ -570,7 +595,11 @@ func (m *Model) submit(raw string) tea.Cmd {
 	case "new":
 		m.newChat()
 	case "stop":
-		m.stopChat()
+		if m.Tests.Busy != "" {
+			m.stopTest()
+		} else {
+			m.stopChat()
+		}
 	case "retry":
 		m.retryChat()
 	case "btw":
@@ -600,27 +629,34 @@ func (m *Model) submit(raw string) tea.Cmd {
 	case "workflow":
 		m.workflowChat(args)
 	case "tools":
-		if m.Chat.Running || m.Wf.Busy != "" || m.compactBusy(false) || m.servingPending() {
+		if len(args) > 0 && (m.Chat.Running || m.Wf.Busy != "" || m.Tests.Busy != "" || m.compactBusy(false) || m.servingPending()) {
 			m.alert("err", "switch tools when idle")
 			break
 		}
 		if len(args) == 1 && (args[0] == "coding" || args[0] == "full") {
-			m.Chat.Tools = args[0]
-			m.Chat.Context.Workflow = nil
-			m.Chat.Context.Invalidate()
+			if err := m.selectToolView(args[0], nil); err != nil {
+				m.alert("err", err.Error())
+				break
+			}
 		} else if len(args) > 0 {
 			m.alert("err", "use /tools coding or /tools full")
 			break
 		}
-		view := m.Chat.Tools
+		view := m.Chat.toolView()
 		if view == "" {
 			view = "coding"
 		}
-		names := strings.Join(agent.ToolNames(view), ", ")
-		if m.Chat.Context.Workflow != nil {
-			view, names = "workflow", "selected-node legal operations, refreshed at each request"
+		label, names := "next request", "registry is prepared from this profile and selected workflow when work begins"
+		if m.Chat.RegistryKnown {
+			label, names = "last prepared registry", strings.Join(m.Chat.RegistryNames, ", ")
+			if m.Chat.Running {
+				label = "current prepared registry"
+			}
 		}
-		m.Chat.appendLine(lineSys, "tools: "+view+"; active: "+names+". /tools full for planning/memory. Planning: /plans, /workflows; memory: /recall, /remember; GraphQL: caliper-harness graph. Behavior: "+m.Cfg.Behavior.Path)
+		if m.Chat.Context.Workflow != nil {
+			view += " (selected workflow node)"
+		}
+		m.Chat.appendLine(lineSys, "tools: "+view+"; "+label+": "+names+". /tools coding or /tools full changes the next run; /workflow selects planning scope. /help explains usage.")
 	case "auth":
 		m.authChat(args)
 	default:
@@ -639,9 +675,6 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, cmd tea.Cmd) {
 		if next, ok := out.(Model); ok {
 			if next.Tabs[next.Active].feature != "" {
 				next.SyncTabChat()
-			}
-			if next.Chat.Context.Workflow != nil {
-				next.Chat.Tools = "workflow"
 			}
 			next.resizeComposer()
 			next.syncJourneyFocus()
@@ -681,6 +714,9 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, cmd tea.Cmd) {
 		}
 	}()
 	switch msg := msg.(type) {
+	case updateProgressMsg:
+		m.updateProgress(msg)
+		return m, nil
 	case updateCheckedMsg:
 		cmd := m.updateChecked(msg)
 		return m, cmd
@@ -759,6 +795,17 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, cmd tea.Cmd) {
 			m.St.PlanTitle, m.St.PlanApproaches = msg.planTitle, msg.planApproach
 		}
 		return m, nil
+	case testsHistoryMsg:
+		if msg.ticket == m.Tests.Ticket {
+			m.Tests.History, m.Tests.Freshness, m.Tests.Readiness, m.Tests.Err = msg.runs, msg.fresh, msg.ready, ""
+			m.Tests.Specs, m.Tests.ContextConfig = msg.specs, msg.contextConfig
+			if msg.err != nil {
+				m.Tests.Err = msg.err.Error()
+			}
+		}
+		return m, nil
+	case testsDoneMsg:
+		return m, m.onTestDone(msg)
 	case showDialogMsg:
 		if msg.dismiss {
 			if d := m.Chat.Dialog; d != nil && ((msg.answer != nil && d.Answer == msg.answer) || (msg.askDone != nil && d.AskDone == msg.askDone)) {
@@ -770,6 +817,9 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, cmd tea.Cmd) {
 		if msg.workflow != "" {
 			stale = msg.workflow != m.Wf.Busy || msg.ctx == nil || msg.ctx != m.Wf.ctx
 		}
+		if msg.tests != "" {
+			stale = msg.tests != m.Tests.Busy || msg.ctx == nil || msg.ctx != m.Tests.ctx
+		}
 		if stale || (msg.ctx != nil && msg.ctx.Err() != nil) {
 			if msg.kind == "auth" {
 				msg.answer <- "n"
@@ -778,7 +828,7 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, cmd tea.Cmd) {
 			}
 			return m, nil
 		}
-		m.Chat.Dialog = &Dialog{Workflow: msg.workflow, Kind: msg.kind, Prompt: msg.prompt, Answer: msg.answer, Questions: msg.questions, AskDone: msg.askDone}
+		m.Chat.Dialog = &Dialog{Workflow: msg.workflow, Tests: msg.tests, Kind: msg.kind, Prompt: msg.prompt, Answer: msg.answer, Questions: msg.questions, AskDone: msg.askDone}
 		m.syncAskInput(m.askFreeText())
 		return m, nil
 	case tokenMsg:
@@ -957,11 +1007,13 @@ func (m Model) escapeHint() string {
 		if m.Chat.Dialog.Kind == "auth" {
 			return "esc declines"
 		}
-		return "esc skips questions"
+		return "esc skips all questions and discards answers"
 	case m.diffActive() && m.Diff.Viewer != nil, m.plansActive() && m.Plans.Detail != nil, m.sessionsActive() && m.Sessions.Detail != nil, m.filesActive() && m.Files.Path != "":
 		return "esc closes detail"
-	case m.settingsActive() && m.Settings.Editing != nil:
+	case m.testsActive() && m.Tests.Editing, m.settingsActive() && m.Settings.Editing != nil:
 		return "esc cancels edit"
+	case m.testsActive() && m.Tests.Detail:
+		return "esc closes result"
 	case m.setupActive() && m.Setup.Stage > 0:
 		return "esc previous setup step"
 	case len(m.suggestions()) > 0:
@@ -970,9 +1022,11 @@ func (m Model) escapeHint() string {
 		return "esc back one layer"
 	case m.Tabs[m.Active].dock.Focused && m.Tabs[m.Active].at.view == ViewChat:
 		return "esc input"
+	case m.Tests.Busy != "":
+		return "esc stops test command"
 	case m.Chat.Running:
 		return "esc stops run"
-	case len(m.Alerts) > 0:
+	case len(m.Alerts) > 0 && !m.alertHidden:
 		return "esc dismisses alert"
 	case m.Tabs[m.Active].at.view != ViewChat:
 		return "esc chat"
@@ -1061,6 +1115,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.Files.Capture = nil
 			return m, nil
 		}
+		if m.testsActive() && m.Tests.Editing {
+			m.cancelTestEdit()
+			m.alert("info", "test edit cancelled")
+			return m, nil
+		}
+		if m.testsActive() && m.Tests.Detail {
+			m.Tests.Detail = false
+			m.Tests.Scroll = 0
+			return m, nil
+		}
 		if m.settingsActive() && m.Settings.Editing != nil {
 			m.disarmEdit()
 			m.alert("info", "edit cancelled")
@@ -1079,15 +1143,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.Input.Focus()
 			return m, nil
 		}
+		if m.Tests.Busy != "" {
+			m.stopTest()
+			return m, nil
+		}
 		if m.Chat.Running {
 			m.stopChat()
 			return m, nil
 		}
-		if len(m.Alerts) > 0 {
-			m.Alerts = m.Alerts[:len(m.Alerts)-1]
+		if len(m.Alerts) > 0 && !m.alertHidden {
+			m.alertHidden = true
 			return m, nil
 		}
-		if m.diffActive() || m.plansActive() || m.serveActive() || m.Tabs[m.Active].at.view == ViewStatus || m.sessionsActive() || m.decisionsActive() || m.workflowsActive() || m.filesActive() || m.settingsActive() {
+		if m.diffActive() || m.plansActive() || m.serveActive() || m.Tabs[m.Active].at.view == ViewStatus || m.sessionsActive() || m.decisionsActive() || m.workflowsActive() || m.filesActive() || m.settingsActive() || m.testsActive() {
 			m.showChat()
 			return m, nil
 		}
@@ -1223,49 +1291,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if m.setupActive() && len(m.suggestions()) == 0 {
-		if um, cmd, done := m.setupKey(msg); done {
-			return um, cmd
-		}
-	}
-	if m.diffActive() && len(m.suggestions()) == 0 {
-		if um, cmd, done := m.diffKey(msg); done {
-			return um, cmd
-		}
-	}
-	if m.plansActive() && len(m.suggestions()) == 0 {
-		if um, cmd, done := m.plansKey(msg); done {
-			return um, cmd
-		}
-	}
-	if m.serveActive() && len(m.suggestions()) == 0 {
-		if um, cmd, done := m.serveKey(msg); done {
-			return um, cmd
-		}
-	}
-	if m.sessionsActive() && len(m.suggestions()) == 0 {
-		if um, cmd, done := m.sessionsKey(msg); done {
-			return um, cmd
-		}
-	}
-	if m.decisionsActive() && len(m.suggestions()) == 0 {
-		if um, cmd, done := m.decisionsKey(msg); done {
-			return um, cmd
-		}
-	}
-	if m.workflowsActive() && len(m.suggestions()) == 0 {
-		if um, cmd, done := m.workflowsKey(msg); done {
-			return um, cmd
-		}
-	}
-	if m.filesActive() && len(m.suggestions()) == 0 {
-		if um, cmd, done := m.filesKey(msg); done {
-			return um, cmd
-		}
-	}
-	if m.settingsActive() && len(m.suggestions()) == 0 {
-		if um, cmd, done := m.settingsKey(msg); done {
-			return um, cmd
+	if key := viewRoutes[m.Tabs[m.Active].at.view].key; key != nil && len(m.suggestions()) == 0 {
+		if next, cmd, done := key(m, msg); done {
+			return next, cmd
 		}
 	}
 	switch msg.Type {
@@ -1297,12 +1325,13 @@ func keyHelp() string {
 		{"chat", "pgup/pgdn scroll"},
 		{"diff", "↑↓ select · enter open · f comment · esc chat"},
 		{"plans", "↑↓ move · →← expand · enter dive · f comment · r refresh · esc chat"},
-		{"status", "read-only runtime metrics · /manage connections · esc chat"},
+		{"status", "read-only runtime metrics · /manage connections · /chat return"},
 		{"manage", "n Add server · + Add model · g LLM-assisted setup · e Edit · backspace Remove · t Test · u Coding · j Judge · s start · x unload · l load"},
 		{"sessions", "↑↓ select · enter open · r refresh · esc chat"},
+		{"tests", "n add · e JSON edit · space enable · r selected · R enabled · x cancel · Enter results · PgUp/PgDn · d design draft · g guidance · f refresh"},
 		{"slash menu", "↑↓ move · enter complete · esc close"},
 		{"dialogs", "y/n answer · esc dismiss"},
-		{"ask", "↑↓ pick · tab comment · enter answer · esc skip all"},
+		{"ask", "↑↓ pick · tab comment · enter answer · esc skip all; discard answers"},
 		{"tabs", "ctrl+t new tab · ctrl+n/p switch tab · ctrl+w close tab · ctrl+o/g tab back/fwd"},
 	}
 	var b strings.Builder
@@ -1315,9 +1344,6 @@ func keyHelp() string {
 
 // View renders tabs, view, alert, picker, chips, dialog, input, footer.
 func (m Model) View() string {
-	if m.Chat.Context.Workflow != nil {
-		m.Chat.Tools = "workflow"
-	}
 	if m.HelpOpen {
 		lines := Wrap(m.helpBody(), m.Width)
 		start := min(max(0, m.HelpScroll), max(0, len(lines)-max(1, m.Height-len(m.tabChrome())-2)))
@@ -1330,30 +1356,8 @@ func (m Model) View() string {
 	var b strings.Builder
 	b.WriteString(strings.Join(m.tabChrome(), "\n") + "\n")
 	vh := viewHeight(m)
-	if m.Tabs[m.Active].at.view == ViewChat {
-		b.WriteString(m.renderChat(m.Width, vh) + "\n")
-	} else if m.journeyActive() {
-		b.WriteString(m.renderJourney(m.Width, vh) + "\n")
-	} else if m.diffActive() {
-		b.WriteString(m.renderDiff(m.Width, vh) + "\n")
-	} else if m.Tabs[m.Active].at.view == ViewPlans {
-		b.WriteString(m.renderPlans(m.Width, vh) + "\n")
-	} else if m.Tabs[m.Active].at.view == ViewStatus {
-		b.WriteString(m.renderRuntimeStatus(m.Width, vh) + "\n")
-	} else if m.Tabs[m.Active].at.view == ViewManage {
-		b.WriteString(m.renderServe(m.Width, vh) + "\n")
-	} else if m.Tabs[m.Active].at.view == ViewSessions {
-		b.WriteString(m.renderSessions(m.Width, vh) + "\n")
-	} else if m.Tabs[m.Active].at.view == ViewDecisions {
-		b.WriteString(m.renderDecisions(m.Width, vh) + "\n")
-	} else if m.Tabs[m.Active].at.view == ViewWorkflows {
-		b.WriteString(m.renderWorkflows(m.Width, vh) + "\n")
-	} else if m.Tabs[m.Active].at.view == ViewFiles {
-		b.WriteString(m.renderFiles(m.Width, vh) + "\n")
-	} else if m.Tabs[m.Active].at.view == ViewSettings {
-		b.WriteString(m.renderSettings(m.Width, vh) + "\n")
-	} else if m.setupActive() {
-		b.WriteString(m.renderSetup(m.Width, vh) + "\n")
+	if render := viewRoutes[m.Tabs[m.Active].at.view].render; render != nil {
+		b.WriteString(render(&m, m.Width, vh) + "\n")
 	} else {
 		lines := strings.Split(placeholderView(m.Tabs[m.Active]), "\n")
 		for len(lines) < vh {
@@ -1361,7 +1365,10 @@ func (m Model) View() string {
 		}
 		b.WriteString(strings.Join(lines, "\n") + "\n")
 	}
-	if len(m.Alerts) > 0 {
+	if progress := m.updateProgressLine(); progress != "" {
+		b.WriteString(ansi.Truncate(Muted.Render(progress), m.Width, "...") + "\n")
+	}
+	if len(m.Alerts) > 0 && !m.alertHidden {
 		last := m.Alerts[len(m.Alerts)-1]
 		var s string
 		switch last.Kind {
@@ -1372,9 +1379,7 @@ func (m Model) View() string {
 		default:
 			s = InfoSt.Render("i " + last.Text)
 		}
-		if len(m.Alerts) > 1 {
-			s += Muted.Render(fmt.Sprintf(" (+%d more)", len(m.Alerts)-1))
-		}
+
 		if m.serveActive() {
 			s = ansi.Truncate(s, m.Width, "…")
 		}
@@ -1424,7 +1429,7 @@ func (m Model) View() string {
 	left := fmt.Sprintf("Enter send · Ctrl+J newline · → marks tabs · draft %d/3", m.Draft+1)
 	if m.Tabs[m.Active].at.view != ViewChat && !m.askFreeText() {
 		left = "Enter /command · " + m.escapeHint()
-		if m.settingsActive() && m.Settings.Editing != nil {
+		if (m.settingsActive() && m.Settings.Editing != nil) || (m.testsActive() && m.Tests.Editing) {
 			left = "Enter applies edit · " + m.escapeHint()
 		}
 	}
@@ -1490,7 +1495,10 @@ func (m Model) View() string {
 // chips?, dialog?, actual input height + borders, footer (3).
 func viewHeight(m Model) int {
 	vh := m.Height - len(m.tabChrome()) - (m.Input.Height() + 2) - 3 - m.dockExtraHeight()
-	if len(m.Alerts) > 0 {
+	if m.updateProgressLine() != "" {
+		vh--
+	}
+	if len(m.Alerts) > 0 && !m.alertHidden {
 		vh--
 	}
 	if m.Tabs[m.Active].at.view == ViewChat {
@@ -1669,11 +1677,18 @@ func placeholderView(t Tab) string {
 // requestQuit keeps the UI alive until owned work has released its leases.
 func (m *Model) requestQuit() tea.Cmd {
 	m.quitPending = true
+	if m.Tests.loadCancel != nil {
+		m.Tests.loadCancel()
+		m.Tests.loadCancel = nil
+	}
 	if m.Updater != nil && m.Updater.cancel != nil {
 		m.Updater.cancel()
 	}
 	if m.Updater != nil && m.Updater.busy {
 		return nil
+	}
+	if m.Tests.Busy != "" {
+		m.stopTest()
 	}
 	if m.Chat.Running {
 		m.stopChat()
@@ -1690,7 +1705,7 @@ func (m *Model) requestQuit() tea.Cmd {
 	if m.Serve.Loading != "" {
 		return nil
 	}
-	if m.compactBusy(true) || m.Chat.Running || m.Wf.Busy != "" {
+	if m.compactBusy(true) || m.Chat.Running || m.Wf.Busy != "" || m.Tests.Busy != "" {
 		return nil
 	}
 	return tea.Quit

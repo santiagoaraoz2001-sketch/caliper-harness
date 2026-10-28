@@ -162,7 +162,7 @@ func TestNativeJudgeCandidateUsesOwnedActivationRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := serve.Start(serve.Recipe{Name: "native-catalog-owner", Argv: []string{"sleep", "30"}}, filepath.Join(t.TempDir(), "owner.log"))
+	p, err := serve.Start(serve.Recipe{Name: "native-catalog-owner", Argv: napCmd("30")}, filepath.Join(t.TempDir(), "owner.log"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,8 +205,8 @@ func TestNormalizedWorkerSelectionRetainsOwnedRelease(t *testing.T) {
 	m := settingsModel(t)
 	root := "http://127.0.0.1:18889/custom"
 	m.Cfg.Model.Server = root + "/v1"
-	m.Cfg.Serve.Recipes = []config.RecipeConfig{{Name: "custom-worker", Kind: "openai", URL: root, Argv: []string{"sleep", "30"}}}
-	p, err := serve.Start(serve.Recipe{Name: "ownership-fixture", Argv: []string{"sleep", "30"}}, filepath.Join(t.TempDir(), "owner.log"))
+	m.Cfg.Serve.Recipes = []config.RecipeConfig{{Name: "custom-worker", Kind: "openai", URL: root, Argv: napCmd("30")}}
+	p, err := serve.Start(serve.Recipe{Name: "ownership-fixture", Argv: napCmd("30")}, filepath.Join(t.TempDir(), "owner.log"))
 	if err != nil {
 		t.Fatal(err)
 	}

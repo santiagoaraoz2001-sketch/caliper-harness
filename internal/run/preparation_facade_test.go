@@ -456,7 +456,7 @@ func TestTypedPreparationNativeAndTextCorrelation(t *testing.T) {
 			if _, _, err = r.Run(context.Background(), "repair source"); err != nil {
 				t.Fatal(err)
 			}
-			if n != 4 || r.Continuation.Assignment == nil || r.Continuation.Assignment.TaskID != taskID || r.Continuation.Workflow == nil || r.Continuation.Workflow.Kind != "root" || r.Continuation.Workflow.Store != s.Identity() {
+			if n != 4 || r.Continuation.Assignment == nil || r.Continuation.Assignment.TaskID != taskID || r.Continuation.Workflow == nil || r.Continuation.Workflow.Kind != "task" || r.Continuation.Workflow.ID != taskID || r.Continuation.Workflow.Store != s.Identity() {
 				t.Fatalf("explicit claim sequence requests=%d assignment=%+v focus=%+v", n, r.Continuation.Assignment, r.Continuation.Workflow)
 			}
 			stored, err := plan.GetTask(s, taskID)

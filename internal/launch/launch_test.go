@@ -392,11 +392,13 @@ func TestLaunchRetryExhaustion(t *testing.T) {
 	if err := json.Unmarshal([]byte(r.AttemptLog), &records); err != nil {
 		t.Fatal(err)
 	}
-	if len(records) != 3 {
+	if len(records) != 6 {
 		t.Fatalf("attempt records=%+v", records)
 	}
-	for i, record := range records {
-		if record.Attempt != i+1 || !strings.Contains(record.Error, "blew up") {
+	for attempt := 1; attempt <= 3; attempt++ {
+		ownedAttemptRecords(t, records, "execution_contract", attempt, 1)
+		record := ownedAttemptRecords(t, records, "execution", attempt, 1)[0]
+		if !strings.Contains(record.Error, "blew up") {
 			t.Errorf("record=%+v", record)
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -24,11 +25,19 @@ func New(cfg config.BashConfig, catalogs ...*prompts.Catalog) tool.Definition {
 
 func NewAt(cfg config.BashConfig, dir string, catalogs ...*prompts.Catalog) tool.Definition {
 	pc := prompts.Select(catalogs...)
+	purpose := pc.Text("tools.bash.purpose")
+	if runtime.GOOS == "windows" {
+		// Existence is not runtime verification; never spawn probes while
+		// constructing a tool view or declare a Store redirector installed.
+		if path, err := exec.LookPath("python3"); err == nil && process.WindowsPythonAlias(path) {
+			purpose += "\n" + pc.Text("guidance.bash.python_alias")
+		}
+	}
 	return tool.Definition{Prompts: pc,
 		Name:    "bash",
 		Label:   "bash",
 		Desc:    pc.Text("tools.bash.description"),
-		Purpose: pc.Text("tools.bash.purpose"),
+		Purpose: purpose,
 		Params: []tool.Param{
 			{Name: "cmd", Desc: pc.Text("tools.bash.parameters.cmd"), Type: tool.TypeString, Required: true},
 			{Name: "timeout", Desc: pc.Text("tools.bash.parameters.timeout"), Type: tool.TypeInt, Default: fmt.Sprint(cfg.DefaultTimeout)},
@@ -54,15 +63,29 @@ func run(parent context.Context, cfg config.BashConfig, args tool.Args, dir stri
 	}
 	ctx, cancel := context.WithTimeout(parent, time.Duration(timeout)*time.Second)
 	defer cancel()
-	cmd := process.Command(ctx, "bash", "-c", cmdStr)
+	shell, err := ShellPath()
+	if err != nil {
+		return tool.Result{}, err
+	}
+	argsv, cleanup, err := scriptArgs(cmdStr)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	defer cleanup()
+	cmd := process.Command(ctx, shell, argsv...)
 	cmd.Dir = dir
+	cmd.Env = process.TestEnvironment(ctx, cmd.Environ())
 	out := cappedOutput{maxBytes: cfg.MaxBytes}
 	cmd.Stdout = &out
 	cmd.Stderr = &out
-	err := process.Run(cmd)
+	err = process.Run(cmd)
 	text, truncated := capOutput(out.buf.String(), cfg.MaxBytes, cfg.MaxLines, out.truncated, pc)
 	if cause := ctx.Err(); cause != nil {
-		return tool.Result{Text: text, Truncated: truncated, Failed: true}, fmt.Errorf("%s: %w — retained partial output; %s (max %ds)", interruption(cause, timeout), cause, pc.Text("guidance.bash.interrupted"), cfg.MaxTimeout)
+		result := tool.Result{Text: text, Truncated: truncated, Failed: true}
+		if cause == context.DeadlineExceeded {
+			return result, fmt.Errorf("%s: %w — retained partial output; %s (max %ds)", interruption(cause, timeout), cause, pc.Text("guidance.bash.interrupted"), cfg.MaxTimeout)
+		}
+		return result, fmt.Errorf("%s: %w — retained partial output", interruption(cause, timeout), cause)
 	}
 	if err != nil {
 		if exit, ok := err.(*exec.ExitError); ok {
@@ -70,7 +93,10 @@ func run(parent context.Context, cfg config.BashConfig, args tool.Args, dir stri
 			code := exit.ExitCode()
 			return tool.Result{Text: text, Truncated: truncated, Failed: true, ExitCode: &code}, nil
 		}
-		return tool.Result{}, fmt.Errorf("cannot run command: %v — %s", err, pc.Text("guidance.bash.missing_shell"))
+		if cmd.Process != nil {
+			return tool.Result{Text: text, Truncated: truncated, Failed: true}, fmt.Errorf("command started but did not settle cleanly: %w — retained partial output; ordinary command descendants are stopped when the call ends", err)
+		}
+		return tool.Result{Text: text, Truncated: truncated, Failed: true}, fmt.Errorf("cannot start command: %w — %s", err, pc.Text("guidance.bash.missing_shell"))
 	}
 	code := 0
 	return tool.Result{Text: text, Truncated: truncated, ExitCode: &code}, nil

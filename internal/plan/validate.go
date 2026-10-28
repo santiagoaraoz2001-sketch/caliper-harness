@@ -13,6 +13,20 @@ func ValidateApproachReady(s stateStore, approachID string) error {
 	if err := requireNoRevision(s, "approach", approachID); err != nil {
 		return err
 	}
+	p, err := ApproachPlan(s, approachID)
+	if err != nil {
+		return err
+	}
+	if _, err := GuidanceSelection(p.Goal); err != nil {
+		return fmt.Errorf("plan %q guidance: %w", p.ID, err)
+	}
+	a, err := GetApproach(s, approachID)
+	if err != nil {
+		return err
+	}
+	if _, err := GuidanceSelection(a.Title); err != nil {
+		return fmt.Errorf("approach %q guidance: %w", a.ID, err)
+	}
 	tasks, err := ApproachTasks(s, approachID)
 	if err != nil {
 		return err
@@ -45,6 +59,9 @@ func checkBlock(t *Task) error {
 		if strings.TrimSpace(f.val) == "" {
 			return fmt.Errorf("task %q field %q is blank — fill every block field before ready", t.ID, f.name)
 		}
+	}
+	if _, err := GuidanceSelection(t.Sketch); err != nil {
+		return fmt.Errorf("task %q guidance: %w", t.ID, err)
 	}
 	return nil
 }

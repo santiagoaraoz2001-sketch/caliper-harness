@@ -167,15 +167,33 @@ See [Server and model connections](SERVER-MODELS.md) for details.
 | Command | What it does |
 |---|---|
 | `caliper-harness` | Open the interactive TUI |
-| `caliper-harness run --config ... --prompt '...'` | Headless coding task; completion requires a declared check |
+| `caliper-harness run --config ... --prompt '...'` | Headless task; changed project work requires a declared check |
 | `caliper-harness chat` | One model prompt, no agent tools |
 | `caliper-harness sessions [id]` | List past runs / show one run |
 | `caliper-harness judgments <id>` | Summarize one run's decision judgments |
 | `caliper-harness graph --query '...'` | Run one in-process GraphQL operation |
-| `caliper-harness list plans\|approaches` | Browse planning state |
+| `caliper-harness list plans` or `caliper-harness list approaches <plan-id>` | Browse planning state |
 | `caliper-harness launch <approach-id>` | Fan out one approach |
 | `caliper-harness config` | Print the effective YAML configuration |
 | `caliper-harness hw` | Hardware profile and limits |
+
+Plans created through the owner CLI graph route need an explicit project binding
+before launch. Run the following from the intended project directory, using the
+actual ID returned by `createPlan` and the same `--config` for graph and launch:
+
+```sh
+caliper-harness graph --query 'mutation { bindPlanProject(id:"ACTUAL_PLAN_ID") { id projectRoot } }'
+```
+
+Check the returned `projectRoot` before preparing and approving an approach, then
+run `caliper-harness launch ACTUAL_READY_APPROACH_ID` from that project. Binding
+does not approve work or make an approach ready. A plan already bound elsewhere
+cannot be rebound through this operation; use its original project. Missing,
+unbound or mismatched ownership refuses before dispatch.
+
+`--db` overrides the database only for `graph`; `launch` uses the database in
+its effective configuration. If you use a graph override, it must name that same
+database.
 
 ## How it works
 
@@ -194,9 +212,13 @@ See [Server and model connections](SERVER-MODELS.md) for details.
                                      └──────────────────┘
 ```
 
-- **Worker model** — an OpenAI-compatible local server. The Python worker
-  side (`python/worker/`) owns native tool-call parsing for framed
-  tool-call formats, including literal continuation of unfinished responses.
+- **Worker model** — a configured local server. Caliper owns continuation across
+  output limits. The MLX adapter retains its native token prefix. The Rulith
+  adapter uses the existing template/completion APIs for structured tool requests, preserves the rendered
+  prompt and unfinished UTF-8 output, and resumes without a new user message.
+  Rulith retokenizes that byte prefix; original token IDs/RNG state are not
+  replayed. Completed native calls still pass the same registry admission before
+  any effect. No Rulith server patch or extra inference service is required.
 - **Agent loop** — one executor. It validates every call against the
   *current* question's schema, tolerates known compatibility spellings of
   arguments, and refuses the rest with the exact legal call so the model can
@@ -222,6 +244,24 @@ See [Server and model connections](SERVER-MODELS.md) for details.
   rejected summary leaves context intact and execution continues. Old
   `compaction_absolute_tokens` settings are ignored. The full retained context governs admission;
   estimates are disclosed, never silently trusted.
+
+Domain guidance uses compact sections and explicit section → topic → worked-example
+links. Start articles near 1,000 tokens; a selected domain response may use up to
+2,000 tokens including preferences and navigation. This applies to bundled
+`caliper/standards` / `caliper/guides` and opt-in project articles under
+`project/guides/<domain>/<topic>`. Current project identity, testing strategy,
+ordinary task notes and PAT state retain their separate source/context limits.
+Planning's optional `guidance` selection pins a returned `knowledge:key#section`
+and supplies that body before the next decision; it does not load descendants.
+
+Rulith counts the complete domain envelope with its native tokenizer. MLX, Ollama
+and generic OpenAI-compatible adapters explicitly lack that count-only capability
+and use the existing conservative UTF-8-byte estimate, capped at 2,000 bytes
+including the disclosed basis label and links. This is not a measured token count
+or universal tokenizer guarantee. Native tokenizer failures, cancellation, unknown
+runtime and missing counters remain explicit errors; they never trigger fallback.
+Ordinary graph facts and PAT retain their own limits. Exact counting and performance
+across backends remain separate gates. See [domain guidance](https://github.com/santiagoaraoz2001-sketch/caliper-harness/blob/v0.2.3/docs/domain-guidance.md).
 
 ## Configuration
 
@@ -270,6 +310,74 @@ project notes, model-authored knowledge and earlier shared memories. Search
 also matches saved note keys and file paths. `/remember --global <text>`
 explicitly shares a new note across projects; existing global memories remain
 available. These commands use Caliper's state store and add no project files.
+
+## Design and run tests
+
+Open `/tests` to manage optional project test suites alongside the configured
+coding check. Use `n` to add or `e` to edit a suite as JSON, Space to enable or
+disable an optional suite, `r` to run the selected suite, `R` to run enabled
+optional suites, `x` to cancel, Enter to inspect result history, and `f` to refresh
+evidence. Use PgUp/PgDn to scroll details and older results. The configured coding
+check remains required and cannot be disabled here. Disabling an optional suite
+keeps its history and records a reason.
+
+Use `d` to prepare a test design/refinement draft in Chat. Review and submit it
+normally; opening Tests or preparing the draft makes no model request. With
+testing guidance on, the draft asks for relevant sections of
+`caliper/standards/tests` and the project's versioned `project/testing/strategy`.
+The guide covers independent expected outcomes, useful negative controls,
+fixtures, prerequisites and honest evidence. `g` changes the project guidance
+setting for future drafts. Turning it off neither removes explicit knowledge
+lookup nor weakens required verification.
+
+Suite settings are saved in the existing project configuration:
+
+```yaml
+testing:
+  guidance: true
+  suites:
+    - id: unit
+      name: Unit behavior
+      purpose: Check the package's public behavior
+      expected: Valid inputs work and invalid inputs are rejected
+      command: go test -json -count=1 ./internal/example
+      enabled: true
+      prerequisites:
+        - kind: executable
+          value: go
+      report_format: go-test-json
+      expected_tests:
+        - example.org/project/internal/example/TestBehavior
+```
+
+Replace the example command and expected test identifier with your project's
+actual values. Optional fields include `location`, `exclusions`, and paired
+`spec_key`/`spec_version` references to a current project knowledge version.
+Prerequisites can name a workspace-relative path or executable. A declared
+manual prerequisite remains blocked until it is replaced with verifiable setup;
+the runner does not assume it was satisfied.
+
+Runs freeze their selected suite, command, configuration and spec references.
+Output and results use existing session archives; source, command or spec
+changes can make earlier evidence stale. Saving a configuration file inside the
+observed workspace can also mark evidence stale, including an advice-only edit.
+The `go-test-json` adapter reads current uncached Go test events. The
+framework-neutral `caliper-test-report-v1` adapter validates declared stages
+against the current execution ID. `caliper-test-report-v2` also declares each
+stage's prerequisites and expected observations, retaining actual observations
+beside host-recorded prerequisite presence. See the
+[report contract](https://github.com/santiagoaraoz2001-sketch/caliper-harness/blob/v0.2.3/docs/testing-report-contract.md) for configuration and producer
+examples. These formats distinguish executed, failed and
+skipped tests. Missing required tests or stages, malformed/truncated reports and
+zero executed tests do not establish declared coverage. Without a report format,
+exit zero means **process passed; coverage unknown**. No report establishes that
+assertions are meaningful without inspecting their requirements and oracles.
+
+These are standalone test results. Even running the configured command here
+does not qualify an active Chat task or PAT attempt; those retain their own
+required checks and receipts. Test commands use the existing Bash authorization
+and process cleanup. A suite can modify its workspace, so review its command as
+you would any other command.
 
 ## Record what you notice
 
@@ -336,9 +444,10 @@ Python sidecars carry their own suites under `python/worker/` and
 `python/decision/` (run with the managed runtimes). The example
 configuration, prompt catalog, and GraphQL schema are all test-pinned
 against drift; if you change a default, a prompt, or the schema, the
-corresponding test tells you exactly what else to update. Regenerate the
-GraphQL code with `go run github.com/99designs/gqlgen generate` (see
-[gqlgen.yml](gqlgen.yml)).
+corresponding test tells you exactly what else to update. GraphQL execution and
+help load the same embedded `schema/v1.graphqls`; no code generation is required.
+Root resolver interfaces and model structs remain typed, while the small
+`internal/graph/execution` adapter uses gqlgen validation and execution contexts.
 
 ## Repository layout
 
@@ -346,7 +455,7 @@ GraphQL code with `go run github.com/99designs/gqlgen generate` (see
 cmd/specific-harness/   CLI entrypoint (binary: caliper-harness)
 internal/
   agent/                executor loop, supervision, context, style judge
-  graph/                embedded GraphQL state API (generated in generated/)
+  graph/                embedded GraphQL API with schema-driven execution
   launch/ run/          run assembly, readiness, task lifecycle
   llm/                  model transports (native + text protocols)
   memory/               knowledge documents, recall, styleguide
@@ -370,3 +479,5 @@ MIT — see [LICENSE](LICENSE).
 ### Server and platform development
 
 Server/model controls and custom recipes are described in [SERVER-MODELS.md](SERVER-MODELS.md). The `MacOS`, `Windows` and `Linux` branches carry the same shared source. Target-platform qualification is documented in [PORTABILITY.md](PORTABILITY.md).
+
+The Tests structured adapter accepts current direct `go test -json -count=1` output. It rejects events outside the command interval and incomplete/skipped package or test results. Other commands report process status with coverage unknown; reported execution counts are not proof that tests correctly capture the requirement.

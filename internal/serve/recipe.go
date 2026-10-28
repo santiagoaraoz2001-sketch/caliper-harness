@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os/exec"
+	"specific-harness/internal/tools/process"
 	"strings"
 )
 
@@ -12,7 +13,7 @@ func (r Recipe) Executable() (string, error) {
 	if len(r.Argv) == 0 {
 		return "", fmt.Errorf("external endpoint; no launch command configured")
 	}
-	return exec.LookPath(r.Argv[0])
+	return process.Executable(r.Argv[0])
 }
 
 // BindModel substitutes only explicit placeholders within literal argv elements.

@@ -6,27 +6,31 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"os"
 	"path/filepath"
+	"reflect"
 	"specific-harness/internal/config"
 	"specific-harness/internal/tui/thirdparty/textarea"
 	"strings"
 )
 
 type SetupState struct {
-	Stage        int
-	Judge        config.DecisionConfig
-	JudgePick    string
-	Serve        config.ServeConfig
-	Add          *connectionForm
-	Added        []setupChoice
-	Scroll       int
-	CheckFocused bool
-	Pick         string
-	Model        config.ModelConfig
-	Check        textarea.Model
-	Started      bool
-	Original     []byte
-	Existed      bool
-	Path, Err    string
+	Stage         int
+	Judge         config.DecisionConfig
+	JudgeBase     config.DecisionConfig
+	JudgeBasePick string
+	JudgePick     string
+	Serve         config.ServeConfig
+	Add           *connectionForm
+	Added         []setupChoice
+	Scroll        int
+	CheckFocused  bool
+	Pick          string
+	ModelBaseKey  string // Last effective identity; untouched defaults follow explicit owner saves.
+	Model         config.ModelConfig
+	Check         textarea.Model
+	Started       bool
+	Original      []byte
+	Existed       bool
+	Path, Err     string
 }
 type setupChoice struct {
 	key, label, state string
@@ -35,11 +39,13 @@ type setupChoice struct {
 }
 
 // Keep the retained Setup editor aligned with writes made through Manage.
-// Its project check and staged choices remain in the editor.
+// Untouched role defaults follow the latest owner save; deliberately staged
+// choices and the project check remain in the editor.
 func (m *Model) syncSetupAfterSave() {
 	if !m.Setup.Started {
 		return
 	}
+	m.syncSetupRoles()
 	m.Setup.Serve = m.Cfg.Serve
 	if m.Setup.Path == m.CfgPath {
 		raw, err := os.ReadFile(m.CfgPath)
@@ -49,10 +55,48 @@ func (m *Model) syncSetupAfterSave() {
 	}
 }
 
+// Role baselines distinguish untouched retained defaults from authored drafts.
+func (m *Model) setupRoleBaselines() {
+	m.Setup.ModelBaseKey = setupModelKey(m.Cfg.Model)
+	m.Setup.JudgeBase = m.Cfg.Decision
+	if m.Cfg.Decision.ConfidenceBuckets != nil {
+		m.Setup.JudgeBase.ConfidenceBuckets = append([]float64{}, m.Cfg.Decision.ConfidenceBuckets...)
+	}
+	m.Setup.JudgeBasePick = setupJudgeKey(m.Cfg.Decision)
+}
+func setupJudgeKey(d config.DecisionConfig) string {
+	if d.Runtime == "laya" || d.Runtime == "system_one" {
+		return "native:" + d.Server + ":" + d.Model
+	}
+	return setupModelKey(config.ModelConfig{Name: d.Model, Server: d.Server, Runtime: d.Runtime})
+}
+func (m *Model) syncSetupRoles() {
+	if m.Setup.Pick == m.Setup.ModelBaseKey && setupModelKey(m.Setup.Model) == m.Setup.ModelBaseKey {
+		m.Setup.Model, m.Setup.Pick = m.Cfg.Model, setupModelKey(m.Cfg.Model)
+	}
+	if m.Setup.JudgePick == m.Setup.JudgeBasePick && reflect.DeepEqual(m.Setup.Judge, m.Setup.JudgeBase) {
+		m.Setup.Judge, m.Setup.JudgePick = m.Cfg.Decision, setupJudgeKey(m.Cfg.Decision)
+	}
+	m.setupRoleBaselines()
+}
+
 func (m Model) setupActive() bool { return m.Tabs[m.Active].at.view == ViewSetup }
+func setupModelKey(c config.ModelConfig) string {
+	if c.Name == "" {
+		return ""
+	}
+	return strings.TrimRight(strings.TrimSuffix(strings.TrimRight(c.Server, "/"), "/v1"), "/") + "\x00" + c.Name + "\x00" + c.Runtime
+}
 func (m Model) setupChoices() []setupChoice {
-	out := append([]setupChoice(nil), m.Setup.Added...)
+	var out []setupChoice
 	seen := map[string]bool{}
+	for _, c := range m.Setup.Added {
+		c.key = setupModelKey(c.model)
+		if !seen[c.key] {
+			out = append(out, c)
+			seen[c.key] = true
+		}
+	}
 	for _, r := range m.Serve.Rows {
 		if r.Sidecar || !r.IsModel || r.Ep.Model == "" {
 			continue
@@ -85,7 +129,7 @@ func (m Model) setupChoices() []setupChoice {
 		if candidate.Runtime == "mlx" && r.Asset != nil && r.Recipe != nil && r.Recipe.HasModelPlaceholder() {
 			candidate.Name = r.Asset.Path
 		}
-		key := candidate.Server + "\x00" + candidate.Name + "\x00" + candidate.Runtime
+		key := setupModelKey(candidate)
 		if seen[key] {
 			continue
 		}
@@ -125,6 +169,11 @@ func (m *Model) OpenSetup() {
 		field.Placeholder = "Your project's check command"
 		field.SetValue(m.Cfg.Coding.CheckCommand)
 		m.Setup = SetupState{Started: true, Path: path, Original: raw, Existed: err == nil, Model: m.Cfg.Model, Judge: m.Cfg.Decision, Serve: m.Cfg.Serve, Check: field}
+		m.Setup.Pick = setupModelKey(m.Cfg.Model)
+		m.Setup.JudgePick = setupJudgeKey(m.Cfg.Decision)
+		m.setupRoleBaselines()
+	} else {
+		m.syncSetupRoles()
 	}
 	m.navigate(ViewSetup, "")
 }
@@ -201,6 +250,7 @@ func (m *Model) setupSave() {
 	m.Setup.Stage, m.Setup.Scroll = 0, 0
 	m.Setup.Original, m.Setup.Existed = saved, true
 	m.Setup.Model, m.Setup.Err = candidate.Model, ""
+	m.setupRoleBaselines()
 	m.focusChat()
 	m.alert("info", "Connections saved for all projects · inference unchecked · /manage to load or inspect")
 }
@@ -266,7 +316,7 @@ func (m Model) setupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			} else {
 				m.Setup.Judge.Server = choices[i].model.Server
 				m.Setup.Judge.Model = choices[i].model.Name
-				m.Setup.Judge.Runtime = choices[i].model.Runtime
+				m.Setup.Judge = m.Setup.Judge.WithRuntime(choices[i].model.Runtime)
 				m.Setup.Judge.Path = ""
 				m.Setup.Judge.Revision = ""
 				m.Setup.Judge.Device = "auto"
@@ -311,7 +361,7 @@ func (s SetupState) reviewRows(width int) []string {
 	return append(rows, Guidance.Render("Model loading and inference remain unchecked."))
 }
 
-func (m Model) renderSetup(w, h int) string {
+func (m *Model) renderSetup(w, h int) string {
 	inner := BoxInner(w)
 	s := m.Setup
 	if s.Add != nil {
@@ -399,7 +449,7 @@ func (m Model) currentSetupChoices() []setupChoice {
 			d.Model = r.Asset.ID
 			d.Path = r.Asset.Path
 			d.Revision = r.Asset.Revision
-			d.Runtime = r.Asset.Runtime
+			d = d.WithRuntime(r.Asset.Runtime)
 			out = append(out, setupChoice{key: "native:" + d.Path, label: d.Model, state: r.Asset.Reason, judge: &d})
 		}
 	}

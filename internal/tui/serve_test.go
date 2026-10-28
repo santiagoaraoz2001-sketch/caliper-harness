@@ -48,7 +48,7 @@ func serveModelWithModels(t *testing.T) Model {
 	mk := func(name string, resident bool) ServeRow {
 		return ServeRow{
 			Ep:     serve.Endpoint{Kind: serve.KindOllama, Label: ollama.Ep.Label, URL: ollama.Ep.URL, Model: name},
-			Health: serve.Health{Up: true, Kind: serve.KindOllama},
+			Health: serve.Health{Up: true, Kind: serve.KindOllama, Available: []string{name}},
 			Have:   true, IsModel: true, Resident: resident,
 		}
 	}
@@ -144,7 +144,7 @@ func TestServeModelRender(t *testing.T) {
 	m.Cfg.Model.Name = "qwen3:8b"
 	m.Width = 160
 	got := viewportServePages(m, m.Width, 12)
-	for _, want := range []string{"├─", "└─", "resident — x unload", "available — l load", "[requested next]"} {
+	for _, want := range []string{"model ·", "qwen3:8b", "resident — x unload", "catalog", "l load", "[requested next]"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("screen omits %q", want)
 		}
@@ -473,8 +473,8 @@ func TestServeRender(t *testing.T) {
 			t.Errorf("narrow screen omits %q", want)
 		}
 	}
-	for _, want := range []string{"RUNTIME", "DECISION SIDECAR", "worker", "ollama", "sidecar",
-		"●", "○", "down", "qwen3:8b", "[Coding]", "u Coding", "s start", "x unload", "l load", "d device", "m model", "esc chat"} {
+	for _, want := range []string{"runtime ·", "decision sidecar ·", "worker", "ollama", "sidecar",
+		"up", "down", "qwen3:8b", "[Coding]", "u Coding", "s start", "x unload", "l load", "d device", "m model", "esc chat"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("screen omits %q:\n%s", want, got)
 		}

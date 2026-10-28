@@ -1,2 +1,6 @@
 # Captured wire evidence must retain its exact bytes on every platform.
 /internal/agent/testdata/cancelled-laguna-reasoning.txt -text
+
+# Hash-checked native wire fixtures must not be rewritten by core.autocrlf.
+/internal/agent/testdata/** -text
+/internal/llm/testdata/** -text

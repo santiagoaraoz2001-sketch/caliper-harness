@@ -33,7 +33,7 @@ func TestOwningReadySnapshotAndRace(t *testing.T) {
 		draftBlock(t, s, x.ID)
 		return s, a.ID, x.ID
 	}
-	for _, mode := range []string{"absent", "refused", "cancelled", "changed"} {
+	for _, mode := range []string{"absent", "refused", "cancelled", "changed", "approach-changed"} {
 		t.Run(mode, func(t *testing.T) {
 			s, id, tid := makeDraft()
 			ctx, cancel := context.WithCancel(context.Background())
@@ -50,6 +50,10 @@ func TestOwningReadySnapshotAndRace(t *testing.T) {
 				case "changed":
 					_, err := SetTaskBlock(s, tid, "changed", "target", "sketch", "exit code 0", "tests", "verify")
 					return err
+				case "approach-changed":
+					return s.Update(func(tx *store.Tx) error {
+						return tx.Write(`MATCH (a:Approach) WHERE a.id=$id SET a.title=$title`, map[string]any{"id": id, "title": "different scope after judgment"})
+					})
 				}
 				return nil
 			}

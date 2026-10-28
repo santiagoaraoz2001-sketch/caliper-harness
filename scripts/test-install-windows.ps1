@@ -47,13 +47,14 @@ try {
     }
     Assert ((Get-ChildItem (Join-Path $target 'applications') -Directory).Count -eq 1) 'first immutable application copy missing'
     Assert ([Environment]::GetEnvironmentVariable('Path', 'User') -eq $originalUserPath) '-NoPath changed persisted PATH'
-    # Reinstall retains both previous runtime and central data; commands outrank
-    # the older root executable without removing the older root PATH entry.
-    & (Join-Path $source 'install-windows.ps1')
+    # Reinstall is isolated too. Registration in persisted PATH is not qualified
+    # by this fixture; command precedence below uses only this process's PATH.
+    & (Join-Path $source 'install-windows.ps1') -NoPath
     Assert ((Get-ChildItem (Join-Path $target 'applications') -Directory).Count -eq 2) 'reinstall replaced an existing application copy'
     Assert ([IO.File]::ReadAllText($launcher) -ne $firstLauncher) 'launcher did not select new immutable copy'
     $backups = @(Get-ChildItem -LiteralPath (Join-Path $target 'commands') -Filter '.caliper-previous-*.cmd' -Force)
     Assert ($backups.Count -eq 1 -and [IO.File]::ReadAllText($backups[0].FullName) -eq $firstLauncher) 'atomic replacement did not preserve the prior launcher'
+    $env:PATH = (Join-Path $target 'commands') + ';' + $target + ';' + $originalPath
     Assert (($env:PATH -split ';')[0] -eq (Join-Path $target 'commands')) 'command directory is not first on PATH'
     Assert ((Get-Command caliper).Source -eq $launcher) 'legacy executable shadows new launcher'
     foreach ($name in $sentinels) {
@@ -117,12 +118,18 @@ try {
     try { & (Join-Path $source 'install-windows.ps1') -TargetDirectory $unrelated -NoPath } catch { $refused = $true }
     Assert $refused 'unrelated command overwritten'
     Assert ([IO.File]::ReadAllText((Join-Path $unrelated 'commands\caliper.cmd')) -eq 'unrelated') 'unrelated command modified'
+    Assert ([Environment]::GetEnvironmentVariable('Path', 'User') -eq $originalUserPath) 'fixture changed persisted User PATH'
+    Write-Output 'UNQUALIFIED: persisted PATH registration and new-terminal discovery (no User PATH writes)'
     $global:LASTEXITCODE = 0
     Write-Output 'PASS: default/custom/legacy install, reinstall, data preservation, copy failure, command precedence, cwd and exit code'
 } finally {
     Set-Location $originalLocation
-    [Environment]::SetEnvironmentVariable('Path', $originalUserPath, 'User')
+    $userPathUnchanged = [Environment]::GetEnvironmentVariable('Path', 'User') -eq $originalUserPath
     $env:PATH = $originalPath
     $env:LOCALAPPDATA = $originalLocalAppData
-    Remove-Item -LiteralPath $fixture -Recurse -Force
+    $resolvedFixture = [IO.Path]::GetFullPath($fixture)
+    $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+    Assert ($resolvedFixture.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase)) 'fixture cleanup escaped TEMP'
+    Remove-Item -LiteralPath $resolvedFixture -Recurse -Force
+    Assert $userPathUnchanged 'fixture changed persisted User PATH; it was not restored or overwritten'
 }

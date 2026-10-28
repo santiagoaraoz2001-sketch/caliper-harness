@@ -9,10 +9,11 @@ import (
 	"specific-harness/internal/config"
 	"specific-harness/internal/outcome"
 	"specific-harness/internal/store"
+	"strings"
 	"testing"
 )
 
-func TestOrdinaryRunRequiresCheckWithoutEdits(t *testing.T) {
+func TestOrdinaryInspectionCompletesWithoutClaimingVerification(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"PASS done\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
 	}))
@@ -33,7 +34,7 @@ func TestOrdinaryRunRequiresCheckWithoutEdits(t *testing.T) {
 		t.Fatal(e)
 	}
 	_, _, e = r.Run(context.Background(), "inspect only")
-	if e != nil || r.Outcome.Status != outcome.Stopped || r.Outcome.ExitCode() != 1 {
+	if e != nil || r.Outcome.Status != outcome.Completed || r.Outcome.ExitCode() != 0 || r.Continuation.Coding.Passed() || !strings.Contains(r.Evidence, "correctness/test count unverified") {
 		t.Fatalf("ordinary no-edit final=%+v error=%v", r.Outcome, e)
 	}
 }

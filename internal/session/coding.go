@@ -1,19 +1,23 @@
 package session
 
-import "fmt"
+import (
+	"fmt"
+	"specific-harness/internal/checkreport"
+)
 
 // CodingState is owning metadata, never inferred from model prose.
 type CodingState struct {
-	Attempt           int           `json:"attempt,omitempty"`
-	TaskID            string        `json:"task_id"`
-	Workspace         string        `json:"workspace"`
-	Command           string        `json:"command,omitempty"`
-	AcceptanceCommand string        `json:"acceptance_command,omitempty"`
-	Source            string        `json:"source,omitempty"`
-	ConfigCommand     string        `json:"config_command,omitempty"`
-	Revision          int           `json:"revision"`
-	Closed            bool          `json:"closed,omitempty"`
-	Receipt           *CheckReceipt `json:"receipt,omitempty"`
+	Report            checkreport.Contract `json:"report,omitzero"`
+	Attempt           int                  `json:"attempt,omitempty"`
+	TaskID            string               `json:"task_id"`
+	Workspace         string               `json:"workspace"`
+	Command           string               `json:"command,omitempty"`
+	AcceptanceCommand string               `json:"acceptance_command,omitempty"`
+	Source            string               `json:"source,omitempty"`
+	ConfigCommand     string               `json:"config_command,omitempty"`
+	Revision          int                  `json:"revision"`
+	Closed            bool                 `json:"closed,omitempty"`
+	Receipt           *CheckReceipt        `json:"receipt,omitempty"`
 }
 
 // CommandReceipt records one actually attempted command, not inferred coverage.
@@ -34,20 +38,24 @@ func (r *CommandReceipt) Passed() bool {
 }
 
 type CheckReceipt struct {
-	Direct         bool            `json:"direct,omitempty"` // New ordinary receipt, never inferred from missing acceptance.
-	Text           string          `json:"text,omitempty"`
-	Truncated      bool            `json:"truncated,omitempty"`
-	Acceptance     *CommandReceipt `json:"acceptance,omitempty"`
-	EpisodeStarted string          `json:"episode_started,omitempty"`
-	EpisodeEnded   string          `json:"episode_ended,omitempty"`
-	Command        string          `json:"command"`
-	Cwd            string          `json:"cwd"`
-	Revision       int             `json:"revision"`
-	Started        string          `json:"started"`
-	Ended          string          `json:"ended,omitempty"`
-	ExitCode       *int            `json:"exit_code,omitempty"`
-	Status         string          `json:"status"`
-	Reason         string          `json:"reason,omitempty"`
+	Report         checkreport.Contract            `json:"report,omitzero"`
+	RunID          string                          `json:"run_id,omitempty"`
+	Coverage       checkreport.Coverage            `json:"coverage,omitzero"`
+	Prerequisites  *checkreport.PrerequisiteReport `json:"prerequisites,omitempty"`
+	Direct         bool                            `json:"direct,omitempty"` // New ordinary receipt, never inferred from missing acceptance.
+	Text           string                          `json:"text,omitempty"`
+	Truncated      bool                            `json:"truncated,omitempty"`
+	Acceptance     *CommandReceipt                 `json:"acceptance,omitempty"`
+	EpisodeStarted string                          `json:"episode_started,omitempty"`
+	EpisodeEnded   string                          `json:"episode_ended,omitempty"`
+	Command        string                          `json:"command"`
+	Cwd            string                          `json:"cwd"`
+	Revision       int                             `json:"revision"`
+	Started        string                          `json:"started"`
+	Ended          string                          `json:"ended,omitempty"`
+	ExitCode       *int                            `json:"exit_code,omitempty"`
+	Status         string                          `json:"status"`
+	Reason         string                          `json:"reason,omitempty"`
 }
 
 func (c *CodingState) Passed() bool {
@@ -60,10 +68,24 @@ func (c *CodingState) Passed() bool {
 	if r.Direct {
 		modePassed = c.Attempt == 0 && c.AcceptanceCommand == "" && r.Acceptance == nil
 	}
-	return modePassed &&
+	reportPassed := c.Report.Equal(r.Report) && r.ReportSatisfied()
+	return reportPassed && modePassed &&
 		r.EpisodeStarted != "" && r.EpisodeEnded != "" && r.Started != "" && r.Ended != "" &&
 		r.Status == "passed" && r.ExitCode != nil && *r.ExitCode == 0 &&
 		r.Command == c.Command && r.Cwd == c.Workspace && r.Revision == c.Revision
+}
+
+func (r *CheckReceipt) ReportSatisfied() bool {
+	if r.Report.Validate() != nil {
+		return false
+	}
+	if r.Report.Format == "" {
+		return r.Report.IsZero()
+	}
+	if r.RunID == "" || !r.Coverage.Satisfied() {
+		return false
+	}
+	return r.Report.Format != checkreport.EvidenceFormat || r.Prerequisites != nil && r.Prerequisites.Validate(r.Report, r.RunID, r.Cwd) == nil
 }
 func (c *CodingState) Invalidate(reason string) {
 	c.Revision++
@@ -83,10 +105,16 @@ func (c *CodingState) Validate() error {
 	if c == nil {
 		return nil
 	}
+	if err := c.Report.Validate(); err != nil {
+		return fmt.Errorf("invalid coding report contract: %w", err)
+	}
 	if c.TaskID == "" || c.Workspace == "" || c.Revision < 0 {
 		return fmt.Errorf("invalid coding state")
 	}
 	if r := c.Receipt; r != nil {
+		if err := r.Report.Validate(); err != nil {
+			return fmt.Errorf("invalid receipt report contract: %w", err)
+		}
 		if r.Command == "" || r.Cwd == "" || r.Started == "" && (r.Acceptance == nil && !r.Direct || r.ExitCode != nil || r.Status == "passed" || r.Status == "failed") || r.Revision < 0 {
 			return fmt.Errorf("invalid check receipt")
 		}
@@ -110,9 +138,13 @@ func (c *CodingState) Validate() error {
 		switch r.Status {
 		case "incomplete", "failed", "stale", "historical", "unverified", "unexecuted":
 		case "passed":
-			// Legacy single-command receipts remain readable, but Passed rejects them.
-			legacyPassed := r.Acceptance == nil && r.ExitCode != nil && *r.ExitCode == 0 && r.Command == c.Command && r.Cwd == c.Workspace && r.Revision == c.Revision
-			if r.Acceptance != nil && !c.Passed() || r.Acceptance == nil && !legacyPassed || r.Ended == "" {
+			// This status belongs to the configured suite. Acceptance can fail
+			// independently; aggregate qualification remains CodingState.Passed.
+			suitePassed := r.ExitCode != nil && *r.ExitCode == 0 && r.Command == c.Command && r.Cwd == c.Workspace && r.Revision == c.Revision
+			if !c.Report.Equal(r.Report) || !r.ReportSatisfied() {
+				return fmt.Errorf("passed receipt lacks declared stage evidence")
+			}
+			if !suitePassed || r.Ended == "" || r.Acceptance != nil && (r.EpisodeStarted == "" || r.EpisodeEnded == "" || r.Acceptance.Command != c.AcceptanceCommand) {
 				return fmt.Errorf("invalid passed check receipt")
 			}
 		default:

@@ -459,7 +459,7 @@ func TestPrepareTaskExplicitFullReceiptReadyClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	actual, e := plan.GetTask(s, task)
-	if n != 3 || e != nil || actual.State != plan.TaskStopped || actual.Attempts != 1 || actual.Qualified() || rr.Continuation.Workflow != nil || rr.Continuation.Assignment == nil || rr.Continuation.Assignment.TaskID != task {
+	if n != 3 || e != nil || actual.State != plan.TaskStopped || actual.Attempts != 1 || actual.Qualified() || rr.Continuation.Workflow == nil || rr.Continuation.Workflow.Kind != "task" || rr.Continuation.Workflow.ID != task || rr.Continuation.Assignment == nil || rr.Continuation.Assignment.TaskID != task {
 		t.Fatalf("false preparation/claim n=%d task=%+v continuation=%+v error=%v", n, actual, rr.Continuation, e)
 	}
 }

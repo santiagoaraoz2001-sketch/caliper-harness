@@ -206,7 +206,18 @@ func (m *Model) onManagedTest(msg managedTestMsg) {
 			}
 			m.onServeProbed(serveProbedMsg{rows: groupServeRows(m.Serve.Rows), mem: m.Serve.Mem, memErr: m.Serve.MemErr, warnings: m.Serve.Warnings})
 		}
-		m.alert("info", "Server responds · catalog: "+strings.Join(msg.Health.Available, ", ")+" · inference unchecked")
+		names := []string{}
+		for _, name := range append(append([]string(nil), msg.Health.Loaded...), msg.Health.Available...) {
+			names = appendUnique(names, name)
+		}
+		notice := "Server responds · catalog: " + strings.Join(names, ", ") + " · inference unchecked"
+		if len(names) == 0 {
+			notice = "Server responds · no models advertised · inference unchecked"
+		}
+		if msg.Health.InventoryErr != "" {
+			notice += " · inventory error: " + msg.Health.InventoryErr
+		}
+		m.alert("info", notice)
 	} else {
 		m.alert("err", "Connection failed: "+msg.Health.Err)
 	}

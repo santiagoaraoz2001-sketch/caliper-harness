@@ -19,21 +19,35 @@ import (
 // ToolCall retains original decoded argument JSON, never float-rounded slots.
 type ToolCall struct{ ID, Name, Arguments string }
 type ToolDefinition struct {
-	Type     string `json:"type"`
-	Function struct {
+	// TailPublished is set only by the host after checking the final retained
+	// current planning publication. It changes Rulith placement, not authority.
+	TailPublished bool   `json:"-"`
+	Type          string `json:"type"`
+	Function      struct {
 		Name        string         `json:"name"`
 		Description string         `json:"description"`
 		Parameters  map[string]any `json:"parameters"`
 	} `json:"function"`
 }
+
+// LatePlanningSchema reports the one transport with harness-owned raw rendering.
+func (c *Client) LatePlanningSchema() bool {
+	return c.runtime == RuntimeRulith && c.ToolProtocol() == "structured"
+}
+
 type Reply struct {
-	Prefix       *ResponsePrefix // exact runtime-issued tokens/framing; never reconstructed from fields
-	OutputLimit  bool            // untainted length terminal; transport/cancellation failures never set it
-	Message      Message
-	Served       string
-	Usage        Usage
-	FinishReason string
-	ThinkingOnly bool // validated normal completion; no answer or function call
+	// RawNative is a native completion, parsed by the owning registry before
+	// any tool can execute. It is never promoted to Message.Content here.
+	RawNative          string
+	NativeInitialState string
+	RawContentStreamed string          // exact leading normal prose already delivered to onDelta
+	Prefix             *ResponsePrefix // declared native prefix; never reconstructed from parsed message fields
+	OutputLimit        bool            // untainted length terminal; transport/cancellation failures never set it
+	Message            Message
+	Served             string
+	Usage              Usage
+	FinishReason       string
+	ThinkingOnly       bool // validated normal completion; no answer or function call
 }
 
 // AuxDelta is original decoded streamed text: content or an auxiliary field.
@@ -103,11 +117,19 @@ func ToolProtocol(protocol string) string {
 func (c *Client) ChatTools(ctx context.Context, msgs []Message, tools []ToolDefinition, onDelta func(string)) (reply Reply, err error) {
 	started := time.Now()
 	defer func() { c.observeRequest(started, reply.Served, reply.Usage, err) }()
-	if _, continuing := ctx.Value(responseContinuationKey{}).(Reply); continuing && c.runtime != RuntimeMLX {
-		return reply, fmt.Errorf("selected runtime cannot continue an unfinished native response; explicit owned MLX token-prefix support is required")
+	previous, continuing := ctx.Value(responseContinuationKey{}).(Reply)
+	if continuing && c.runtime != RuntimeMLX && c.runtime != RuntimeRulith {
+		return reply, fmt.Errorf("selected runtime cannot continue an unfinished native response; an explicit native prefix contract is required")
 	}
 	if c.ToolProtocol() != "structured" && c.ToolProtocol() != "text" {
 		return reply, fmt.Errorf("invalid model.tool_protocol %q", c.ToolProtocol())
+	}
+	rawContinuation := continuing && previous.Prefix != nil && previous.Prefix.Strategy == RulithRawPrefix
+	if rawContinuation && c.runtime != RuntimeRulith {
+		return reply, fmt.Errorf("unfinished Rulith response cannot change runtime")
+	}
+	if rawContinuation && c.ToolProtocol() != "structured" {
+		return reply, fmt.Errorf("unfinished native response cannot change tool protocol")
 	}
 	if c.ToolProtocol() == "text" {
 		for _, m := range msgs {
@@ -133,7 +155,15 @@ func (c *Client) ChatTools(ctx context.Context, msgs []Message, tools []ToolDefi
 		}
 	}
 	reply.Message.Role = "assistant"
-	_, _, _, err = c.chatStream(context.WithValue(ctx, idleKey{}, guard), msgs, onDelta, tools, &reply)
+	// Judge/compaction callers use this method for streaming without tools and
+	// consume ordinary parsed messages. Only structured tool generation uses raw
+	// framing. A retained raw prefix still validates identity if tools disappear;
+	// it must never fall through into a fresh chat request.
+	if c.runtime == RuntimeRulith && (len(tools) > 0 || rawContinuation) {
+		reply, err = c.chatRulithRaw(context.WithValue(ctx, idleKey{}, guard), msgs, tools, onDelta)
+	} else {
+		_, _, _, err = c.chatStream(context.WithValue(ctx, idleKey{}, guard), msgs, onDelta, tools, &reply)
+	}
 	if err == nil && context.Cause(ctx) != nil {
 		err = context.Cause(ctx)
 	}

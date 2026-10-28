@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+	"specific-harness/internal/checkreport"
 	"specific-harness/internal/prompts"
 )
 
@@ -48,7 +49,14 @@ func DefaultFile() string {
 }
 
 type CodingConfig struct {
-	CheckCommand string `yaml:"check_command"`
+	CheckCommand  string                         `yaml:"check_command"`
+	ReportFormat  string                         `yaml:"report_format,omitempty"`
+	ExpectedTests []string                       `yaml:"expected_tests,omitempty"`
+	Stages        []checkreport.StageRequirement `yaml:"stages,omitempty"`
+}
+
+func (c CodingConfig) ReportContract() checkreport.Contract {
+	return (checkreport.Contract{Format: c.ReportFormat, Expected: c.ExpectedTests, Stages: c.Stages}).Clone()
 }
 
 type UIConfig struct {
@@ -66,6 +74,7 @@ type Config struct {
 	PromptCatalog   *prompts.Catalog `yaml:"-"`
 	UI              UIConfig         `yaml:"ui"`
 	Coding          CodingConfig     `yaml:"coding"`
+	Testing         TestingConfig    `yaml:"testing"`
 	Context         ContextConfig    `yaml:"context"`
 	Schemas         SchemaConfig     `yaml:"schemas"`
 	Retention       RetentionConfig  `yaml:"retention"`
@@ -438,7 +447,7 @@ type WorkflowsConfig struct {
 
 type DecisionConfig struct {
 	Protocol        string `yaml:"protocol,omitempty"` // system_one selects Ollama's typed decision endpoint; empty keeps the runtime default
-	Disabled        bool   `yaml:"disabled,omitempty"` // retain selection while disabling decision inference and automatic service startup
+	Disabled        bool   `yaml:"disabled"`           // Explicit false must override a personal true selection on project reload.
 	Runtime         string `yaml:"runtime"`            // laya or native system_one, never inferred from the checkpoint name
 	Path            string `yaml:"path,omitempty"`     // optional downloaded local assets bound to Model
 	Revision        string `yaml:"revision,omitempty"`
@@ -478,6 +487,7 @@ type DecisionConfig struct {
 // Defaults returns product defaults, including the owner's output-age policy.
 func Defaults() Config {
 	return Config{
+		Testing:          TestingConfig{Guidance: true},
 		templatesDefault: true,
 		UI:               UIConfig{MaxFileEntries: 500, MaxFileViewLines: 2000, MaxRunIDs: 20, MaxDecisionRows: 100, MaxAlerts: 50, MaxLegacyMessages: 100},
 		Serve:            ServeConfig{ProbeTimeoutSeconds: 3},
@@ -601,6 +611,17 @@ func load(path string, explicit bool) (cfg Config, usedFile bool, err error) {
 	if err := dec.Decode(&merged); err != nil {
 		return Config{}, false, fmt.Errorf("config file %s has a problem: %s", path, plainYAML(err))
 	}
+	// A project selecting another runtime cannot inherit a protocol that only
+	// applies to the personal Ollama connection. Explicit protocol still wins.
+	var selected struct{ Decision map[string]any }
+	if e := yaml.Unmarshal(raw, &selected); e != nil {
+		return Config{}, false, e
+	}
+	if _, hasRuntime := selected.Decision["runtime"]; hasRuntime && merged.Decision.Runtime != cfg.Decision.Runtime {
+		if _, hasProtocol := selected.Decision["protocol"]; !hasProtocol {
+			merged.Decision.Protocol = cfg.Decision.WithRuntime(merged.Decision.Runtime).Protocol
+		}
+	}
 	// Old automatically saved workspace snapshots must not freeze personal
 	// settings once the user has deliberately saved global defaults. Authored
 	// project files still overlay globals, preserving explicit project choices.
@@ -644,6 +665,16 @@ func (c Config) templatesDir(exe string) string {
 
 // Validate rejects out-of-range values in plain language.
 func (c Config) Validate() error {
+	if err := c.Coding.ReportContract().Validate(); err != nil {
+		return fmt.Errorf("coding: %w", err)
+	}
+	if c.Coding.ReportFormat != "" && strings.TrimSpace(c.Coding.CheckCommand) == "" {
+		return fmt.Errorf("coding report contract requires check_command")
+	}
+
+	if err := c.Testing.Validate(); err != nil {
+		return err
+	}
 	for name, v := range map[string]int{"ui.max_file_entries": c.UI.MaxFileEntries, "ui.max_file_view_lines": c.UI.MaxFileViewLines, "ui.max_run_ids": c.UI.MaxRunIDs, "ui.max_decision_rows": c.UI.MaxDecisionRows, "ui.max_alerts": c.UI.MaxAlerts, "ui.max_legacy_messages": c.UI.MaxLegacyMessages} {
 		if v <= 0 {
 			return fmt.Errorf("%s must be positive, got %d", name, v)

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"specific-harness/internal/testfs"
 	"testing"
 )
 
@@ -104,7 +105,7 @@ func TestWorkspaceSymlinkHasSameIdentity(t *testing.T) {
 	isolatedUser(t)
 	project := t.TempDir()
 	alias := filepath.Join(t.TempDir(), "alias")
-	if err := os.Symlink(project, alias); err != nil {
+	if err := testfs.Symlink(project, alias); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
 	t.Chdir(project)

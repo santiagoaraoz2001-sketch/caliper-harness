@@ -93,7 +93,13 @@ func TestRollbackCheckpointWaitsForReaderSettlement(t *testing.T) {
 			return refused
 		})
 	}()
-	<-changed
+	// A writer now drains readers BEFORE entering a transaction, including
+	// native auto-checkpoints during COMMIT. It must not reach the callback yet.
+	select {
+	case <-changed:
+		t.Fatal("write overlapped reader transaction")
+	case <-time.After(30 * time.Millisecond):
+	}
 	res, err := reader.Query("COMMIT")
 	if res != nil {
 		res.Close()
@@ -103,6 +109,7 @@ func TestRollbackCheckpointWaitsForReaderSettlement(t *testing.T) {
 	}
 	held = false
 	s.owner.readers.RUnlock()
+	<-changed
 	if err := <-settled; !errors.Is(err, refused) || !rollbackConfirmed(err) {
 		t.Fatalf("rollback: %v", err)
 	}

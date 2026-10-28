@@ -89,6 +89,7 @@ func TestSettingsGenerationBudgetTitleAndSummaryFactories(t *testing.T) {
 	}
 	m.Cfg.Templates.Path = "../../templates"
 	m.St.CtxWindow = 32768
+	m.Cfg.Context.Keep = .01
 	m.Chat.Context = session.Continuation{Version: 1}
 	m.Chat.Context.Add("intent", "user", "ORIGINAL", false)
 	m.Chat.Context.Add("reply", "assistant", strings.Repeat("UNVERIFIED PROPOSAL ", 100), false)

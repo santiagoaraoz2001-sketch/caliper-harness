@@ -309,7 +309,11 @@ func TestMainPlanningWithoutConfiguredCheck(t *testing.T) {
 			if mode == "alert" {
 				wantCalls = 4
 			}
-			if e != nil || r.Outcome.Status != outcome.Stopped || calls != wantCalls || r.Continuation.Coding.Passed() {
+			wantOutcome := outcome.Completed
+			if mode == "alert" {
+				wantOutcome = outcome.Stopped
+			}
+			if e != nil || r.Outcome.Status != wantOutcome || calls != wantCalls || r.Continuation.Coding.Passed() || r.Continuation.Assignment != nil {
 				t.Fatalf("unclaimed discovery outcome=%+v calls=%d error=%v", r.Outcome, calls, e)
 			}
 

@@ -39,6 +39,7 @@ func (m *Model) recallChat(args []string) {
 		m.alert("info", fmt.Sprintf("no memories match %q", q))
 		return
 	}
+	m.alert("info", "recall results for "+q)
 	m.Chat.appendLine(lineSys, block)
 	m.Chat.unpin()
 	m.showChat()
@@ -88,6 +89,7 @@ func (m *Model) rememberChat(args []string) {
 		m.alert("err", "remember failed: "+err.Error())
 		return
 	}
+	m.alert("info", "memory saved in "+scope)
 	m.Chat.appendLine(lineSys, fmt.Sprintf("remembered in %s · %s", scope, entry.ID))
 	m.Chat.unpin()
 	m.showChat()
@@ -132,6 +134,7 @@ func (m *Model) styleChat(args []string) {
 			m.alert("info", "no project style guidance; /style add <rule>")
 			return
 		}
+		m.alert("info", "showing current project style")
 		m.Chat.appendLine(lineSys, fmt.Sprintf("project style · %s · version %s\n%s", w.Path, previous, body))
 	} else {
 		var entry *memory.Entry
@@ -144,6 +147,7 @@ func (m *Model) styleChat(args []string) {
 			m.alert("err", "style failed: "+err.Error())
 			return
 		}
+		m.alert("info", "project style saved; used from next run")
 		m.Chat.appendLine(lineSys, fmt.Sprintf("project style saved · %s · version %s · used from next run", w.Path, entry.ID))
 	}
 	m.Chat.unpin()

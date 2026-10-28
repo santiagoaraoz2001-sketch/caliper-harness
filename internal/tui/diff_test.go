@@ -105,8 +105,8 @@ func TestDiffViewer(t *testing.T) {
 func TestDiffComment(t *testing.T) {
 	m := feedDiff(diffModel(), diffEv("sub/a.txt", "modify", "x"))
 	m = key(toDiff(m), "f")
-	if m.Tabs[m.Active].at.view != ViewChat {
-		t.Fatal("f must land in chat")
+	if m.Tabs[m.Active].at.view != ViewDiff {
+		t.Fatal("f must preserve captured viewer")
 	}
 	if got := m.Input.Value(); got != "/comment sub/a.txt " {
 		t.Fatalf("prefill=%q", got)

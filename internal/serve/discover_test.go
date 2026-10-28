@@ -3,6 +3,7 @@ package serve
 import (
 	"os"
 	"path/filepath"
+	"specific-harness/internal/testfs"
 	"strings"
 	"testing"
 )
@@ -34,7 +35,7 @@ func TestD09DiscoveryPinnedLocalAndNoActivation(t *testing.T) {
 	makeAsset(t, broken, true)
 	os.Remove(filepath.Join(broken, "part.safetensors"))
 	alias := filepath.Join(t.TempDir(), "alias")
-	if err := os.Symlink(snapshot, alias); err != nil {
+	if err := testfs.Symlink(snapshot, alias); err != nil {
 		t.Fatal(err)
 	}
 	catalog := t.TempDir()
@@ -87,7 +88,7 @@ func TestD09RootOverridePrecedence(t *testing.T) {
 		t.Setenv(k, "")
 	}
 	t.Setenv("XDG_CACHE_HOME", "/xdg")
-	if ModelRoots("/home")[0].Path != "/xdg/huggingface/hub" {
+	if ModelRoots("/home")[0].Path != filepath.Join("/xdg", "huggingface", "hub") {
 		t.Fatal("xdg")
 	}
 	t.Setenv("HF_HOME", "/hf")

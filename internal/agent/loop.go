@@ -26,14 +26,14 @@ const (
 	loopProgress       = "the agent is making progress and should continue"
 )
 
-// watcher counts consecutive repeat signatures and non-productive attempts.
-// Detection is consecutive-attempts by design: it catches the loop-as-stupidity
-// shape (identical block N times). A loop interleaved with unrelated work
-// evades it — documented, not handled; revisit with live evidence.
+// watcher supplies advisory cadence plus cumulative, bounded observed evidence.
+// Neither repeated inspection nor complete reads establish task completion.
 type watcher struct {
-	lastSig string
-	sameRun int
-	nonprod int
+	history       discoveryHistory
+	historyBudget int
+	lastSig       string
+	sameRun       int
+	nonprod       int
 	// Advisory cadence counts settled receipts independently of their success.
 	// Productive discovery and varied Bash calls still need progress supervision.
 	discoveryCalls int
@@ -101,12 +101,14 @@ type loopObservation struct {
 	OutputText                          string     `json:",omitempty"`
 	Tool                                string
 	Args                                tool.Args
+	StateChanged                        bool `json:",omitempty"`
 	Changed, Failed, Blocked, Truncated bool
 	NoMatches                           bool
 	ExitCode                            *int
 	Error                               string
 	OutputBytes                         int
 	OutputSHA256                        string
+	ArgumentsSHA256                     string
 	TextBasis                           string
 }
 
@@ -119,14 +121,15 @@ func loopObserved(note *observed) *loopObservation {
 		basis = "GraphQL observation summary; response body omitted"
 	}
 	var observedAt *time.Time
+	args, _ := json.Marshal(note.Args)
 	if !note.ObservedAt.IsZero() {
 		value := note.ObservedAt
 		observedAt = &value
 	}
 	return &loopObservation{Tool: note.Tool, Args: note.Args, CallID: note.CallID, ObservedAt: observedAt,
-		Changed: note.Result.Changed, Failed: note.Result.Failed, Blocked: note.Result.Blocked,
+		Changed: note.Result.Changed, StateChanged: note.Result.StateChanged, Failed: note.Result.Failed, Blocked: note.Result.Blocked,
 		Truncated: note.Result.Truncated, NoMatches: note.Result.NoMatches, ExitCode: note.Result.ExitCode,
-		Error: note.Error, OutputBytes: len(note.Result.Text), OutputSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(note.Result.Text))), TextBasis: basis}
+		Error: note.Error, OutputBytes: len(note.Result.Text), OutputSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(note.Result.Text))), ArgumentsSHA256: fmt.Sprintf("%x", sha256.Sum256(args)), TextBasis: basis}
 }
 
 // Both progress touchpoints use the same observed packet and advisory choices.
@@ -141,7 +144,6 @@ func (r *Runner) confirmLoop(ctx context.Context, w *watcher, desc string, log f
 		packet.PreflightRefusal = refusal
 		packet.Checkpoint.NextAction = r.Prompts.Text("progress.refused_call")
 	}
-	packet.ProgressBasis = r.Prompts.Text("decision.loop.progress_basis")
 	return r.progressAdvice(ctx, w, packet, decision.SourceLoopConfirm, r.Prompts.Text("decision.loop.instructions"), log)
 }
 
@@ -222,6 +224,10 @@ func (r *Runner) deliveredUserContext() (original, current string, comments []de
 }
 
 type progressPacket struct {
+	// Only the owning reviewer runner may identify its assembled review request
+	// as attachments, rather than human intent. Never inferred from its text.
+	hostReviewRequest                                                    bool
+	AnsweredQuestions                                                    []session.Entry `json:",omitempty"`
 	LatestSettled                                                        *loopObservation
 	UnexecutedCalls                                                      []unexecutedProgressCall `json:",omitempty"`
 	CapacityOmissions                                                    []progressOmission       `json:",omitempty"`
@@ -235,6 +241,7 @@ type progressPacket struct {
 	OmittedDeliberation                                                  []deliberationOmission
 	OmittedCompletedReplies, OmittedReceipts, OmittedDeliberationEntries int
 	LatestSourceText                                                     string
+	Discovery                                                            discoveryEvidence
 	Coding                                                               *session.CodingState
 	Facts                                                                any
 	Checkpoint                                                           ProgressCheckpoint
@@ -258,6 +265,7 @@ func (r *Runner) progressEvidence(ctx context.Context, w *watcher) (progressPack
 		}
 	}
 	packet := progressPacket{PlanningActive: r.PlanningActive(),
+		ProgressBasis:            r.Prompts.Text("decision.loop.progress_basis"),
 		AuthoredTaskInstructions: r.TaskSystem,
 		Coding:                   r.Continuation.Coding, Facts: facts, Checkpoint: r.currentProgress(facts), PendingRepair: r.enforcement.repair,
 		Latest: loopObserved(r.enforcement.current), LatestDiscovery: loopObserved(r.enforcement.discovery), Assigned: r.assignedClaim, Settled: r.settlement != nil}
@@ -282,7 +290,14 @@ func (r *Runner) progressEvidence(ctx context.Context, w *watcher) (progressPack
 		packet.Checkpoint.NextAction = r.Prompts.Text("progress.review")
 	}
 	packet.OriginalUserIntent, packet.CurrentUserRequest, packet.DeliveredUserComments, packet.DeliveredTaskComments = r.deliveredUserContext()
+	packet.hostReviewRequest = r.reviewRequest != "" && packet.OriginalUserIntent == r.reviewRequest
+	for i, keep := range answerGroupEntries(r.Continuation) {
+		if keep {
+			packet.AnsweredQuestions = append(packet.AnsweredQuestions, r.Continuation.Entries[i])
+		}
+	}
 	if w != nil {
+		packet.Discovery = w.history.evidence()
 		for _, message := range w.recentReplies {
 			packet.RecentCompletedReplies = append(packet.RecentCompletedReplies, message.Clone())
 		}
@@ -330,7 +345,8 @@ func (r *Runner) progressEvidence(ctx context.Context, w *watcher) (progressPack
 		} else if len(packet.RecentReceipts) > 0 {
 			last := packet.RecentReceipts[len(packet.RecentReceipts)-1]
 			current := latestNativeResult == nil || latestNativeResult.ToolCallID == last.CallID || strings.HasPrefix(latestNativeResult.Content, "call not executed:")
-			if current && (last.Error != "" || last.Failed || last.Blocked || last.ExitCode != nil && *last.ExitCode != 0) {
+			// Executed nonzero results are evidence, not a malformed-call refusal.
+			if current && (last.Blocked || (last.ExitCode == nil && (last.Error != "" || last.Failed))) {
 				refusal := last.Error
 				if last.OutputText != "" {
 					if refusal != "" {
@@ -346,7 +362,7 @@ func (r *Runner) progressEvidence(ctx context.Context, w *watcher) (progressPack
 		// error prose or an unfinished response.
 		if latestNativeResult == nil && len(w.recentReplies) > 0 && len(r.Continuation.Entries) > 0 {
 			last := r.Continuation.Entries[len(r.Continuation.Entries)-1]
-			if last.Kind == "failure" && last.Message.Role == "user" {
+			if last.Kind == "failure" && last.Message.Role == "user" && (r.enforcement.current == nil || r.enforcement.current.Result.ExitCode == nil) {
 				call, found, _ := tool.Extract(w.recentReplies[len(w.recentReplies)-1].Content, r.Prompts)
 				if found && call.Name != "" {
 					r.groundProgressRefusal(&packet, last.Message.Content, call.Name)
@@ -435,6 +451,8 @@ func (r *Runner) progressAdvice(ctx context.Context, w *watcher, packet progress
 	resolution := []string{"continued-work", "repair-rejected-call", "reconsider-approach"}[index]
 	if v.Confidence < advisoryConfidence {
 		resolution = "failed-confidence"
+	} else if index == 1 && packet.PreflightRefusal == "" {
+		resolution = "unsupported-repair" // No unresolved refusal: stale advice cannot become a new instruction.
 	} else if index != 0 {
 		advice = r.Prompts.Text(keys[index])
 	}
@@ -560,7 +578,7 @@ func (e *progressJudgeError) Unwrap() error { return e.error }
 // The opt-in caller owns evidence selection. Other judgments never reduce or
 // retry; every native admission request and final selected input is recorded.
 func (r *Runner) progressJudgment(ctx context.Context, input any, req decision.Request, reduce func() bool, log func(string, string) error) (decision.Request, decision.Verdict, error) {
-	for {
+	for admission := 0; ; admission++ {
 		raw, err := json.Marshal(input)
 		if err != nil {
 			return req, decision.Verdict{}, err
@@ -585,10 +603,32 @@ func (r *Runner) progressJudgment(ctx context.Context, input any, req decision.R
 			return req, v, nil
 		}
 		var capacity *decision.ContextCapacityError
-		if !errors.As(err, &capacity) || !reduce() {
+		if !errors.As(err, &capacity) || admission >= 12 {
 			return req, decision.Verdict{}, &progressJudgeError{fmt.Errorf("progress advice unavailable: %w", err)}
 		}
-		if err := log("note", "progress input refused before inference by native context admission; retrying with disclosed optional evidence omissions"); err != nil {
+		// A refusal is local admission, not inference. Batch optional omissions
+		// before retrying: one refusal per small field caused thousands of native
+		// admissions and duplicated log packets on long tasks. Protected evidence
+		// remains owned by reduce; never truncate required facts to force a fit.
+		target := len(raw) / 2
+		removed := 0
+		for reduce() {
+			removed++
+			if e := ctx.Err(); e != nil {
+				return req, decision.Verdict{}, e
+			}
+			next, e := json.Marshal(input)
+			if e != nil {
+				return req, decision.Verdict{}, e
+			}
+			if len(next) <= target {
+				break
+			}
+		}
+		if removed == 0 {
+			return req, decision.Verdict{}, &progressJudgeError{fmt.Errorf("progress advice unavailable: protected evidence exceeds capacity: %w", err)}
+		}
+		if err := log("note", fmt.Sprintf("progress input refused before inference; retrying after %d disclosed optional evidence omissions", removed)); err != nil {
 			return req, decision.Verdict{}, err
 		}
 	}
@@ -617,6 +657,15 @@ func (p *progressPacket) omitSmaller(field, text string, remove, restore func())
 }
 
 func (p *progressPacket) reduceForCapacity() bool {
+	// The reviewer receives the full host-assembled evidence prompt, which is
+	// not a second human request. Its frozen scope and current receipts remain
+	// below; only this optional attachment copy can be omitted on real refusal.
+	if p.hostReviewRequest && p.AuthoredTaskInstructions != "" && p.OriginalUserIntent != "" {
+		request := p.OriginalUserIntent
+		if p.omitSmaller("OriginalUserIntent (host-assembled reviewer request; frozen AuthoredTaskInstructions and current receipts retained)", request, func() { p.OriginalUserIntent = "" }, func() { p.OriginalUserIntent = request }) {
+			return true
+		}
+	}
 	// Historical reviewer prose is optional; the current rejected task's
 	// failure feedback remains protected along with its owning outcome.
 	if s := p.HistoricalSettlement; s != nil && (s.Qualified || s.TaskID != p.Checkpoint.SelectedID) {
@@ -675,6 +724,18 @@ func (p *progressPacket) reduceForCapacity() bool {
 	if source != "" && p.omitSmaller("LatestSourceText", source, func() { p.LatestSourceText = "" }, func() { p.LatestSourceText = source }) {
 		return true
 	}
+	// Cumulative provenance outlives recent receipt bodies, but remains optional
+	// under an actual capacity refusal. Disclose lost facts rather than treating
+	// absent historical evidence as novel work or proof of no earlier inspection.
+	if len(p.Discovery.Sources)+len(p.Discovery.RepeatedObservations) > 0 {
+		previous := p.Discovery
+		raw, _ := json.Marshal(previous)
+		if p.omitSmaller("Discovery", string(raw), func() {
+			p.Discovery = discoveryEvidence{OmittedFacts: previous.OmittedFacts + len(previous.Sources) + len(previous.RepeatedObservations)}
+		}, func() { p.Discovery = previous }) {
+			return true
+		}
+	}
 	// Checkpoint retains actual host phase/identity/next action if a large
 	// authored snapshot is omitted; no qualification or authority is created.
 	if facts, ok := p.Facts.(BookkeepingFacts); ok {
@@ -690,11 +751,12 @@ func (p *progressPacket) reduceForCapacity() bool {
 	return false
 }
 
-// completedDiscovery retains the cadence-sized window of complete replies before maintenance
-// can retire duplicates. It never consumes partial streamed reasoning.
+// completedDiscovery retains the cadence-sized window of complete replies before
+// maintenance can retire duplicates. Disabling optional cadence still retains one
+// latest completed boundary for current refusal/ownership decisions.
 func (w *watcher) completedDiscovery(reply llm.Message, cadence int, sampleBytes ...int) {
 	if cadence <= 0 {
-		return
+		cadence = 1
 	}
 	budget := 0 // Legacy callers without configured sampling retain omission-only evidence.
 	if len(sampleBytes) > 0 {
@@ -713,9 +775,13 @@ func (w *watcher) completedDiscovery(reply llm.Message, cadence int, sampleBytes
 	}
 }
 func (w *watcher) discoveryReceipt(note *observed, cadence int) {
-	if note == nil || cadence <= 0 {
+	if note == nil {
 		return
 	}
+	if cadence <= 0 {
+		cadence = 1
+	}
+	w.history.record(note, w.historyBudget)
 	receipt := loopObserved(note)
 	switch note.Tool {
 	case "read", "read_outside", "grep":
@@ -761,6 +827,13 @@ func (r *Runner) reviewDiscovery(ctx context.Context, w *watcher, log func(strin
 	}
 	digest := r.progressPhase(packet)
 	phaseChanged := w.phaseFacts != ([32]byte{}) && digest != w.phaseFacts
+	// A successful host-owned drafting transition already supplies its next
+	// exact question. It is ordinary progress, not a new lifecycle concern.
+	// Keep cadence, current refusals and real claim/review transitions intact.
+	if note := r.enforcement.latest; !packet.CurrentClaim && note != nil && note.PlanningQuestion != "" && note.PlanningQuestion == packet.Checkpoint.NextAction && note.Error == "" && !note.Result.Failed && !note.Result.Blocked && !note.Result.Truncated && packet.PreflightRefusal == "" {
+		phaseChanged = false
+		w.phaseFacts = digest
+	}
 	if w.phaseFacts == ([32]byte{}) {
 		w.phaseFacts = digest
 	}
