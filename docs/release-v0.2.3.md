@@ -24,6 +24,8 @@ This release adds navigable domain guidance, test-suite management and harness-o
 
 ## Planning, recovery and prompt cost
 
+- Planning respects the requested stopping point: drafting-only leaves drafts; readiness-only does not claim or ask to execute. Build/fix requests authorize the normal readiness/claim sequence.
+
 - Rulith output-limit continuation resumes the exact rendered prompt and raw response prefix through its existing native endpoint. Partial tool frames do not execute; effects commit only after a complete validated call. No recovery user prompt or server modification is inserted.
 - Planning publishes the current host-owned question and authenticates correlated receipts before omitting duplicate schema text. Current project knowledge updates replace one scoped frame at a complete-response boundary.
 - Readiness includes the Approach's declared scope and collective Task coverage. Approval remains bound to the exact displayed owner and brief; a scaffold-only task does not prove a broader product scope.

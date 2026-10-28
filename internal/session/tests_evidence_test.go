@@ -3,10 +3,16 @@ package session
 import (
 	"encoding/json"
 	"testing"
+
+	"specific-harness/internal/pathutil"
 )
 
 func TestTestsEvidenceValidatesImmutableOwnerAndPreservesRaw(t *testing.T) {
-	root := t.TempDir()
+	// Match production project capture before seeding or recording ownership.
+	root, err := pathutil.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, kind := range []string{"valid", "changed-selection", "foreign-workspace", "missing-start", "duplicate-start", "same-hash-changed-spec", "corrupt"} {
 		t.Run(kind, func(t *testing.T) {
 			dir := t.TempDir()

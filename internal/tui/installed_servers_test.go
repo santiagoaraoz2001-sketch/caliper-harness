@@ -127,5 +127,7 @@ func TestDiscoveredLauncherRequiresLocalCandidateAndLoadsLiteralPath(t *testing.
 		}
 		time.Sleep(time.Millisecond)
 	}
-	t.Fatal("local fixture did not capture args")
+	partial, readErr := os.ReadFile(output)
+	fixtureLog, logErr := os.ReadFile(filepath.Join(os.TempDir(), "caliper-harness-my-gufo.log"))
+	t.Fatalf("local fixture did not capture args: pid=%d argv=%q partial=%q read=%v log=%q log_read=%v", msg.proc.PID(), candidate.Recipe.Argv, partial, readErr, fixtureLog, logErr)
 }

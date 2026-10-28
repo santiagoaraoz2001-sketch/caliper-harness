@@ -26,7 +26,8 @@ func call(t *testing.T, cfg config.BashConfig, slots map[string]string) (tool.Re
 func TestEcho(t *testing.T) {
 	res, err := call(t, testCfg(), map[string]string{"cmd": "echo hello"})
 	if err != nil {
-		t.Fatalf("echo failed: %v", err)
+		shell, shellErr := ShellPath()
+		t.Fatalf("echo failed: %v; shell=%q lookup=%v; partial=%q truncated=%v", err, shell, shellErr, res.Text, res.Truncated)
 	}
 	if !strings.Contains(res.Text, "hello") || res.Truncated {
 		t.Errorf("text=%q truncated=%v", res.Text, res.Truncated)

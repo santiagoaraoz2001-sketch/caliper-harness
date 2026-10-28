@@ -10,6 +10,7 @@ import (
 	"specific-harness/internal/graph"
 	"specific-harness/internal/llm"
 	"specific-harness/internal/memory"
+	"specific-harness/internal/pathutil"
 	"specific-harness/internal/run"
 	"specific-harness/internal/store"
 	"specific-harness/internal/tool"
@@ -19,7 +20,11 @@ import (
 )
 
 func TestTestsDesignFirstProviderPacketAndPublicEvidence(t *testing.T) {
-	root := t.TempDir()
+	// Match production project capture before seeding or recording ownership.
+	root, err := pathutil.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Chdir(root)
 	db, dir := filepath.Join(t.TempDir(), "db"), t.TempDir()
 	s, err := store.Open(db)
