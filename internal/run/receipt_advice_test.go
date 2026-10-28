@@ -309,7 +309,7 @@ func TestReceiptAdviceAdmissionAndRefetch(t *testing.T) {
 			if e := s.Write(`MATCH(a:Approach) WHERE a.id=$id SET a.state=$state`, map[string]any{"id": a, "state": string(approachState)}); e != nil {
 				t.Fatal(e)
 			}
-			if v := advice(); !strings.Contains(v, "ready_task(task=") || !strings.Contains(v, first) || !strings.Contains(v, "partial receipts") || !strings.Contains(v, "separate task_start") {
+			if v := advice(); !strings.Contains(v, "ready_task(task=") || !strings.Contains(v, first) || !strings.Contains(v, "partial receipts") || !strings.Contains(v, "task_start after successful Ready only for requested execution") || !strings.Contains(v, "For readiness-only, report and stop") {
 				t.Fatalf("advertised typed readiness absent (%s/%s): %q", parentState, approachState, v)
 			}
 			withoutReady := []string{}

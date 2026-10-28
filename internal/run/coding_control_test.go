@@ -312,6 +312,17 @@ func TestCodingChecksRefuseAndInvalidateTruthfully(t *testing.T) {
 				r.Registry = reg
 			}
 			_, _, e = r.Run(context.Background(), "owned control")
+			if scenario == "failed workflow" {
+				definitions, err := r.Registry.NativeDefinitions()
+				if err != nil {
+					t.Fatal(err)
+				}
+				wire, err := json.Marshal(definitions)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Logf("fixed-window pressure: window=%d schema_bytes=%d compact_argument_headings=%d outcome=%s", deps.Window, len(wire), strings.Count(string(wire), " arguments (flat JSON, no wrapper):"), r.Outcome.Status)
+			}
 			hostExpected := scenario == "later bash" || scenario == "later launch" || scenario == "later workflow_resume" || scenario == "hidden workflow" || strings.Contains(scenario, "configured")
 			if hostExpected {
 				want = outcome.Completed

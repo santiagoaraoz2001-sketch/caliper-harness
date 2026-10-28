@@ -41,8 +41,8 @@ func nativeHelpTemplate(t *testing.T, text string) struct {
 		t.Fatal(err)
 	}
 	for _, line := range strings.Split(text, "\n") {
-		if strings.HasPrefix(line, "Arguments for ") && strings.Contains(line, " (direct fields, not nested in name/arguments)") {
-			call.Name = strings.Fields(line)[2]
+		if strings.HasSuffix(line, " arguments (flat JSON, no wrapper):") {
+			call.Name = strings.Fields(line)[0]
 			break
 		}
 	}

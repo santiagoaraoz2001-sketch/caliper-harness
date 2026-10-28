@@ -1047,7 +1047,7 @@ texts:
   # Definition-owned native example; arguments come only from its current Params.
   # Fields: .Name, .Arguments. Source/command placeholders are not guessed values.
   tool.call.template: |-
-    Arguments for {{.Name}} (direct fields, not nested in name/arguments):
+    {{.Name}} arguments (flat JSON, no wrapper):
     ```json
     {{.Arguments}}
     ```
@@ -2322,10 +2322,10 @@ texts:
   # Original use sites: internal/tools/graph/graph.go:132 (Preparation).
   # Fields: none. Supplied by the owning Go caller.
   tools.ready_task.purpose: >2-
-    Omit task only with one complete unambiguous current-run prepare_task receipt; otherwise use
-    the intended queued UUID. Activate a Draft same-project parent, then request owning Ready
-    with brief/coherence/approval guards. Reuse Active parents. No claim or coding occurs;
-    retain partial effects. For readiness-only, report the result and stop. Call task_start after Ready only when execution was requested.
+    Use the queued UUID, or omit task for one complete unambiguous current-run prepare_task receipt.
+    Activate its Draft same-project parent; reuse Active. Request Ready with brief/coherence/approval guards.
+    Retain partial effects. For readiness-only, report and stop; no claim or coding.
+    Use task_start only for requested execution after Ready.
 
   # Model-facing desc prose for the current New registry constructor; executable schema/authority
   # remain Go-owned.
@@ -2370,10 +2370,9 @@ texts:
   # Original use sites: internal/agent/enforcement.go:89 (TaskStartDefinition).
   # Fields: none. Supplied by the owning Go caller.
   tools.task_start.purpose: >2-
-    Only for requested execution with an Active parent and actual Ready, omit task with the same complete unambiguous current-run
-    prepare_task receipt; otherwise use the intended queued UUID. Empty/null refuses. This
-    claims main-model execution and installs its frozen task instructions on the next request.
-    Wait for its actual receipt; successful claim consumes the binding.
+    Only for requested execution: claim as main model under an Active parent and actual Ready.
+    Use the queued UUID, or omit task for one complete unambiguous current-run prepare_task receipt.
+    Empty/null refuses. Success consumes the binding and supplies frozen task instructions next request; wait for its receipt.
 
   # Model-facing desc prose for the current NewBuild registry constructor; executable
   # schema/authority remain Go-owned.
