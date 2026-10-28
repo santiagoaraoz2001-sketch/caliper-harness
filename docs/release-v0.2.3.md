@@ -4,6 +4,8 @@ This release adds navigable domain guidance, test-suite management and harness-o
 
 ## Behavior changes
 
+- File write/edit receipts report exact committed UTF-8 byte counts alongside hashes, line counts and newline flags, within the existing receipt budget.
+
 - Windows terminal paste preserves Unicode and multiline input as one submission through the real console boundary. Ask choices use one option per line so natural commas remain part of a label. `/btw` preserves authored spacing.
 - PAT exposes the current field instead of a broad future-field schema, rejects unsupported authored fields instead of silently dropping them, and reopens the same task for counterevidence. An unchanged stopped task can be requeued without rewriting its brief; the new attempt still requires fresh checks.
 - User feedback has distinct captured and committed events. Late feedback can be saved against its exact task/attempt without granting execution authority. Capture failures preserve the popped intent in memory.

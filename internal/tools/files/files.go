@@ -608,7 +608,7 @@ func sourceLines(s string) []string {
 
 // Construct the bounded factual receipt before effects; source bytes are not repaired.
 func publicationReceipt(path, scope string, b, next []byte, deleted, inserted string, cap int) (string, bool, error) {
-	text := fmt.Sprintf("%q changed %s (%d→%d file lines) old_sha256=%s sha256=%s replacement_final_LF=%t file_final_LF=%t\n", path, scope, len(sourceLines(string(b))), len(sourceLines(string(next))), digest(b), digest(next), strings.HasSuffix(inserted, "\n"), strings.HasSuffix(string(next), "\n"))
+	text := fmt.Sprintf("%q changed %s (%d→%d file lines) size_bytes=%d old_sha256=%s sha256=%s replacement_final_LF=%t file_final_LF=%t\n", path, scope, len(sourceLines(string(b))), len(sourceLines(string(next))), len(next), digest(b), digest(next), strings.HasSuffix(inserted, "\n"), strings.HasSuffix(string(next), "\n"))
 	omission := "[preview omitted]"
 	if len(text)+len(omission) > cap {
 		return "", false, fmt.Errorf("publication receipt exceeds tools.bash.max_bytes=%d; no bytes published", cap)

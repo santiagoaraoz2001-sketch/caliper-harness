@@ -386,3 +386,37 @@ func TestReadGroundingCaseAliasesAndHardlinkPublication(t *testing.T) {
 		})
 	}
 }
+
+// Compare public write/edit receipts with actual committed bytes, not character
+// counts or the JSON-escaped argument representation.
+func TestPublicationReceiptReportsCommittedUTF8Bytes(t *testing.T) {
+	dir := t.TempDir()
+	w := &Workspace{Path: dir, Caps: config.Defaults().Tools.Bash}
+	publish := func(name string, args map[string]string, want string) []byte {
+		t.Helper()
+		res, err := invoke(t, w, name, args)
+		got, readErr := os.ReadFile(filepath.Join(dir, "cargo.txt"))
+		if err != nil || readErr != nil || !res.Changed || string(got) != want {
+			t.Fatalf("actual publication: result=%+v err=%v read=%v bytes=%q", res, err, readErr, got)
+		}
+		if len(got) == utf8.RuneCount(got) {
+			t.Fatal("fixture must distinguish bytes from characters")
+		}
+		for _, fact := range []string{"size_bytes=" + strconv.Itoa(len(got)) + " ", "sha256=" + digest(got), "file_final_LF=true"} {
+			if !strings.Contains(res.Text, fact) {
+				t.Fatalf("receipt lacks actual fact %q: %s", fact, res.Text)
+			}
+		}
+		if res.FileEffect == nil || res.FileEffect.AfterHash != digest(got) {
+			t.Fatal("receipt and effect disagree")
+		}
+		return got
+	}
+	original := publish("write", map[string]string{"path": "cargo.txt", "content": "Cargo α 🚚\r\n"}, "Cargo α 🚚\r\n")
+	edited := publish("edit", map[string]string{"path": "cargo.txt", "old": "Cargo", "new": "Port 色", "expected_hash": digest(original)}, "Port 色 α 🚚\r\n")
+	refused, err := invoke(t, w, "edit", map[string]string{"path": "cargo.txt", "old": "Port", "new": "wrong", "expected_hash": digest(original)})
+	after, readErr := os.ReadFile(filepath.Join(dir, "cargo.txt"))
+	if err == nil || refused.Changed || strings.Contains(refused.Text, "size_bytes=") || readErr != nil || string(after) != string(edited) {
+		t.Fatalf("refused write claimed or changed bytes: %+v %v %q", refused, err, after)
+	}
+}

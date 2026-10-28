@@ -2702,7 +2702,7 @@ texts:
 
   # Scoped advice after the actual owning operation; factual receipt remains in Go.
   # Fields: .ParentID. Supplied by the owning Go caller.
-  continuation.workflow.scoped_saved_task_brief: " brief saved; this call ran no children. Draft remaining behavior tasks; stop with a summary for planning only, or select parent {{.ParentID}} for authorized readiness."
+  continuation.workflow.scoped_saved_task_brief: " brief saved; this call ran no children. Draft remaining behavior tasks; stop with a summary for planning only, or select parent {{.ParentID}} for authorized readiness through its current advertised schema."
 
   # --- Corrective tool guidance; factual error classes and actual values stay in Go ---
   # Corrective advice for internal/tools/files/files.go:66; no authority or effects implied.
@@ -3007,7 +3007,7 @@ texts:
   planning.another: |2-
     DRAFT TASKS: plan(invoke="TASK", title="<title>", objective="<outcome>") adds another behavior task.
     Honor requested grouping. Define a coherent runnable increment; avoid speculative later features.
-    For planning only, give a final summary and leave the Approach Draft; no completion call is needed.
+    For planning only, give a final summary without readiness or claim; no completion call is needed.
     When readiness is authorized and all briefs are drafted, plan(invoke="COMPLETE") requests readiness,
     not execution/qualification. Repair the deficient brief if readiness refuses.
 
@@ -3064,7 +3064,7 @@ texts:
   planning.task_drafted: |2-
     TASK BRIEF DRAFTED — still planning, not executed or verified.
     plan(invoke="NEXT") returns to the Approach to draft remaining Tasks. For planning only,
-    give a final summary and leave the Approach Draft. Readiness and claim require authorization.
+    give a final summary without readiness or claim. Preserve the current Approach state.
 
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
   planning.task_complete: |2-
@@ -3358,7 +3358,7 @@ texts:
     preserve the fix and plan remaining work. After claim, reuse checks only when host receipts mark them current
     for that task and attempt; obtain missing or stale checks before independent review. Draft intentions are not executed commands.
     In DRAFT TASKS, plan(invoke="TASK", title="<title>", objective="<outcome>") adds a task;
-    For planning only, summarize the drafts and leave the Approach Draft; no completion call is needed.
+    For planning only, summarize the drafts without readiness or claim; no completion call is needed.
     When authorized, plan(invoke="COMPLETE") requests readiness after all approach briefs. At START,
     plan(invoke="EXECUTE") claims the main model's next task only when execution is authorized.
     Its frozen brief becomes system instructions. Use check for the behavioral command then
