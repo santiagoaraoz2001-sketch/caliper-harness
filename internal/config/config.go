@@ -468,8 +468,8 @@ type DecisionConfig struct {
 	// below it the gate asks the human or refuses admission. Advisory supervision
 	// uses the owner's separate fixed 0.5 floor and never grants authority.
 	RiskThreshold float64 `yaml:"risk_threshold"`
-	// CoherenceMaxChars is a legacy optional logical-request byte guard.
-	// 0 delegates capacity to native full-input token admission; positive values add a local policy.
+	// CoherenceMaxChars is accepted for compatibility and ignored: no byte
+	// ceiling refuses decision admission. Provider token limits are the only limit.
 	CoherenceMaxChars int `yaml:"coherence_max_chars"`
 	// JudgmentContextChars caps the context kept in a judgment log event.
 	// 0 = unlimited.
@@ -524,7 +524,7 @@ func Defaults() Config {
 		Templates: TemplatesConfig{Path: "templates"},
 		Subagents: SubagentsConfig{Mode: SubagentsConcurrent, MaxSubagents: 0, ContextWindow: 0, MaxResultChars: 2000},
 		Workflows: WorkflowsConfig{MaxRetries: 2, RetryDelaySeconds: 0, VerifyFollowup: true},
-		Decision:  DecisionConfig{Runtime: "laya", Server: "http://127.0.0.1:8090", Model: "typed-decisions", Device: "auto", TimeoutSeconds: 30, MaxInputTokens: 15999, RiskThreshold: 0.7, CoherenceMaxChars: 0, JudgmentContextChars: 500, ConfidenceBuckets: []float64{0.5, 0.7, 0.9}},
+		Decision:  DecisionConfig{Runtime: "laya", Server: "http://127.0.0.1:8090", Model: "typed-decisions", Device: "auto", TimeoutSeconds: 30, MaxInputTokens: 15999, RiskThreshold: 0.7, CoherenceMaxChars: 0, JudgmentContextChars: 0, ConfidenceBuckets: []float64{0.5, 0.7, 0.9}},
 		Watch:     WatchConfig{Enabled: true, MaxFileBytes: 131072, StartupMaxBytes: 8388608, StartupMaxFiles: 512, StartupMaxEntries: 4096, DebounceMs: 200, MaxEvents: 100, DiffLines: 6, FileLines: 200, AttrWindowS: 30},
 		Tabs:      TabsConfig{TitleEvery: 5, TitleTimeoutSeconds: 20},
 	}

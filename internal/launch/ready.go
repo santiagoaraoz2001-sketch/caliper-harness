@@ -8,6 +8,7 @@ import (
 
 	"specific-harness/internal/auth"
 	"specific-harness/internal/decision"
+	"specific-harness/internal/outcome"
 	"specific-harness/internal/plan"
 )
 
@@ -84,8 +85,9 @@ func checkCoherence(ctx context.Context, d Deps, approachID string, p *plan.Plan
 	}
 	if d.ManualReadiness {
 		prompt := fmt.Sprintf("Decision model disabled — approve approach %q as ready for execution? Review the complete task briefs below; this is readiness approval, not evidence that code passed checks or independent review.\n", approachID)
-		prompt += humanReadinessContext(p, a, tasks)
+		prompt += humanReadinessContext(p, a, tasks, req)
 		accepted := false
+		var confirmedSnapshot string
 		if d.ConfirmReadiness != nil {
 			snapshot, err := plan.ReadinessBriefSnapshot(d.Store, approachID, p, a, tasks)
 			if err != nil {
@@ -95,6 +97,7 @@ func checkCoherence(ctx context.Context, d Deps, approachID string, p *plan.Plan
 			if err != nil {
 				return err
 			}
+			confirmedSnapshot = snapshot
 		} else if d.Ask != nil {
 			accepted = d.Ask(ctx, prompt)
 		} else if d.In != nil && d.Out != nil {
@@ -111,6 +114,9 @@ func checkCoherence(ctx context.Context, d Deps, approachID string, p *plan.Plan
 			d.Log("manual-readiness", string(raw))
 		}
 		if !accepted {
+			if confirmedSnapshot != "" {
+				return &outcome.ReadinessNotApprovedError{Store: d.Store.Identity(), ApproachID: approachID, Snapshot: confirmedSnapshot}
+			}
 			return fmt.Errorf("readiness not approved; approve the exact brief in an interactive session or enable the decision model")
 		}
 		return nil
@@ -118,14 +124,18 @@ func checkCoherence(ctx context.Context, d Deps, approachID string, p *plan.Plan
 	if d.Judge == nil {
 		return fmt.Errorf("PAT readiness has no decision judge; enable it in Settings (decision.disabled: false) — refusing %q", approachID)
 	}
-	if d.CoherenceMaxChars > 0 && size > d.CoherenceMaxChars {
-		return fmt.Errorf("readiness request is %d bytes, exceeds decision.coherence_max_chars=%d — split or narrow the full brief; no judgment ran", size, d.CoherenceMaxChars)
-	}
+	_ = size // complete encoded size is diagnostic only; no byte ceiling refuses admission
 	v, err := d.Judge(ctx, req)
+	if err != nil && decision.IsCapacity(err) && ctx.Err() == nil {
+		v, err = judgeCoherenceChunked(ctx, d, p, a, tasks, req)
+	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 	if err != nil {
+		if decision.EncodedCapacity(err) {
+			return fmt.Errorf("launch refused: %v — %s", err, d.Prompts.Text("guidance.judge.capacity"))
+		}
 		return fmt.Errorf("launch refused: the decision sidecar refused or is unreachable (%v) — %s", err, d.Prompts.Text("guidance.judge.unreachable"))
 	}
 	if v.Option != req.Options[0] && v.Option != req.Options[1] {
@@ -133,8 +143,9 @@ func checkCoherence(ctx context.Context, d Deps, approachID string, p *plan.Plan
 	}
 	if v.Confidence < d.Threshold {
 		prompt := fmt.Sprintf("unsure — leans %s (confidence %.3f) — admit approach %q anyway?", v.Option, v.Confidence, approachID)
-		prompt += "\nComplete judged brief:\n" + humanReadinessContext(p, a, tasks)
+		prompt += "\nComplete judged brief:\n" + humanReadinessContext(p, a, tasks, req)
 		accepted := false
+		var confirmedSnapshot string
 		if d.ConfirmReadiness != nil {
 			snapshot, err := plan.ReadinessBriefSnapshot(d.Store, approachID, p, a, tasks)
 			if err != nil {
@@ -144,13 +155,20 @@ func checkCoherence(ctx context.Context, d Deps, approachID string, p *plan.Plan
 			if err != nil {
 				return err
 			}
+			confirmedSnapshot = snapshot
 		} else if d.Ask != nil {
 			accepted = d.Ask(ctx, prompt)
 		} else if d.In != nil && d.Out != nil {
 			accepted = auth.Ask(ctx, d.In, d.Out, prompt)
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if !accepted {
 			decision.LogJudgment(d.Log, decision.SourceCoherence, req, v, "asked-refused", d.JudgmentContextChars)
+			if confirmedSnapshot != "" {
+				return &outcome.ReadinessNotApprovedError{Store: d.Store.Identity(), ApproachID: approachID, Snapshot: confirmedSnapshot}
+			}
 			return fmt.Errorf("launch refused: coherence unsure (confidence %.2f)", v.Confidence)
 		}
 		if ctx.Err() != nil {
@@ -183,10 +201,7 @@ func ReadinessBudget(d Deps, approachID string) (size, maximum, overage int, err
 		return 0, 0, 0, err
 	}
 	_, size, err = coherenceRequest(d, p, a, tasks)
-	maximum = d.CoherenceMaxChars
-	if maximum > 0 && size > maximum {
-		overage = size - maximum
-	}
+	maximum, overage = 0, 0 // no byte ceiling; provider token admission is the only limit
 	return
 }
 
@@ -196,6 +211,11 @@ func coherenceRequest(d Deps, p *plan.Plan, a *plan.Approach, tasks []*plan.Task
 		Instructions: d.Prompts.Text("decision.readiness.instructions"),
 		Options:      []string{d.Prompts.Text("decision.readiness.ready"), d.Prompts.Text("decision.readiness.revise")},
 	}
+	if d.ReadinessRequirements != nil {
+		if requirements := d.ReadinessRequirements(); requirements != "" {
+			req.Context += "\nCurrent delivered user requirements (reconcile these with the owning briefs):\n" + requirements
+		}
+	}
 	if strings.TrimSpace(req.Options[0]) == "" || strings.TrimSpace(req.Options[1]) == "" || req.Options[0] == req.Options[1] {
 		return req, 0, fmt.Errorf("readiness decision options must be nonblank and distinct")
 	}
@@ -203,7 +223,9 @@ func coherenceRequest(d Deps, p *plan.Plan, a *plan.Approach, tasks []*plan.Task
 	return req, len(raw), err
 }
 
-// coherenceContext retains every task field; the complete request is bounded above.
+// coherenceContext retains every task field. Size is handled by chunked
+// judgments when the complete request exceeds the provider limit, never
+// by dropping authored fields from judgment.
 func coherenceContext(p *plan.Plan, a *plan.Approach, tasks []*plan.Task) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Plan goal: %s\nApproach %s declared scope and strategy: %s\nTasks (assess their collective coverage of that Approach):\n", p.Goal, a.ID, a.Title)
@@ -213,9 +235,57 @@ func coherenceContext(p *plan.Plan, a *plan.Approach, tasks []*plan.Task) string
 	return b.String()
 }
 
+// judgeCoherenceChunked judges a brief whose complete request exceeds the
+// provider limit: one bounded verdict per task, then one collective verdict
+// over compact task lines. The host aggregates deterministically: any revise
+// verdict refuses, confidence is the minimum. No evidence is truncated.
+func judgeCoherenceChunked(ctx context.Context, d Deps, p *plan.Plan, a *plan.Approach, tasks []*plan.Task, collective decision.Request) (decision.Verdict, error) {
+	taskOptions := []string{d.Prompts.Text("decision.readiness_task.ready"), d.Prompts.Text("decision.readiness_task.revise")}
+	verdicts := make([]decision.Verdict, 0, len(tasks)+1)
+	for _, t := range tasks {
+		req := decision.Request{
+			Context:      coherenceContext(p, a, []*plan.Task{t}),
+			Instructions: d.Prompts.Text("decision.readiness_task.instructions"),
+			Options:      taskOptions,
+		}
+		v, err := d.Judge(ctx, req)
+		if err != nil {
+			if decision.IsCapacity(err) {
+				return decision.Verdict{}, fmt.Errorf("task %q alone exceeds the decision provider limit — shorten its acceptance or split the task: %w", t.Title, err)
+			}
+			return decision.Verdict{}, err
+		}
+		decision.LogJudgment(d.Log, decision.SourceCoherence, req, v, "chunked-task", d.JudgmentContextChars)
+		verdicts = append(verdicts, v)
+		if v.Option == taskOptions[1] {
+			return decision.Verdict{Pick: 1, Option: collective.Options[1], Confidence: v.Confidence, Model: v.Model, Device: v.Device, Protocol: v.Protocol, ConfidenceSource: v.ConfidenceSource}, nil
+		}
+	}
+	var lines strings.Builder
+	fmt.Fprintf(&lines, "Plan goal: %s\nApproach %s declared scope and strategy: %s\nTasks:\n", p.Goal, a.ID, a.Title)
+	for i, t := range tasks {
+		fmt.Fprintf(&lines, "%d. %s — %s\ntarget: %s\n", i+1, t.Title, t.Prompt, t.Target)
+	}
+	req := decision.Request{Context: lines.String(), Instructions: collective.Instructions, Options: collective.Options}
+	v, err := d.Judge(ctx, req)
+	if err != nil {
+		return decision.Verdict{}, err
+	}
+	decision.LogJudgment(d.Log, decision.SourceCoherence, req, v, "chunked-collective", d.JudgmentContextChars)
+	verdicts = append(verdicts, v)
+	min := verdicts[0].Confidence
+	for _, x := range verdicts[1:] {
+		if x.Confidence < min {
+			min = x.Confidence
+		}
+	}
+	v.Confidence = min
+	return v, nil
+}
+
 // Presentation is separate from the exact snapshot and judge input. Every field
 // remains visible, including unknown structured fields from older/newer clients.
-func humanReadinessContext(p *plan.Plan, a *plan.Approach, tasks []*plan.Task) string {
+func humanReadinessContext(p *plan.Plan, a *plan.Approach, tasks []*plan.Task, req decision.Request) string {
 	copyPlan := *p
 	copyPlan.Goal = plan.DisplayStructured(p.Goal)
 	copyApproach := *a
@@ -226,7 +296,10 @@ func humanReadinessContext(p *plan.Plan, a *plan.Approach, tasks []*plan.Task) s
 		copyTask.Sketch = plan.DisplayStructured(task.Sketch)
 		copyTasks = append(copyTasks, &copyTask)
 	}
-	return plan.DisplayText(coherenceContext(&copyPlan, &copyApproach, copyTasks))
+	// Retain the exact requirements captured for this judgment; do not call the
+	// live delivery accessor again while presenting an unsure/manual decision.
+	suffix := strings.TrimPrefix(req.Context, coherenceContext(p, a, tasks))
+	return plan.DisplayText(coherenceContext(&copyPlan, &copyApproach, copyTasks) + suffix)
 }
 
 // Required execution needs a declared command before admitting queued work.

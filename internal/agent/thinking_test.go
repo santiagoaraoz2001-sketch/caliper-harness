@@ -90,7 +90,7 @@ func TestThinkingLoopHeldPartial(t *testing.T) {
 			calls, logs := 0, 0
 			r := thinkingRunner(func(ctx context.Context, req decision.Request) (decision.Verdict, error) {
 				calls++
-				if req.MaxBytes != 8192 || !strings.Contains(req.Context, "original requirement") {
+				if !strings.Contains(req.Context, "original requirement") {
 					t.Fatal("complete bounded task evidence missing")
 				}
 				evidence := readThinkingEvidence(t, req.Context)
@@ -238,7 +238,7 @@ func TestThinkingLoopVisibleContentHeldPartial(t *testing.T) {
 	r := thinkingRunner(func(_ context.Context, req decision.Request) (decision.Verdict, error) {
 		calls++
 		evidence := readThinkingEvidence(t, req.Context)
-		if evidence.Field != "content" || req.MaxBytes != 8192 || evidence.UnitEncoding != "utf8" || !strings.Contains(evidence.Sample, "<|channel>") {
+		if evidence.Field != "content" || evidence.UnitEncoding != "utf8" || !strings.Contains(evidence.Sample, "<|channel>") {
 			t.Fatalf("visible repetition evidence changed: %+v", evidence)
 		}
 		return decision.Verdict{Pick: 1, Option: loopProgress, Confidence: .3}, nil

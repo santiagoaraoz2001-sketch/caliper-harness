@@ -246,22 +246,30 @@ database.
   estimates are disclosed, never silently trusted.
 
 Domain guidance uses compact sections and explicit section → topic → worked-example
-links. Start articles near 1,000 tokens; a selected domain response may use up to
-2,000 tokens including preferences and navigation. This applies to bundled
+links. New articles and sections start with a 1,000-token limit, including their
+locator and direct navigation. A later version of the same section anchor may
+expand to 2,000 tokens for preferences and enrichment; newly added or renamed
+anchors start at 1,000. Each section is checked before a domain append commits,
+even for ID-only output. A multi-section article is bounded per section, and the
+complete selected domain response stays within 2,000 tokens. This applies to bundled
 `caliper/standards` / `caliper/guides` and opt-in project articles under
 `project/guides/<domain>/<topic>`. Current project identity, testing strategy,
 ordinary task notes and PAT state retain their separate source/context limits.
 Planning's optional `guidance` selection pins a returned `knowledge:key#section`
-and supplies that body before the next decision; it does not load descendants.
+and supplies that body before the next decision; selected domain items must fit
+together within 2,000 units. Supplied pins replace generic entry guidance, while
+older over-budget selections retain fitting bodies and explicit omitted-section
+locators. Descendant bodies stay lazy.
 
 Rulith counts the complete domain envelope with its native tokenizer. MLX, Ollama
 and generic OpenAI-compatible adapters explicitly lack that count-only capability
-and use the existing conservative UTF-8-byte estimate, capped at 2,000 bytes
+and use the existing conservative UTF-8-byte estimate at the same initial/enriched
+1,000/2,000-unit limits,
 including the disclosed basis label and links. This is not a measured token count
 or universal tokenizer guarantee. Native tokenizer failures, cancellation, unknown
 runtime and missing counters remain explicit errors; they never trigger fallback.
 Ordinary graph facts and PAT retain their own limits. Exact counting and performance
-across backends remain separate gates. See [domain guidance](https://github.com/santiagoaraoz2001-sketch/caliper-harness/blob/v0.2.3/docs/domain-guidance.md).
+across backends remain separate gates. See [domain guidance](https://github.com/santiagoaraoz2001-sketch/caliper-harness/blob/v0.2.4/docs/domain-guidance.md).
 
 ## Configuration
 
@@ -366,7 +374,7 @@ framework-neutral `caliper-test-report-v1` adapter validates declared stages
 against the current execution ID. `caliper-test-report-v2` also declares each
 stage's prerequisites and expected observations, retaining actual observations
 beside host-recorded prerequisite presence. See the
-[report contract](https://github.com/santiagoaraoz2001-sketch/caliper-harness/blob/v0.2.3/docs/testing-report-contract.md) for configuration and producer
+[report contract](https://github.com/santiagoaraoz2001-sketch/caliper-harness/blob/v0.2.4/docs/testing-report-contract.md) for configuration and producer
 examples. These formats distinguish executed, failed and
 skipped tests. Missing required tests or stages, malformed/truncated reports and
 zero executed tests do not establish declared coverage. Without a report format,

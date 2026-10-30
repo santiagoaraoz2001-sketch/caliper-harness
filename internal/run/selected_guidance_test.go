@@ -234,6 +234,56 @@ func TestSelectedGuidanceApproachAndObservePreserveInheritanceAndClearing(t *tes
 	}
 }
 
+func TestProofGuidancePreservesSelectedDesignAndPinsTestMethod(t *testing.T) {
+	client, _, _, _ := selectedGuidanceProvider(t)
+	for _, mode := range []string{"inherit", "replace", "clear"} {
+		t.Run(mode, func(t *testing.T) {
+			f := selectedGuidanceFixture(t, client)
+			design := "project/guides/ui/controls"
+			tests := "project/guides/tests/controls"
+			for _, key := range []string{design, tests} {
+				if _, err := memory.PutKnowledge(t.Context(), f.d.Store, f.d.Workspace, "author", key, "## Method\nUse the public control and its visible state.", "", "", ""); err != nil {
+					t.Fatal(err)
+				}
+			}
+			f.call(tool.Args{})
+			f.call(tool.Args{"title": "controls", "outcome": "usable control", "rules": "preserve identity", "articles": "control", "proof": "visible change"})
+			f.call(tool.Args{"strategy": "use the agreed control language", "guidance": "knowledge:" + design + "#method"})
+			f.call(tool.Args{"title": "control", "objective": "visible state change"})
+			f.call(tool.Args{"current": "supplied requirement; source uninspected", "target": "public control changes state"})
+			args := tool.Args{"acceptance": "activation changes visible state", "tests": "planned public-control assertion", "acceptance_command": "test 1 -eq 1"}
+			want := 1
+			if mode == "replace" {
+				args["guidance"] = "knowledge:" + design + "#method\nknowledge:" + tests + "#method"
+				want = 2
+			} else if mode == "clear" {
+				args["guidance"] = ""
+				want = 0
+			}
+			f.call(args)
+			// Later method answers must preserve the proof's selection.
+			f.call(tool.Args{"objective": "wire the public control"})
+			c := session.Continuation{Workflow: f.scope}
+			if err := projectContext(config.Defaults(), f.d.Store, f.d.Workspace, client.CountTokens)(t.Context(), &c, ""); err != nil {
+				t.Fatal(err)
+			}
+			items := pinnedGuidance(t, contextPacket(t, &c))
+			if len(items) != want {
+				t.Fatalf("proof selection lost or inherited after clear: %+v", items)
+			}
+			for _, item := range items {
+				if item.Status != "supplied" || !strings.Contains(item.Body, "visible state") || item.ID == "" {
+					t.Fatalf("selected body not delivered: %+v", item)
+				}
+			}
+			task, err := plan.GetTask(f.d.Store, f.scope.ID)
+			if err != nil || task.Attempts != 0 || task.State != plan.TaskQueued || task.Tests != args["tests"] {
+				t.Fatalf("proof selection changed execution authority or assertions: %+v %v", task, err)
+			}
+		})
+	}
+}
+
 func TestSelectedGuidanceInvalidBindingHasNoPlanEffect(t *testing.T) {
 	client, _, _, _ := selectedGuidanceProvider(t)
 	f := selectedGuidanceFixture(t, client)

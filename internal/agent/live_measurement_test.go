@@ -99,7 +99,7 @@ func TestLiveMeasurementMutationBoundaries(t *testing.T) {
 				model.usages[1].In = 9500
 			} else {
 				model.replies = []string{echoBlock(strings.Repeat("x", 5000)), echoBlock("b"), "Observed source read; verification pending.", "FINAL"}
-				model.usages = []llm.Usage{{In: 20, Out: 5, Reported: true}, {In: 1450, Out: 5, Reported: true}, {In: 20, Out: 5, Reported: true}, {In: 100, Out: 5, Reported: true}}
+				model.usages = []llm.Usage{{In: 20, Out: 5, Reported: true}, {In: 1750, Out: 5, Reported: true}, {In: 20, Out: 5, Reported: true}, {In: 100, Out: 5, Reported: true}}
 				r = compactRunner(model, sink, testTemplateDir(t))
 				r.ModelKey = "fixture"
 				r.Compaction.Keep = 5

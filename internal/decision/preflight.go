@@ -1,16 +1,14 @@
 package decision
 
-import "fmt"
+
 
 // Preflight checks limits known without provider inference. It does not certify
-// token fit, model identity or a verdict; Judge still owns those checks. System
-// One has a hard encoded-body limit, unlike the other configured protocols.
+// token fit, model identity or a verdict; Judge still owns those checks. The
+// System One provider endpoint refuses text+schema over 64 KiB; other
+// protocols admit by provider token limits only.
 func (c *Client) Preflight(r Request) error {
 	if c.disabled {
 		return ErrDisabled
-	}
-	if r.MaxBytes < 0 {
-		return fmt.Errorf("judge request byte limit must not be negative")
 	}
 	if r.Instructions == "" {
 		r.Instructions = c.Prompts.Text("decision.default.instructions")

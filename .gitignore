@@ -42,3 +42,21 @@ __pycache__/
 # npm distribution development dependencies
 scripts/npm/node_modules/
 scripts/npm/*.tgz
+
+
+# Local development/audit documents: retain on disk, exclude from version control.
+# Only explicitly user-facing usage guides/release notes are public in docs/.
+/docs/*.md
+!/docs/domain-guidance.md
+!/docs/observed-benchmark.md
+!/docs/release-v0.2.2.md
+!/docs/release-v0.2.3.md
+!/docs/release-v0.2.4.md
+!/docs/testing-report-contract.md
+/scripts/NPM-PUBLISHING.md
+/scripts/TEST-WORKSPACES.md
+/HANDOVER*.md
+/handover/
+/test-findings/
+# Runtime Markdown under internal/ and third-party provenance are source assets,
+# not investigation reports; these exclusions deliberately do not match them.

@@ -126,7 +126,7 @@ func compactRunner(model *scriptModel, sink *recordSink, dir string) *Runner {
 	reg := tool.NewRegistry()
 	var calls []string
 	reg.Register(echoTool(&calls))
-	return &Runner{Model: model, Registry: reg, MaxSteps: 5, MaxTokens: 1500,
+	return &Runner{Model: model, Registry: reg, MaxSteps: 5, MaxTokens: 1900,
 		SessionID: "compact-test", Session: sink,
 		Compaction: testCompaction(), TemplatesDir: dir, Judge: acceptCompaction, Threshold: .7}
 }
@@ -146,11 +146,11 @@ func TestCompactFlowChainsAndContinues(t *testing.T) {
 	big := strings.Repeat("x", 5000)
 	model := &scriptModel{
 		replies: []string{echoBlock(big), echoBlock("b"), "SUMMARY-1", echoBlock("c"), "SUMMARY-2", "done"},
-		usages:  []llm.Usage{{In: 20, Out: 5, Reported: true}, {In: 1450, Out: 5, Reported: true}, {In: 20, Out: 5, Reported: true}, {In: 1450, Out: 5, Reported: true}, {In: 20, Out: 5, Reported: true}, {In: 100, Out: 5, Reported: true}},
+		usages:  []llm.Usage{{In: 20, Out: 5, Reported: true}, {In: 1750, Out: 5, Reported: true}, {In: 20, Out: 5, Reported: true}, {In: 1750, Out: 5, Reported: true}, {In: 20, Out: 5, Reported: true}, {In: 100, Out: 5, Reported: true}},
 	}
 	sink := &recordSink{}
 	r := compactRunner(model, sink, dir)
-	r.Compaction.Keep = 5
+	r.Compaction.Keep = 4
 	r.Compaction.Summary, r.Compaction.Max = 30, 40
 	final, _, err := r.Run(context.Background(), "go")
 	if err != nil {
@@ -163,10 +163,10 @@ func TestCompactFlowChainsAndContinues(t *testing.T) {
 	if len(sums) != 2 {
 		t.Fatalf("summary calls=%d, want 2 (seen=%d)", len(sums), len(model.seen))
 	}
-	if !strings.Contains(sums[0][0].Content, "WORDS=225") {
+	if !strings.Contains(sums[0][0].Content, "WORDS=285") {
 		t.Errorf("first budget words wrong: %q", sums[0][0].Content[:60])
 	}
-	if !strings.Contains(sums[1][0].Content, "WORDS=232") {
+	if !strings.Contains(sums[1][0].Content, "WORDS=294") {
 		t.Errorf("second budget words wrong: %q", sums[1][0].Content[:60])
 	}
 	if !strings.Contains(sums[1][1].Content, "SUMMARY-1") {
@@ -195,8 +195,8 @@ func TestCompactFlowChainsAndContinues(t *testing.T) {
 	if compacts != 2 {
 		t.Errorf("compact events=%d, want 2", compacts)
 	}
-	if r.UsedIn != 3060 {
-		t.Errorf("UsedIn=%d, want %d (summary calls accumulate too)", r.UsedIn, 3060)
+	if r.UsedIn != 3660 {
+		t.Errorf("UsedIn=%d, want %d (summary calls accumulate too)", r.UsedIn, 3660)
 	}
 }
 
@@ -204,7 +204,7 @@ func TestCompactFailureStopsLoud(t *testing.T) {
 	dir := testTemplateDir(t)
 	model := &scriptModel{
 		replies:        []string{echoBlock(strings.Repeat("x", 5000)), echoBlock("b"), "unused"},
-		usages:         []llm.Usage{{In: 20, Out: 5, Reported: true}, {In: 1450, Out: 5, Reported: true}},
+		usages:         []llm.Usage{{In: 20, Out: 5, Reported: true}, {In: 1750, Out: 5, Reported: true}},
 		failIfContains: "WORDS=",
 		failErr:        errLoopDown,
 	}
@@ -227,7 +227,7 @@ func TestCompactEmptySummaryStopsLoud(t *testing.T) {
 	dir := testTemplateDir(t)
 	model := &scriptModel{
 		replies: []string{echoBlock(strings.Repeat("x", 5000)), echoBlock("b"), "  "},
-		usages:  []llm.Usage{{In: 20, Out: 5, Reported: true}, {In: 1450, Out: 5, Reported: true}},
+		usages:  []llm.Usage{{In: 20, Out: 5, Reported: true}, {In: 1750, Out: 5, Reported: true}},
 	}
 	r := compactRunner(model, &recordSink{}, dir)
 	r.Compaction.Keep = 5
@@ -244,7 +244,7 @@ func TestCompactRetainsVisibleSummaryWithReasoningUsage(t *testing.T) {
 	dir := testTemplateDir(t)
 	model := &scriptModel{
 		replies: []string{echoBlock(strings.Repeat("x", 5000)), echoBlock("b"), "SUMMARY-LONG", "done"},
-		usages:  []llm.Usage{{In: 20, Out: 5, Reported: true}, {In: 1450, Out: 5, Reported: true}, {In: 50, Out: 500, Reported: true}, {In: 100, Out: 5, Reported: true}}, // reasoning output is not visible text
+		usages:  []llm.Usage{{In: 20, Out: 5, Reported: true}, {In: 1750, Out: 5, Reported: true}, {In: 50, Out: 500, Reported: true}, {In: 100, Out: 5, Reported: true}}, // reasoning output is not visible text
 	}
 	sink := &recordSink{}
 	r := compactRunner(model, sink, dir)

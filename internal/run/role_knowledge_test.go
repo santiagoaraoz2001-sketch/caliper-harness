@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"specific-harness/internal/config"
 	"specific-harness/internal/memory"
+	"specific-harness/internal/plan"
 	"specific-harness/internal/prompts"
 	"specific-harness/internal/store"
 	"specific-harness/internal/tool"
@@ -54,7 +55,22 @@ func TestChildRoleKnowledgeFactoryAndHelp(t *testing.T) {
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("partial role mutation: %v %v", entries, err)
 	}
-	reviewer, err := d.NewKnowledge("actual-child-task", true)
+	p, err := plan.CreatePlanContext(plan.WithProject(t.Context(), root), s, "review", "goal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := plan.CreateApproach(s, p.ID, "approach")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := plan.CreateTask(s, a.ID, "task", "prompt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Write(`MATCH(t:Task) WHERE t.id=$id SET t.attempts=1`, map[string]any{"id": task.ID}); err != nil {
+		t.Fatal(err)
+	}
+	reviewer, err := d.NewKnowledge(task.ID, true)
 	if err != nil {
 		t.Fatal(err)
 	}

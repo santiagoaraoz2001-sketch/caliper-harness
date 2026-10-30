@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"specific-harness/internal/config"
+	"specific-harness/internal/plan"
 	"specific-harness/internal/prompts"
 	"specific-harness/internal/session"
 	"specific-harness/internal/store"
@@ -170,7 +171,24 @@ func TestR3DesignIdentityRecipesReopenAndPreserve(t *testing.T) {
 	if got := execute(foreign, readExamples[0]); len(got.Data.Identity) != 0 {
 		t.Fatal("identity leaked across projects", got)
 	}
-	reviewer, reviewRegistry := makeRole(root, "review-author", true)
+	// Reviewers use the actual project Task and attempt; author session labels
+	// above remain worker provenance, not authority to read task evidence.
+	reviewPlan, err := plan.CreatePlanContext(plan.WithProject(t.Context(), root), s, "identity review", "preserve identity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewApproach, err := plan.CreateApproach(s, reviewPlan.ID, "read-only review")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewTask, err := plan.CreateTask(s, reviewApproach.ID, "review identity", "inspect the saved identity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := plan.SetTaskAttempts(s, reviewTask.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	reviewer, reviewRegistry := makeRole(root, reviewTask.ID, true)
 	if got := execute(reviewer, readExamples[0]); len(got.Data.Identity) != 1 || got.Data.Identity[0].ID != corrected.ID {
 		t.Fatal("reviewer lost current read", got)
 	}

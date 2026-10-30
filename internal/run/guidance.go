@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -34,7 +35,7 @@ func guidanceItem(ctx context.Context, cfg config.Config, s *store.Store, root s
 		if s == nil {
 			return item, fmt.Errorf("guidance store unavailable")
 		}
-		entries, err := memory.Knowledge(ctx, s, root, "", ref.Version, 1, cfg.Tools.GraphQL.MaxResultBytes, true, []string{"key"})
+		entries, err := memory.Knowledge(ctx, s, root, "", ref.Version, 1, cfg.Tools.GraphQL.MaxResultBytes, true, []string{"key", "previousId"})
 		if err != nil {
 			return item, err
 		}
@@ -50,6 +51,14 @@ func guidanceItem(ctx context.Context, cfg config.Config, s *store.Store, root s
 		return item, fmt.Errorf("guidance section %q unavailable in %s; query its sections first", ref.Section, ref.Key)
 	}
 	item.Body = parts[0].Body
+	item.domainLimit = memory.DomainInitialTokens
+	if memory.ProjectGuide(entry.Key) && entry.PreviousID != "" {
+		previous, err := memory.Knowledge(ctx, s, root, "", entry.PreviousID, 1, cfg.Tools.GraphQL.MaxResultBytes, true, []string{"body"})
+		if err != nil || len(previous) != 1 {
+			return item, fmt.Errorf("guidance section lineage unavailable for %s", entry.ID)
+		}
+		item.domainLimit = memory.DomainSectionTokens(previous[0].Body, ref.Section)
+	}
 	if item.Source == "project-authored" {
 		refs, err := memory.References(ctx, s, root, entry.ID, false, cfg.Tools.GraphQL.MaxResultBytes, nil, ref.Section)
 		if err != nil {
@@ -60,6 +69,17 @@ func guidanceItem(ctx context.Context, cfg config.Config, s *store.Store, root s
 	// The section's Markdown already carries exact useful next hops. Loading
 	// linked bodies or duplicating those links here would inflate every request.
 	return item, nil
+}
+
+const guidanceLocatorExample = "caliper/guides/ui/direction#brief-to-direction"
+const guidanceLocatorHelp = "Use a returned key#section (knowledge: prefix optional), e.g. " + guidanceLocatorExample + ". Use the key, not its immutable version ID."
+
+func parseGuidanceLocator(line string) (string, string, error) {
+	key, section, ok := strings.Cut(strings.TrimPrefix(strings.TrimSpace(line), "knowledge:"), "#")
+	if !ok || key == "" || section == "" || strings.Contains(section, "#") {
+		return "", "", fmt.Errorf("invalid guidance locator %q; %s", line, guidanceLocatorHelp)
+	}
+	return key, section, nil
 }
 
 func planningGuidance(ctx context.Context, d launch.Deps, raw string) (*[]plan.GuidanceRef, error) {
@@ -74,17 +94,15 @@ func planningGuidance(ctx context.Context, d launch.Deps, raw string) (*[]plan.G
 		if line == "" {
 			continue
 		}
-		if !strings.HasPrefix(line, "knowledge:") {
-			return nil, fmt.Errorf("guidance needs returned knowledge:key#section references")
+		key, section, err := parseGuidanceLocator(line)
+		if err != nil {
+			return nil, err
 		}
-		key, section, ok := strings.Cut(strings.TrimPrefix(line, "knowledge:"), "#")
-		if !ok || key == "" || section == "" {
-			return nil, fmt.Errorf("guidance needs a key and exact section after #")
-		}
-		if seen[line] {
+		locator := key + "#" + section
+		if seen[locator] {
 			continue
 		}
-		seen[line] = true
+		seen[locator] = true
 		entry := memory.BuiltinKnowledge(key, "", "")
 		if entry == nil {
 			if d.Store == nil {
@@ -95,7 +113,7 @@ func planningGuidance(ctx context.Context, d launch.Deps, raw string) (*[]plan.G
 				return nil, err
 			}
 			if len(entries) != 1 {
-				return nil, fmt.Errorf("guidance key %q unavailable in this project", key)
+				return nil, fmt.Errorf("guidance key %q unavailable in this project; %s", key, guidanceLocatorHelp)
 			}
 			entry = entries[0]
 		}
@@ -110,6 +128,7 @@ func planningGuidance(ctx context.Context, d launch.Deps, raw string) (*[]plan.G
 	}
 	cfg := config.Config{}
 	cfg.Tools.GraphQL = limits
+	items := make([]projectContextItem, 0, len(refs))
 	for _, ref := range refs {
 		item, err := guidanceItem(ctx, cfg, d.Store, d.Workspace, ref)
 		item.Selection = "pinned"
@@ -119,6 +138,10 @@ func planningGuidance(ctx context.Context, d launch.Deps, raw string) (*[]plan.G
 		if err := admitGuidanceItem(ctx, count, &item); err != nil {
 			return nil, err
 		}
+		items = append(items, item)
+	}
+	if err := admitGuidanceItems(ctx, count, items); err != nil {
+		return nil, fmt.Errorf("guidance selection cannot fit together; select fewer or narrower sections: %w", err)
 	}
 	encoded, _ := json.Marshal(refs)
 	if len(encoded) > limits.MaxResultBytes {
@@ -189,10 +212,87 @@ func admitGuidanceItem(ctx context.Context, count memory.TokenCounter, item *pro
 	if item.Source != "caliper-default" && !memory.ProjectGuide(item.Key) {
 		return nil
 	}
-	basis, err := memory.AdmitDomainEnvelope(ctx, count, func(basis string) ([]byte, error) {
+	limit := item.domainLimit
+	if limit == 0 {
+		limit = memory.DomainInitialTokens
+	}
+	basis, err := memory.AdmitDomainEnvelopeLimit(ctx, count, limit, func(basis string) ([]byte, error) {
 		item.DomainBudgetBasis = basis
 		return json.Marshal(item)
 	})
 	item.DomainBudgetBasis = basis
 	return err
+}
+
+func domainContextItem(item projectContextItem) bool {
+	return item.Source == "caliper-default" || memory.ProjectGuide(item.Key) || strings.HasPrefix(item.Key, "caliper/standards/") || strings.HasPrefix(item.Key, "caliper/guides/")
+}
+
+// Count the same serialized domain items delivered in the project packet.
+// Ordinary facts and recall retain their independent source/context limits.
+func admitGuidanceItems(ctx context.Context, count memory.TokenCounter, items []projectContextItem) error {
+	domain := []projectContextItem{}
+	for _, item := range items {
+		if domainContextItem(item) {
+			domain = append(domain, item)
+		}
+	}
+	if len(domain) == 0 {
+		return nil
+	}
+	basis, err := memory.AdmitDomainEnvelope(ctx, count, func(basis string) ([]byte, error) {
+		for i := range domain {
+			domain[i].DomainBudgetBasis = basis
+		}
+		return json.Marshal(projectContextPacket{Items: domain})
+	})
+	for i := range items {
+		if domainContextItem(items[i]) {
+			items[i].DomainBudgetBasis = basis
+		}
+	}
+	return err
+}
+
+// New selections are admitted together at binding. Legacy selections or changed
+// accounting can still overflow: keep their exact locators, then fit pinned
+// bodies in authored order before optional default orientation sections.
+func boundGuidanceItems(ctx context.Context, count memory.TokenCounter, items []projectContextItem) (bool, error) {
+	err := admitGuidanceItems(ctx, count, items)
+	if err == nil {
+		return false, nil
+	}
+	if !errors.Is(err, memory.ErrDomainBudget) {
+		return false, err
+	}
+	original := append([]projectContextItem(nil), items...)
+	for i := range items {
+		if domainContextItem(items[i]) {
+			items[i].Body, items[i].Links = "", nil
+			if original[i].Body != "" {
+				items[i].Status = "omitted-budget"
+			}
+		}
+	}
+	if err := admitGuidanceItems(ctx, count, items); err != nil {
+		return false, fmt.Errorf("domain guidance locator inventory cannot fit; select fewer sections: %w", err)
+	}
+	omitted := false
+	for _, pinned := range []bool{true, false} {
+		for i := range items {
+			if !domainContextItem(original[i]) || original[i].Body == "" || (original[i].Selection == "pinned") != pinned {
+				continue
+			}
+			placeholder := items[i]
+			items[i] = original[i]
+			if err := admitGuidanceItems(ctx, count, items); err != nil {
+				items[i] = placeholder
+				if !errors.Is(err, memory.ErrDomainBudget) {
+					return false, err
+				}
+				omitted = true
+			}
+		}
+	}
+	return omitted, nil
 }

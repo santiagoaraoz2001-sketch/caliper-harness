@@ -364,6 +364,73 @@ func TestEvidenceTaskAttemptPagingScopeAndStalePass(t *testing.T) {
 	t.Logf("task selected old PASS remains historical: %s; selected large reviewer native failure: %s", first, second)
 }
 
+func TestReviewerTranscriptEvidenceIsBoundAndHistorical(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	root, dir := t.TempDir(), t.TempDir()
+	base := evidenceAPI(t, s, dir, root)
+	p, err := plan.CreatePlanContext(plan.WithProject(t.Context(), base.CapturedProject()), s, "plan", "goal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := plan.CreateApproach(s, p.ID, "approach")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := plan.CreateTask(s, a.ID, "task", "prompt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := []llm.Message{{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "c1", Name: "bash", Arguments: `{"cmd":"probe"}`}}}, {Role: "tool", ToolCallID: "c1", Name: "bash", Content: "tool result (truncated):\nobserved failure"}, {Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "pending", Name: "bash", Arguments: `{}`}}}}
+	log, _ := json.Marshal([]any{map[string]any{"Kind": "execution", "Attempt": 1, "Transcript": messages}})
+	if err := s.Write(`MATCH(t:Task) WHERE t.id=$id SET t.attempt_log=$log,t.attempts=1`, map[string]any{"id": task.ID, "log": string(log)}); err != nil {
+		t.Fatal(err)
+	}
+	api, err := New(s, "test", dir).WithAllowedFields("taskEvidence").WithReviewerEvidence(task.ID, 1).Scoped(root, task.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := func(id, args string) string {
+		return fmt.Sprintf(`{taskEvidence(taskId:%q,%s){historical unsettledOffset groups{callIds records{time source workspace message{content toolCallId toolCalls{id arguments}}}}}}`, id, args)
+	}
+	got := evidenceData(t, api, query(task.ID, `attempt:1,record:0,phase:"execution",offset:0,limit:1,callId:"c1"`))
+	if !strings.Contains(got, "observed failure") || !strings.Contains(got, "truncated") || !strings.Contains(got, `"historical":true`) || !strings.Contains(got, `"unsettledOffset":2`) {
+		t.Fatal(got)
+	}
+	for _, args := range []string{`attempt:2,offset:0,limit:1`, `offset:0,limit:1`, `attempt:1,record:0,phase:"execution",offset:0,limit:1,callId:"pending"`} {
+		if _, err := api.ExecBounded(t.Context(), query(task.ID, args), "", nil, config.Defaults().Tools.GraphQL); err == nil {
+			t.Fatalf("admitted %s", args)
+		}
+	}
+	if _, err := api.ExecBounded(t.Context(), query("other", `attempt:1,offset:0,limit:1`), "", nil, config.Defaults().Tools.GraphQL); err == nil {
+		t.Fatal("foreign task admitted")
+	}
+	current, _ := plan.GetTask(s, task.ID)
+	if current.Checked() || current.Qualified() || current.AttemptLog != string(log) {
+		t.Fatal("evidence changed owner")
+	}
+	if err := s.Write(`MATCH(t:Task) WHERE t.id=$id SET t.attempts=2`, map[string]any{"id": task.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.ExecBounded(t.Context(), query(task.ID, `attempt:1,offset:0,limit:1`), "", nil, config.Defaults().Tools.GraphQL); err == nil {
+		t.Fatal("stale attempt admitted")
+	}
+}
+
+func TestTranscriptEvidenceRejectsUnavailableAndAmbiguousCalls(t *testing.T) {
+	for _, messages := range [][]llm.Message{
+		{{Role: "assistant", Content: "tool: bash"}, {Role: "user", Content: "tool result: text mode"}},
+		{{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "same", Name: "bash"}, {ID: "same", Name: "bash"}}}},
+	} {
+		if _, _, err := visitTranscript(t.Context(), messages, func(session.EvidenceGroup) error { return nil }); err == nil {
+			t.Fatal("unavailable or ambiguous transcript accepted")
+		}
+	}
+}
+
 func containsJSONValue(raw, value string) bool {
 	encoded, _ := json.Marshal(value)
 	return strings.Contains(raw, string(encoded))

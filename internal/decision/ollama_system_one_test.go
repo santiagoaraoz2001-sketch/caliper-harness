@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -39,12 +40,12 @@ func TestOllamaSystemOneContract(t *testing.T) {
 	if err != nil || v.Pick != 0 || v.Option != "yes" || v.Confidence != .8 || v.ConfidenceSource != "native_probability" || v.Device != "unknown" {
 		t.Fatalf("%+v %v", v, err)
 	}
-	req.MaxBytes = 1
+	req.Context = strings.Repeat("x", 70000)
 	var capacity *ContextCapacityError
 	if _, err = c.Judge(t.Context(), req); !errors.As(err, &capacity) || !capacity.EncodedRequest || calls != 1 {
-		t.Fatalf("budget: calls=%d err=%v", calls, err)
+		t.Fatalf("provider limit not predicted locally: calls=%d err=%v", calls, err)
 	}
-	req.MaxBytes = 0
+	req.Context = "evidence"
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if _, err = c.Judge(ctx, req); !errors.Is(err, context.Canceled) {

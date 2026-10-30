@@ -15,14 +15,13 @@ import (
 
 func TestReadinessBudgetMatchesActualRequest(t *testing.T) {
 	_, aid, d := gateDeps(t, 2)
-	d.CoherenceMaxChars = 3000
 	var got decision.Request
 	d.Judge = func(_ context.Context, q decision.Request) (decision.Verdict, error) {
 		got = q
 		return decision.Verdict{Option: q.Options[0], Confidence: 1}, nil
 	}
 	size, maximum, over, err := ReadinessBudget(d, aid)
-	if err != nil || maximum != 3000 || over != 0 {
+	if err != nil || maximum != 0 || over != 0 {
 		t.Fatalf("budget=%d/%d +%d %v", size, maximum, over, err)
 	}
 	if err = ReadyCheck(context.Background(), d, aid); err != nil {
@@ -32,24 +31,10 @@ func TestReadinessBudgetMatchesActualRequest(t *testing.T) {
 	if size != len(raw) {
 		t.Fatalf("reported=%d actual=%d", size, len(raw))
 	}
-	// One byte over the exact boundary refuses before any judgment; no fields are dropped.
-	calls := 0
-	d.Judge = func(context.Context, decision.Request) (decision.Verdict, error) {
-		calls++
-		return decision.Verdict{}, nil
-	}
-	d.CoherenceMaxChars = size - 1
+	// No byte ceiling refuses admission at any size; the diagnostic only reports.
 	next, maximum, over, err := ReadinessBudget(d, aid)
-	if err != nil || next != size || maximum != size-1 || over != 1 || calls != 0 {
-		t.Fatalf("nonjudging diagnostic: %d/%d +%d %v calls=%d", next, maximum, over, err, calls)
-	}
-	if err = ReadyCheck(context.Background(), d, aid); err == nil || !strings.Contains(err.Error(), "no judgment ran") || calls != 0 {
-		t.Fatalf("boundary: %v calls=%d", err, calls)
-	}
-	d.CoherenceMaxChars = 0
-	_, _, over, err = ReadinessBudget(d, aid)
-	if err != nil || over != 0 {
-		t.Fatal("unbounded budget", over, err)
+	if err != nil || next != size || maximum != 0 || over != 0 {
+		t.Fatalf("nonjudging diagnostic: %d/%d +%d %v", next, maximum, over, err)
 	}
 }
 

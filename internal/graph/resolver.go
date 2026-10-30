@@ -668,6 +668,12 @@ func (r *mutationResolver) AppendKnowledge(ctx context.Context, key, body, expec
 			refs = append(refs, memory.Reference{Key: ref.Key, Relation: ref.Relation, Section: section, SourceSection: stringValue(ref.SourceSection), Label: stringValue(ref.Label)})
 		}
 	}
+	if err := r.admitDomainWrite(ctx, key, body, expectedPreviousID, refs); err != nil {
+		if b := budget(ctx); b != nil {
+			b.effect(ctx, "rejected", "")
+		}
+		return nil, err
+	}
 	e, err := memory.PutKnowledgeReferences(ctx, r.store, s.root, s.sessionRef, key, body, expectedPreviousID, task, file, refs)
 	if err != nil {
 		return nil, transactionError(ctx, err)

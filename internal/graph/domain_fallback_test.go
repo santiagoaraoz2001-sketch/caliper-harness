@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -39,11 +40,19 @@ func TestDomainFallbackBoundsActualGraphEnvelopeAndExemptsFacts(t *testing.T) {
 	if json.Unmarshal(raw, &result) != nil || result.DomainBudgetBasis != memory.DomainUTF8Bytes {
 		t.Fatalf("missing basis: %s", raw)
 	}
-	body += strings.Repeat("x", memory.DomainTokens-len(raw))
+	sectionBytes := 0
+	_, err = memory.AdmitDomainSections(t.Context(), func(_ context.Context, payload string) (int, error) {
+		sectionBytes = len(strings.Replace(payload, memory.DomainNativeTokens, memory.DomainUTF8Bytes, 1))
+		return 0, nil
+	}, key, body, memory.Sections(body, "", ""), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body += strings.Repeat("x", memory.DomainTokens-sectionBytes)
 	put()
 	raw, err = a.ExecBounded(t.Context(), query, "", nil, config.Defaults().Tools.GraphQL)
-	if err != nil || len(raw) != memory.DomainTokens {
-		t.Fatalf("exact emitted boundary: bytes=%d err=%v", len(raw), err)
+	if err != nil || len(raw) >= memory.DomainTokens {
+		t.Fatalf("exact enriched section boundary: emitted bytes=%d err=%v", len(raw), err)
 	}
 	_, err = memory.PutKnowledge(t.Context(), s, root, "test", "project/design/identity", strings.Repeat("ordinary ", 2000), "", "", "")
 	if err != nil {

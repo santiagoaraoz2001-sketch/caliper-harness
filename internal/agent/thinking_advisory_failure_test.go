@@ -30,12 +30,13 @@ func TestThinkingAdvisoryCapturedCapacityContinues(t *testing.T) {
 	if err := json.Unmarshal(raw, &request); err != nil {
 		t.Fatal(err)
 	}
-	request.MaxBytes = 8192
 	client, calls, bodies := thinkingSelectedClient(t)
 	client.WithInputLimit(15999)
-	if _, err := client.Judge(t.Context(), request); err == nil || !strings.Contains(err.Error(), "8499 exceed limit 8192") || calls.Load() != 0 {
-		t.Fatalf("captured admission changed: %v HTTP=%d", err, calls.Load())
+	// No byte ceiling: the captured 8,499-byte envelope reaches the judge.
+	if _, err := client.Judge(t.Context(), request); err != nil || calls.Load() != 2 {
+		t.Fatalf("captured admission refused: %v HTTP=%d", err, calls.Load())
 	}
+	<-bodies
 	attempts, failures := 0, 0
 	var requests []decision.Request
 	r := thinkingRunner(func(ctx context.Context, req decision.Request) (decision.Verdict, error) {
@@ -62,37 +63,18 @@ func TestThinkingAdvisoryCapturedCapacityContinues(t *testing.T) {
 	reply, err := thinkingFixture(t, r, [][2]string{{"reasoning", thought}}, false, func(kind, text string) error {
 		if kind == "judgment-error" {
 			failures++
-			if !strings.Contains(text, "source=generation-thinking") || !strings.Contains(text, "8499 exceed limit 8192") {
-				t.Fatal(text)
-			}
 		} else if kind != "thinking_loop" && kind != decision.KindJudgment {
 			t.Fatalf("unexpected output: %s %s", kind, text)
 		}
 		return nil
 	})
-	if err != nil || reply.Message.Content != "done" || reply.Message.Reasoning != thought || reply.FinishReason != "stop" || attempts != 2 || failures != 0 || calls.Load() != 2 || !reflect.DeepEqual(before, r.Continuation) {
-		t.Fatalf("advisory capacity stopped/rewrote/retried: error=%v finish=%q attempts=%d failures=%d HTTP=%d", err, reply.FinishReason, attempts, failures, calls.Load())
+	if err != nil || reply.Message.Content != "done" || reply.Message.Reasoning != thought || reply.FinishReason != "stop" || attempts != 1 || failures != 0 || !reflect.DeepEqual(before, r.Continuation) {
+		t.Fatalf("advisory stopped/rewrote/retried: error=%v finish=%q attempts=%d failures=%d HTTP=%d", err, reply.FinishReason, attempts, failures, calls.Load())
 	}
 	body := <-bodies
-	if len(body) > 8192 {
-		t.Fatalf("actual admitted request exceeds configured ceiling: %d", len(body))
-	}
-	beforeSample := readThinkingEvidence(t, requests[0].Context)
-	afterSample := readThinkingEvidence(t, requests[1].Context)
-	firstMetadata, _, _ := strings.Cut(requests[0].Context, "\nUnit:\n")
-	lastMetadata, _, _ := strings.Cut(requests[1].Context, "\nUnit:\n")
-	var first, last map[string]any
-	json.Unmarshal([]byte(firstMetadata), &first)
-	json.Unmarshal([]byte(lastMetadata), &last)
-	if last["OriginalSampleSHA256"] != first["SampleSHA256"] || int(last["OriginalSampleBytes"].(float64)) != len(beforeSample.Sample) || afterSample.Unit != beforeSample.Unit || len(afterSample.Sample) < afterSample.Repeat*len(afterSample.Unit) || afterSample.OmittedBytes-beforeSample.OmittedBytes != len(beforeSample.Sample)-len(afterSample.Sample) || !strings.HasSuffix(beforeSample.Sample, afterSample.Sample) {
-		t.Fatal("sample provenance/repetition lost", last)
-	}
-	for _, key := range []string{"OriginalSampleSHA256", "OriginalSampleBytes", "SampleSHA256", "SampleValueBytes", "OmittedBytes"} {
-		delete(first, key)
-		delete(last, key)
-	}
-	if !reflect.DeepEqual(first, last) {
-		t.Fatal("protected facts changed", first, last)
+	sent := readThinkingEvidence(t, requests[0].Context)
+	if sent.Unit != evidence.Unit || !strings.Contains(thought, sent.Sample) || len(sent.Sample) < sent.Repeat*len(sent.Unit) || len(body) == 0 {
+		t.Fatal("sample provenance/repetition lost")
 	}
 }
 

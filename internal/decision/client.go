@@ -63,7 +63,6 @@ type Request struct {
 	Context      string
 	Instructions string // blank = sidecar default ("Pick the best option.")
 	Options      []string
-	MaxBytes     int `json:"-"` // optional complete HTTP body ceiling; 0 keeps existing admission
 }
 
 // Verdict is the sidecar's answer. Model/Device echo what actually judged.
@@ -149,12 +148,6 @@ func (c *Client) Judge(ctx context.Context, r Request) (Verdict, error) {
 	if err != nil {
 		return Verdict{}, fmt.Errorf("judge cannot encode request: %v", err)
 	}
-	if r.MaxBytes < 0 {
-		return Verdict{}, fmt.Errorf("judge complete request bytes %d exceed limit %d", len(buf), r.MaxBytes)
-	}
-	if r.MaxBytes > 0 && len(buf) > r.MaxBytes {
-		return Verdict{}, &ContextCapacityError{Message: fmt.Sprintf("judge complete request bytes %d exceed limit %d", len(buf), r.MaxBytes), EncodedRequest: true}
-	}
 	if c.expected != nil {
 		h, err := c.Health(ctx)
 		if err != nil {
@@ -224,6 +217,20 @@ func (c *Client) Judge(ctx context.Context, r Request) (Verdict, error) {
 type ContextCapacityError struct {
 	Message        string
 	EncodedRequest bool
+}
+
+// EncodedCapacity reports a local size refusal: the encoded request was
+// too large and no inference ran. The decision server may be healthy.
+// Callers must not describe this case as an unreachable server.
+// IsCapacity reports any capacity refusal, local or provider-returned.
+func IsCapacity(err error) bool {
+	var capacity *ContextCapacityError
+	return errors.As(err, &capacity)
+}
+
+func EncodedCapacity(err error) bool {
+	var capacity *ContextCapacityError
+	return errors.As(err, &capacity) && capacity.EncodedRequest
 }
 
 func (e *ContextCapacityError) Error() string {

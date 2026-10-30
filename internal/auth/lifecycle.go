@@ -23,6 +23,12 @@ func (g *Gate) ConfirmReadiness(ctx context.Context, id, snapshot, brief, prompt
 	if snapshot == "" || g.Record == nil {
 		return false, fmt.Errorf("readiness needs an exact snapshot and durable approval sink")
 	}
+	// One approval binds to its exact snapshot for this gate session: the
+	// same unchanged brief never asks the human twice.
+	key := "readiness:" + id
+	if g.contracts != nil && g.contracts[key] == snapshot {
+		return true, ctx.Err()
+	}
 	approved := g.Confirm(ctx, prompt)
 	cancelled := ctx.Err() != nil
 	if cancelled {
@@ -31,6 +37,12 @@ func (g *Gate) ConfirmReadiness(ctx context.Context, id, snapshot, brief, prompt
 	event := ApprovalEvent{Kind: "readiness", Mode: g.Mode, Scope: "approach", ID: id, Snapshot: snapshot, Brief: brief, Approved: approved, Cancelled: cancelled}
 	if err := g.Record(context.WithoutCancel(ctx), event); err != nil {
 		return false, fmt.Errorf("readiness decision recording failed: %w", err)
+	}
+	if approved {
+		if g.contracts == nil {
+			g.contracts = make(map[string]string)
+		}
+		g.contracts[key] = snapshot
 	}
 	return approved, ctx.Err()
 }

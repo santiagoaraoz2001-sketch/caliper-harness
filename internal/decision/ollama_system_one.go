@@ -39,6 +39,9 @@ func (c *Client) judgeOllamaSystemOne(ctx context.Context, r Request) (Verdict, 
 		if err != nil {
 			return Verdict{}, err
 		}
+		if response.StatusCode == http.StatusRequestEntityTooLarge {
+			return Verdict{}, &ContextCapacityError{Message: "Ollama System One provider limit: " + excerpt(raw), EncodedRequest: true}
+		}
 		if response.StatusCode == http.StatusBadRequest && nativeCapacityRefusal(raw) {
 			return Verdict{}, &ContextCapacityError{Message: "Ollama System One: " + excerpt(raw)}
 		}
@@ -112,15 +115,12 @@ func (c *Client) systemOneRequest(r Request) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if r.MaxBytes < 0 {
-		return nil, fmt.Errorf("judge request byte limit must not be negative")
-	}
-	limit := 64 << 10
-	if r.MaxBytes > 0 && r.MaxBytes < limit {
-		limit = r.MaxBytes
-	}
+	// The provider endpoint itself refuses text+schema over 64 KiB
+	// (HTTP 413, verified against the live endpoint). Predict that exact
+	// refusal locally so callers can split the request instead of failing.
+	const limit = 64 << 10
 	if len(body) > limit {
-		return nil, &ContextCapacityError{Message: fmt.Sprintf("Ollama System One complete request bytes %d exceed limit %d (64 KiB transport maximum)", len(body), limit), EncodedRequest: true}
+		return nil, &ContextCapacityError{Message: fmt.Sprintf("Ollama System One provider limit: text and schema must not exceed 64 KiB (complete request %d bytes)", len(body)), EncodedRequest: true}
 	}
 	return body, nil
 }

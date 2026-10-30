@@ -23,6 +23,7 @@ type projectContextItem struct {
 	Links             []memory.Reference `json:"links,omitempty"`
 	Selection         string             `json:"selection,omitempty"`
 	DomainBudgetBasis string             `json:"domainBudgetBasis,omitempty"`
+	domainLimit       int
 }
 
 type projectContextPacket struct {
@@ -100,9 +101,10 @@ func projectContext(cfg config.Config, s *store.Store, root string, count memory
 				fetched := false
 				if previous.Project == root {
 					for _, cached := range previous.Items {
-						if cached.Key == item.Key && cached.ID == item.ID && cached.Status == "supplied" {
+						if cached.Key == item.Key && cached.ID == item.ID && cached.Status == "supplied" && cached.Selection == "" && cached.Section == "" {
 							item.Body = cached.Body
 							fetched = true
+							break
 						}
 					}
 				}
@@ -156,6 +158,16 @@ func projectContext(cfg config.Config, s *store.Store, root string, count memory
 			}
 			item, err := guidanceItem(ctx, cfg, s, root, ref)
 			item.Selection = "pinned"
+			if err == nil && !domainContextItem(item) {
+				for _, owner := range packet.Items {
+					if owner.Key == item.Key && owner.ID == item.ID && owner.Status == "supplied" && owner.Selection == "" && owner.Section == "" {
+						// The whole immutable owner already includes this section.
+						// Preserve the pin and links without repeating its body.
+						item.Body, item.Status = "", "supplied-in-owner"
+						break
+					}
+				}
+			}
 			if err == nil {
 				err = admitGuidanceItem(ctx, count, &item)
 			}
@@ -165,7 +177,16 @@ func projectContext(cfg config.Config, s *store.Store, root string, count memory
 			}
 			packet.Items = append(packet.Items, item)
 		}
+		pinnedDomain := false
+		for _, item := range packet.Items {
+			pinnedDomain = pinnedDomain || (item.Selection == "pinned" && item.Status == "supplied" && item.Body != "" && domainContextItem(item))
+		}
 		for _, entry := range []struct{ key, section string }{{memory.CodeStandardKey, "scope"}, {memory.UIStandardKey, "identity"}, {memory.TestsStandardKey, "intent"}} {
+			// Explicit domain bodies take over orientation after selection. The
+			// generic roots have already introduced their lazy graph entry points.
+			if pinnedDomain {
+				break
+			}
 			if entry.key == memory.TestsStandardKey && !cfg.Testing.Guidance {
 				continue
 			}
@@ -188,10 +209,33 @@ func projectContext(cfg config.Config, s *store.Store, root string, count memory
 				packet.Items = append(packet.Items, item)
 			}
 		}
+		omitted, err := boundGuidanceItems(ctx, count, packet.Items)
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if errors.Is(err, context.Canceled) {
+				return err
+			}
+			// A domain delivery failure cannot withhold ordinary current facts.
+			// Remove even domain locators when their envelope cannot be admitted;
+			// no uncounted domain payload or alternate counting policy is emitted.
+			kept := packet.Items[:0]
+			for _, item := range packet.Items {
+				if !domainContextItem(item) {
+					kept = append(kept, item)
+				}
+			}
+			packet.Items = kept
+			packet.GuidanceStatus = "domain guidance unavailable; domain items omitted: " + err.Error()
+		}
+		if omitted {
+			packet.GuidanceStatus = "domain guidance exceeds 2000-unit context budget; omitted-budget items retain exact locators; select fewer or narrower sections"
+		}
 		raw, _ := json.Marshal(packet)
 		if len(raw) > cfg.Tools.GraphQL.MaxResultBytes {
 			for i := range packet.Items {
-				if packet.Items[i].Status == "supplied" {
+				if packet.Items[i].Status == "supplied" || packet.Items[i].Status == "supplied-in-owner" {
 					packet.Items[i].Status = "omitted-budget"
 				}
 				packet.Items[i].Body, packet.Items[i].Links = "", nil

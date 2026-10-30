@@ -67,6 +67,13 @@ func New(a *api.API, limits config.GraphQLConfig, root, sessionRef, storeID stri
 		if errors.As(err, &schemaErrors) && len(schemaErrors) > 0 && len(schemaErrors[0].Path) == 0 {
 			err = fmt.Errorf("%w; %s", err, pc.Format("guidance.graph.schema", schemaReference(query, op, schemaErrors)))
 		}
+		if err != nil && anonymousOperationWithName(query, op) {
+			catalog := pc
+			if !catalog.Has("guidance.graph.anonymous_operation_name") {
+				catalog = prompts.Builtin()
+			}
+			err = fmt.Errorf("%w; %s", err, catalog.Text("guidance.graph.anonymous_operation_name"))
+		}
 		var receipt struct {
 			Effects []api.Effect `json:"effects"`
 		}
@@ -227,9 +234,9 @@ func Preparation(graph tool.Definition, s *store.Store, limits config.GraphQLCon
 			if !reflect.DeepEqual(identity, current) {
 				return tool.Result{}, fmt.Errorf("task ancestry/state changed after readiness binding; %s", pc.Text("guidance.graph.changed_ready"))
 			}
-			c, cancel := context.WithDeadline(ctx, deadline)
-			defer cancel()
-			return execute(c, args)
+			// No bind deadline here: readiness may wait for a human approval.
+			// The parent context still cancels; judge calls keep their own timeouts.
+			return execute(ctx, args)
 		}
 		return bound, actual, nil
 	}

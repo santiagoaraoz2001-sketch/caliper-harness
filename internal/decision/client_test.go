@@ -137,7 +137,7 @@ func TestJudgeTimeout(t *testing.T) {
 	}
 }
 
-// Complete body includes selected identity; refusal happens before any HTTP request.
+// Complete bodies have no byte ceiling; provider token admission is the only limit.
 func TestJudgeCompleteBodyLimit(t *testing.T) {
 	var calls atomic.Int32
 	bodies := make(chan []byte, 4)
@@ -154,24 +154,13 @@ func TestJudgeCompleteBodyLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	actual := len(<-bodies)
-	req.MaxBytes = actual - 1
-	before := calls.Load()
-	var capacity *ContextCapacityError
-	if _, err := c.Judge(context.Background(), req); !errors.As(err, &capacity) || !capacity.EncodedRequest || !strings.Contains(err.Error(), "complete request bytes") || calls.Load() != before {
-		t.Fatalf("over-limit reached HTTP: %v calls=%d", err, calls.Load())
-	}
-	req.MaxBytes = actual
+	// No byte ceiling: a much larger complete body still reaches the server.
+	req.Context = strings.Repeat("large legitimate brief ", 20000)
 	if _, err := c.Judge(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
-	if len(<-bodies) != actual || calls.Load() != before+1 {
-		t.Fatal("exact wire boundary failed")
-	}
-	c.expected = &Selection{Model: "m", Runtime: "system_one"}
-	req.MaxBytes = actual
-	before = calls.Load()
-	if _, err := c.Judge(context.Background(), req); err == nil || !strings.Contains(err.Error(), "complete request bytes") || calls.Load() != before {
-		t.Fatalf("identity excluded from cap: %v calls=%d", err, calls.Load())
+	if got := len(<-bodies); got <= actual {
+		t.Fatalf("large body did not reach HTTP: %d <= %d", got, actual)
 	}
 }
 

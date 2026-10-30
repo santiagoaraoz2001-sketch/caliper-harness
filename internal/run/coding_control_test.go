@@ -259,7 +259,7 @@ func TestCodingChecksRefuseAndInvalidateTruthfully(t *testing.T) {
 				// Draft is deliberate: the real failed-workflow route must refuse readiness.
 				calls[len(calls)-1].args["approach"] = a.ID
 			}
-			deps := Deps{Store: owned, Cfg: cfg, AskYesNo: func(context.Context, string) bool { authCalls++; return true }, Tools: view, Server: cfg.Model.Server, Model: "fixture", MaxSteps: 4, Window: 32768, Session: sink, SessionID: "coding"}
+			deps := Deps{Store: owned, Cfg: cfg, AskYesNo: func(context.Context, string) bool { authCalls++; return true }, Tools: view, Server: cfg.Model.Server, Model: "fixture", MaxSteps: 4, Window: 49152, Session: sink, SessionID: "coding"}
 			var r *agent.Runner
 			var e error
 			if view == "full" {

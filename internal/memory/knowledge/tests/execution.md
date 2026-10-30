@@ -15,6 +15,8 @@ Run independent checks in parallel only when they do not share mutable fixtures,
 ## Evidence
 Keep the test's intent, actual executed command, stage outcomes, meaningful assertions, exit status and relevant artifact paths. Preserve failed evidence before repairs. Record uncertainty directly: coverage unknown, visual inspection unavailable, or provider behavior untested.
 
+Before cleaning up temporary probes, preserve their exact source, baseline, commands and decisive results in reviewable evidence outside the product files. Give the reviewer the recorded references or accessible paths. A statement that a deleted script passed cannot replace its assertions and receipts. Plan verification around the reviewer's available read and bound-check tools; do not require an unavailable command or discard evidence that the frozen acceptance needs.
+
 Separate observed output from derived expectation. A manually calculated example is useful but remains expected and unexecuted until run. A passing check proves what its assertions cover; it does not verify adjacent features. Summarize routine success and retain detailed raw logs outside the repository.
 
 [Maintain tests without weakening their contracts](knowledge:caliper/guides/tests/maintenance#repair)

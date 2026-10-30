@@ -223,6 +223,20 @@ func (r *Runner) deliveredUserContext() (original, current string, comments []de
 	return
 }
 
+// ReadinessRequirements reuses delivered-user provenance. User-role tool
+// results, harness advice and notes still queued for delivery are not requests.
+func (r *Runner) ReadinessRequirements() string {
+	original, current, comments, _ := r.deliveredUserContext()
+	if original == "" && current == "" && len(comments) == 0 {
+		return ""
+	}
+	raw, _ := json.Marshal(struct {
+		OriginalUserIntent, CurrentUserRequest string
+		DeliveredUserComments                  []deliveredUserComment `json:",omitempty"`
+	}{original, current, comments})
+	return string(raw)
+}
+
 type progressPacket struct {
 	// Only the owning reviewer runner may identify its assembled review request
 	// as attachments, rather than human intent. Never inferred from its text.
@@ -253,6 +267,9 @@ type progressPacket struct {
 	Assigned, Settled                                                    bool
 	HistoricalSettlement                                                 *TaskSettlement   `json:",omitempty"`
 	UnfinishedResponse                                                   *unfinishedSample `json:",omitempty"`
+	// Historical review attachments follow current role, evidence and action.
+	Review               *ReviewInputs     `json:",omitempty"`
+	HostReviewAttachment *progressOmission `json:",omitempty"`
 }
 
 func (r *Runner) progressEvidence(ctx context.Context, w *watcher) (progressPacket, error) {
@@ -377,6 +394,7 @@ func (r *Runner) progressEvidence(ctx context.Context, w *watcher) (progressPack
 	}
 	packet.RemainingSteps = r.remainingSteps(packet.Checkpoint.RunStep)
 	packet.RemainingSeconds = r.remainingRunSeconds(packet.Checkpoint.ElapsedSeconds)
+	packet.projectReview(r.ReviewInputs)
 	return packet, nil
 }
 
@@ -657,15 +675,9 @@ func (p *progressPacket) omitSmaller(field, text string, remove, restore func())
 }
 
 func (p *progressPacket) reduceForCapacity() bool {
-	// The reviewer receives the full host-assembled evidence prompt, which is
-	// not a second human request. Its frozen scope and current receipts remain
-	// below; only this optional attachment copy can be omitted on real refusal.
-	if p.hostReviewRequest && p.AuthoredTaskInstructions != "" && p.OriginalUserIntent != "" {
-		request := p.OriginalUserIntent
-		if p.omitSmaller("OriginalUserIntent (host-assembled reviewer request; frozen AuthoredTaskInstructions and current receipts retained)", request, func() { p.OriginalUserIntent = "" }, func() { p.OriginalUserIntent = request }) {
-			return true
-		}
-	}
+	// Known review attachments were decomposed at normal projection. Unknown
+	// or restored prompts may contain unique obligations; capacity alone does
+	// not make their contents disposable.
 	// Historical reviewer prose is optional; the current rejected task's
 	// failure feedback remains protected along with its owning outcome.
 	if s := p.HistoricalSettlement; s != nil && (s.Qualified || s.TaskID != p.Checkpoint.SelectedID) {

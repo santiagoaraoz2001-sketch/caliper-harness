@@ -2,11 +2,68 @@ package launch
 
 import (
 	"encoding/json"
+	"fmt"
+	"specific-harness/internal/config"
+	"specific-harness/internal/graph"
+	"specific-harness/internal/llm"
 	"specific-harness/internal/plan"
 	"specific-harness/internal/session"
 	"strings"
 	"testing"
 )
+
+func TestReviewerCanReadMainExecutionAfterPromptReceipt(t *testing.T) {
+	s, aid, ids := setup(t, 1)
+	root := bindFixtureProject(t, s, aid, t.TempDir())
+	if _, err := plan.TransitionApproach(s, aid, plan.ApproachRunning); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := plan.TransitionTask(s, ids[0], plan.TaskRunning); err != nil {
+		t.Fatal(err)
+	}
+	if err := plan.SetTaskAttempts(s, ids[0], 1); err != nil {
+		t.Fatal(err)
+	}
+	task, err := plan.GetTask(s, ids[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := resultOf(task)
+	messages := []llm.Message{{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "observed", Name: "bash", Arguments: `{"cmd":"probe"}`}}}, {Role: "tool", ToolCallID: "observed", Name: "bash", Content: "tool result: diagnostic"}}
+	if err := appendReview(&r, attemptRecord{Kind: "execution", Attempt: 1, Transcript: messages}); err != nil {
+		t.Fatal(err)
+	}
+	reference := reviewEvidenceReference(&r, nil)
+	if !strings.Contains(reference, `record:0`) || !strings.Contains(reference, `nextOffset`) || !strings.Contains(reference, `callIds`) || !strings.Contains(reference, `arguments`) {
+		t.Fatal("missing actual execution reference")
+	}
+	d := depsFor(s, nil)
+	d.Workspace = root
+	d.SessionsDir = t.TempDir()
+	if err := (reviewSink{d: d, r: &r}).Append(t.Context(), task.ID, "prompt", "review"); err != nil {
+		t.Fatal(err)
+	}
+	api, err := graph.New(s, "test", d.SessionsDir).WithAllowedFields("taskEvidence").WithReviewerEvidence(task.ID, 1).Scoped(root, task.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(reference, "\n")
+	var discovery string
+	for _, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "query {") {
+			discovery = strings.TrimSpace(line)
+		}
+	}
+	metadata, err := api.ExecBounded(t.Context(), discovery, "", nil, config.Defaults().Tools.GraphQL)
+	if err != nil || !strings.Contains(string(metadata), "observed") || !strings.Contains(string(metadata), "bash") {
+		t.Fatalf("handoff discovery failed: %s %v", metadata, err)
+	}
+	q := fmt.Sprintf(`{taskEvidence(taskId:%q,attempt:1,record:0,phase:"execution",offset:0,limit:1,callId:"observed"){historical groups{records{message{content}}}}}`, task.ID)
+	result, err := api.ExecBounded(t.Context(), q, "", nil, config.Defaults().Tools.GraphQL)
+	if err != nil || !strings.Contains(string(result), "diagnostic") {
+		t.Fatalf("persisted reviewer evidence missing: %s %v", result, err)
+	}
+}
 
 func TestRoleArchiveDoesNotRewriteGrowingGraphLog(t *testing.T) {
 	s, aid, ids := setup(t, 1)

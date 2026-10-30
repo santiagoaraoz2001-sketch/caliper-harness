@@ -73,7 +73,7 @@ presence, never runtime health or manual confirmation. Missing or unknown stage
 prerequisites prevent qualification while the configured check still runs;
 optional suite-level prerequisites retain their preflight behavior.
 Commands without a report format retain unknown coverage even when they exit
-zero. See the [report contract](https://github.com/santiagoaraoz2001-sketch/caliper-harness/blob/v0.2.3/docs/testing-report-contract.md) for configuration,
+zero. See the [report contract](https://github.com/santiagoaraoz2001-sketch/caliper-harness/blob/v0.2.4/docs/testing-report-contract.md) for configuration,
 evidence limits and the separation between standalone results and Chat/PAT checks.
 
 ## Ollama D1 decision model
@@ -104,4 +104,4 @@ Rulith can continue serving the coding model on its separate endpoint.
 
 ### Domain guidance token admission
 
-Domain articles start near 1,000 tokens and may expand to 2,000 native-counted tokens per enriched retrieval, including preferences and navigation. Rulith uses its native `/tokenize` without generation. MLX/Ollama/generic adapters explicitly lack that capability and use a disclosed conservative UTF-8-byte estimate capped at 2,000 bytes for the complete domain envelope, including links and the accounting-basis label. This keeps compact guidance available without claiming exact token counts or universal tokenizer guarantees. Unknown runtime, missing counter, malformed native response, timeout and cancellation remain failures, never fallback triggers. Ordinary project facts and PAT retain their own limits; exact counting and native benefit on other backends remain separate gates. See [domain guidance](https://github.com/santiagoaraoz2001-sketch/caliper-harness/blob/v0.2.3/docs/domain-guidance.md) for scope, selected-body delivery and multi-hop authoring.
+Domain articles start near 1,000 tokens and may expand to 2,000 native-counted tokens per enriched retrieval, including preferences and navigation. Rulith uses its native `/tokenize` without generation. MLX/Ollama/generic adapters explicitly lack that capability and use a disclosed conservative UTF-8-byte estimate capped at 2,000 bytes for the complete domain envelope, including links and the accounting-basis label. This keeps compact guidance available without claiming exact token counts or universal tokenizer guarantees. Unknown runtime, missing counter, malformed native response, timeout and cancellation remain failures, never fallback triggers. Ordinary project facts and PAT retain their own limits; exact counting and native benefit on other backends remain separate gates. See [domain guidance](https://github.com/santiagoaraoz2001-sketch/caliper-harness/blob/v0.2.4/docs/domain-guidance.md) for scope, selected-body delivery and multi-hop authoring.

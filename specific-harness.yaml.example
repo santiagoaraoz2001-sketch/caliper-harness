@@ -124,7 +124,7 @@ decision:
   timeout_seconds: 30       # one judgment round-trip cap
   risk_threshold: 0.7       # at/above: obey verdict; below: ask the human
   coherence_max_chars: 0         # legacy optional request byte guard; 0 uses native token admission
-  judgment_context_chars: 500    # context kept in a judgment event; 0 = unlimited
+  judgment_context_chars: 0    # context kept in a judgment event; 0 = unlimited
   confidence_buckets: [0.5, 0.7, 0.9]  # judgments histogram edges (keep 0.7)
 
 watch:

@@ -147,7 +147,7 @@ func (r *Runner) thinkingContext(ctx context.Context, log func(string, string) e
 				// Supply each value once, outside JSON escapes. Metadata lengths delimit
 				// untrusted text even when it contains the section labels itself.
 				evidence := string(raw) + "\nUnit:\n" + unitValue + "\nSample:\n" + sampleValue
-				return decision.Request{Context: evidence, Instructions: r.Prompts.Text("decision.thinking_loop.instructions"), Options: []string{loopStuck, loopProgress}, MaxBytes: p.MaxInputBytes}, nil
+				return decision.Request{Context: evidence, Instructions: r.Prompts.Text("decision.thinking_loop.instructions"), Options: []string{loopStuck, loopProgress}}, nil
 			}
 			req, err := buildRequest(sample)
 			if err != nil {

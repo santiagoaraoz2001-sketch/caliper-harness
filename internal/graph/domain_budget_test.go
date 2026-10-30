@@ -26,6 +26,9 @@ func TestDomainAdmissionCountsProjectedAliasesAndKeepsOrdinaryFactsSeparate(t *t
 		calls := 0
 		counter := func(_ context.Context, raw string) (int, error) {
 			calls++
+			if !strings.Contains(raw, `"data":`) {
+				return 1000, nil // Initial canonical section, counted once across aliases.
+			}
 			for _, want := range []string{`"words":`, `"wordsAgain":`, `"first":`, `"second":`} {
 				if !strings.Contains(raw, want) {
 					t.Fatalf("projected alias omitted: %s", raw)
@@ -37,8 +40,8 @@ func TestDomainAdmissionCountsProjectedAliasesAndKeepsOrdinaryFactsSeparate(t *t
 			return tokens, nil
 		}
 		data, err := a.WithDomainTokenCounter(counter).ExecBounded(t.Context(), query, "", nil, config.Defaults().Tools.GraphQL)
-		if calls != 1 {
-			t.Fatalf("wanted one aggregate domain count, got%d", calls)
+		if calls != 2 {
+			t.Fatalf("wanted one section and one aggregate domain count, got%d", calls)
 		}
 		var result Result
 		json.Unmarshal(data, &result)
@@ -98,16 +101,20 @@ func TestDomainOmissionPreservesMixedPageAndMutationSiblings(t *testing.T) {
 	raw, err := bounded.ExecBounded(t.Context(), `mutation {guide:appendKnowledge(key:"project/guides/probe/new",body:"too-large-domain",expectedPreviousId:""){id body} ordinary:appendKnowledge(key:"project/testing/strategy",body:"preserve exact ordinary evidence",expectedPreviousId:""){id body}}`, "", nil, config.Defaults().Tools.GraphQL)
 	var result Result
 	json.Unmarshal(raw, &result)
-	if err == nil || !result.DataOmitted || len(result.Effects) != 2 || strings.Contains(string(result.Data), "too-large-domain") || !strings.Contains(string(result.Data), "preserve exact ordinary evidence") || !strings.Contains(err.Error(), "at guide:") {
+	if err == nil || len(result.Effects) != 2 || result.Effects[0].Status != "rejected" || result.Effects[1].Status != "applied" || !strings.Contains(err.Error(), "maximum is 1000") {
 		t.Fatalf("mixed effects or ordinary mutation receipt lost: %s %v", raw, err)
 	}
 	stored := projectExec(t, a, `{knowledge(key:"project/guides/probe/new"){body}}`)
-	if !strings.Contains(string(stored.Data), "too-large-domain") {
-		t.Fatal("omission rolled back committed domain write")
+	if string(stored.Data) != `{"knowledge":[]}` {
+		t.Fatal("oversized domain write was committed", string(stored.Data))
+	}
+	stored = projectExec(t, a, `{knowledge(key:"project/testing/strategy"){body}}`)
+	if !strings.Contains(string(stored.Data), "preserve exact ordinary evidence") {
+		t.Fatal("ordinary sibling write was lost")
 	}
 }
 
-func TestProjectGuidesOptInAndDomainFailuresPreserveEffects(t *testing.T) {
+func TestProjectGuidesRejectUnavailableTokenCountBeforeCommit(t *testing.T) {
 	s, err := store.Open(filepath.Join(t.TempDir(), "db"))
 	if err != nil {
 		t.Fatal(err)
@@ -117,13 +124,12 @@ func TestProjectGuidesOptInAndDomainFailuresPreserveEffects(t *testing.T) {
 	data, err := a.ExecBounded(t.Context(), `mutation {appendKnowledge(key:"project/guides/mapping/labels",body:"## choices\nUser prefers upright labels.",expectedPreviousId:""){id body}}`, "", nil, config.Defaults().Tools.GraphQL)
 	var result Result
 	json.Unmarshal(data, &result)
-	if err == nil || !result.DataOmitted || len(result.Effects) == 0 {
-		t.Fatalf("lost committed effect or claimed delivery: %s %v", data, err)
+	if err == nil || len(result.Effects) != 1 || result.Effects[0].Status != "rejected" {
+		t.Fatalf("unavailable count did not reject authored guide: %s %v", data, err)
 	}
-	// The write happened once; a post-projection budget error is not rollback.
 	read := projectAPI(t, s, a.scope.root)
 	got := projectExec(t, read, `{knowledge(key:"project/guides/mapping/labels"){body}}`)
-	if !strings.Contains(string(got.Data), "upright labels") {
+	if string(got.Data) != `{"knowledge":[]}` {
 		t.Fatal(string(got.Data))
 	}
 }

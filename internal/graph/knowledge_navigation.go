@@ -22,7 +22,7 @@ func knowledgeFields(ctx context.Context) (map[string]bool, []string) {
 	fields := selectedNames(selection)
 	// Classification belongs to the stored key even when the caller omits or
 	// aliases it. Never infer domain provenance from projected user fields.
-	fields = append(fields, "key")
+	fields = append(fields, "key", "previousId")
 	for _, name := range fields {
 		want[name] = true
 	}
@@ -34,6 +34,7 @@ func knowledgeFields(ctx context.Context) (map[string]bool, []string) {
 		}
 		if field.Name == "sections" {
 			for _, child := range selected(ctx, field.SelectionSet, "KnowledgeSection") {
+				want["sections."+child.Name] = true
 				if child.Name != "references" {
 					continue
 				}
@@ -163,6 +164,8 @@ func (r *Resolver) knowledgeModels(ctx context.Context, entries []*memory.Entry,
 		if want["freshness"] && !builtin {
 			m.Freshness = memory.Freshness(s.root, e)
 		}
+		var budgetRefs []memory.Reference
+		refsLoaded := false
 		if want["references"] || (want["sections.references"] && len(m.Sections) > 0) {
 			_, remaining := available(ctx)
 			var refs []memory.Reference
@@ -182,6 +185,13 @@ func (r *Resolver) knowledgeModels(ctx context.Context, entries []*memory.Entry,
 			if err != nil {
 				return nil, err
 			}
+			budgetRefs = append([]memory.Reference(nil), refs...)
+			for i := range budgetRefs {
+				budgetRefs[i].Status = ""
+			}
+			// A full body alongside text-filtered sections may need references
+			// outside the displayed section list for its canonical budget.
+			refsLoaded = !want["body"] || want["references"] || text == "" || section != ""
 			if want["references.status"] {
 				sourceBody := e.Body
 				if !builtin && !want["body"] && !want["sections"] && section == "" {
@@ -253,6 +263,26 @@ func (r *Resolver) knowledgeModels(ctx context.Context, entries []*memory.Entry,
 			return nil, err
 		}
 		if builtin || memory.ProjectGuide(e.Key) {
+			if b := budget(ctx); b != nil && s.model && !mutation && (want["body"] || want["sections.body"]) {
+				previousBody, err := r.domainPrevious(ctx, e.Key, e.PreviousID)
+				if err != nil {
+					return nil, err
+				}
+				refs := budgetRefs
+				if !refsLoaded && builtin {
+					refs = memory.BuiltinReferences(e.Key, false)
+				} else if !refsLoaded {
+					refs, err = r.domainReferences(ctx, e.ID)
+					if err != nil {
+						return nil, err
+					}
+				}
+				filter := text
+				if want["body"] {
+					filter = ""
+				}
+				b.domainArticles = append(b.domainArticles, domainArticle{key: e.Key, version: e.ID, previousBody: previousBody, sections: memory.Sections(e.Body, filter, section), refs: refs})
+			}
 			noteDomain(ctx, len(out))
 		}
 		out = append(out, m)

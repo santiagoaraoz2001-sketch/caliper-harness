@@ -3,7 +3,7 @@ package run
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+
 	"path/filepath"
 	"strings"
 	"testing"
@@ -26,7 +26,7 @@ func TestPreparationReadinessBudgetBeforeReady(t *testing.T) {
 	}
 	defer s.Close()
 	cfg := config.Defaults()
-	cfg.Decision.CoherenceMaxChars = 3000 // explicit legacy policy, separate from the default native admission
+	cfg.Decision.CoherenceMaxChars = 3000 // legacy accepted value; no byte ceiling enforces it
 	cfg.Auth.Mode = config.AuthYOLO
 	cfg.Recall.TopN = 0
 	cfg.Coding.CheckCommand = "true"
@@ -68,7 +68,7 @@ func TestPreparationReadinessBudgetBeforeReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	preparation := facts.(agent.BookkeepingFacts).Preparation
-	if !strings.Contains(preparation, "Readiness packet:") || !strings.Contains(preparation, "Revise the actual brief") || strings.Contains(preparation, "ready_task(task=") {
+	if !strings.Contains(preparation, "Readiness packet:") || !strings.Contains(preparation, "ready_task(task=") {
 		t.Fatalf("missing current actionable budget: %s", preparation)
 	}
 	ready, _ := r.Registry.Lookup("ready_task")
@@ -77,17 +77,10 @@ func TestPreparationReadinessBudgetBeforeReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	refused, err := r.Exec(context.Background(), ready, args)
-	if err == nil || !strings.Contains(err.Error(), "no judgment ran") {
-		t.Fatalf("actual Ready must retain cap: %v %s", err, refused.Text)
-	}
-	var count, maximum int
-	if _, err = fmt.Sscanf(err.Error()[strings.Index(err.Error(), "readiness request is"):], "readiness request is %d bytes, exceeds decision.coherence_max_chars=%d", &count, &maximum); err != nil {
-		t.Fatal(err)
-	}
-	for _, v := range []string{fmt.Sprint(count) + " bytes", fmt.Sprint(maximum), fmt.Sprint(count-maximum) + " bytes"} {
-		if !strings.Contains(preparation, v) {
-			t.Fatalf("advice disagrees with actual Ready: %s; missing %s", preparation, v)
-		}
+	// No byte ceiling: Ready reaches the decision service (unavailable in
+	// this fixture) instead of refusing on size before judgment.
+	if err == nil || strings.Contains(err.Error(), "no judgment ran") || strings.Contains(err.Error(), "coherence_max_chars") {
+		t.Fatalf("actual Ready must not retain byte cap: %v %s", err, refused.Text)
 	}
 	a, err := plan.GetApproach(s, aid)
 	if err != nil || a.State != plan.ApproachDraft {

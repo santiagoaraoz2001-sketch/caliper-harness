@@ -178,7 +178,7 @@ func TestPruneZeroDisables(t *testing.T) {
 }
 
 func TestPruneInterplaySkipsCompact(t *testing.T) {
-	// Measured 1450 (trigger 1350) but pruning drops the basis below it:
+	// Measured 1700 (trigger 1620) but pruning drops the basis below it:
 	// no compaction, one prune event, run completes. The complete catalog
 	// is admitted at startup; any compaction would consume a scripted reply
 	// and produce an unexpected compact event below.
@@ -189,13 +189,13 @@ func TestPruneInterplaySkipsCompact(t *testing.T) {
 		replies: []string{echoBlock(strings.Repeat("x", 5000)), echoBlock("b"), "done"},
 		usages: []llm.Usage{
 			{In: 20, Out: 5, Reported: true},
-			{In: 1450, Out: 5, Reported: true},
+			{In: 1700, Out: 5, Reported: true},
 		},
 	}
 	sink := &recordSink{}
 	dir := t.TempDir()
 	writeCompactionCatalog(t, dir, "UNEXPECTED_COMPACTION")
-	r := &Runner{Model: model, Registry: reg, MaxSteps: 5, MaxTokens: 1500,
+	r := &Runner{Model: model, Registry: reg, MaxSteps: 5, MaxTokens: 1800,
 		SessionID: "prune-test", Session: sink,
 		Compaction: testCompaction(), TemplatesDir: dir,
 		Prune: Prune{OutputsAgeTokens: 1, SchemasKeep: 3}}

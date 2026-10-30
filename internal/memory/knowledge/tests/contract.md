@@ -9,6 +9,7 @@ Record what would count as failure and which plausible wrong implementations the
 
 [Choose an independent source of expected truth](knowledge:caliper/guides/tests/oracles#independence)
 [Choose state and fixtures that expose the defect](knowledge:caliper/guides/tests/fixtures#discriminating-data)
+[Prove a representative failure without contaminating controls](knowledge:caliper/guides/tests/oracles#negative-controls)
 
 ## Scope and proportionality
 Use a pure test for deterministic calculation, an integration test for storage or service boundaries, and an interaction test for a user-visible path. A browser test is unnecessary for a pure formatter; a private handler test cannot prove a button is wired to it.

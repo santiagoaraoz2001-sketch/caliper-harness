@@ -159,7 +159,7 @@ func (r *Runner) keepPartial(reply llm.Reply, cause error, log func(string, stri
 	if err != nil {
 		return "original partial archive incomplete", err
 	}
-	return fmt.Sprintf("original %d-byte native response archived in raw fragments", len(raw)), nil
+	return fmt.Sprintf("original %d-byte response/error archive envelope retained in raw fragments", len(raw)), nil
 }
 
 func nativeArchiveHeader(provenance any, label string, log func(string, string) error) error {
@@ -406,6 +406,9 @@ func (r *Runner) nativeStep(ctx context.Context, reply llm.Message, exec Exec, l
 		obs = text
 		if r.enforcement.current != nil {
 			r.enforcement.current.CallID = c.ID
+		}
+		if executed && r.readinessStop != nil && err == nil && ctx.Err() == nil && stopped == "" {
+			stopped, tail = r.readinessStop.Error(), "manual readiness approval not granted after call "+c.ID
 		}
 		if executed && tail == "" && err == nil && ctx.Err() == nil && stopped == "" {
 			if msg := observe(sig, productive, ""); msg != "" {

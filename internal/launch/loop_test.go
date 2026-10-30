@@ -89,7 +89,7 @@ func TestSubagentInheritsCompaction(t *testing.T) {
 	writeLegacyLaunchCatalog(t, dir, map[string]string{"templates.compaction": "WORDS={{.Words}}\n{{.Range}}", "templates.subagent": "{{.Title}} {{.Prompt}}"})
 	// A substantial brief and roughly four content bytes per reported input
 	// token exercise compaction without making its rendered request over budget.
-	task.Prompt = strings.Repeat("source context ", 160)
+	task.Prompt = strings.Repeat("source context ", 140)
 	const window = 4000
 	big := "```tool\ntool: nope\nx: " + strings.Repeat("z", 12800) + "\n```"
 	model := &loopModel{replies: []string{big, "Requested tool was unavailable; no work was executed.", "done"},

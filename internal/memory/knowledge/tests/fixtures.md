@@ -17,6 +17,7 @@ Start only services owned by the fixture. Capture their process identity, endpoi
 Keep fixtures local and deterministic where the real remote service is not the subject. A local fake may prove protocol handling, but it does not prove live-provider compatibility. Record those as separate gates.
 
 [Test ownership across lifecycle transitions](knowledge:caliper/guides/tests/state#ownership)
+[Reset each negative control to a passing baseline](knowledge:caliper/guides/tests/oracles#isolated-control-example)
 
 ## Realism without excess
 Represent the boundary that matters. A storage test should reopen actual storage; a UI wiring test should enter through the visible control; a request-format test should inspect the actual serialized request. Large production datasets add little when a three-record fixture exposes the same defect.

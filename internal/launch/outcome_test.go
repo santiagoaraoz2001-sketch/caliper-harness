@@ -549,6 +549,8 @@ func TestLaunchReviewReceivesActualRoleRequestAndEvidence(t *testing.T) {
 	declareFixtureCheck(t, s, aid, ids, "true")
 	m := &handoffModel{}
 	d := depsFor(s, m)
+	var reviewer *agent.Runner
+	d.ConfigureReviewer = func(r *agent.Runner) { reviewer = r }
 	d.Wf.VerifyFollowup = true
 	results, err := Launch(context.Background(), d, aid)
 	if err != nil {
@@ -564,6 +566,9 @@ func TestLaunchReviewReceivesActualRoleRequestAndEvidence(t *testing.T) {
 	task, err := plan.GetTask(s, ids[0])
 	if err != nil {
 		t.Fatal(err)
+	}
+	if reviewer == nil || reviewer.ReviewInputs == nil || reviewer.ReviewInputs.Verify != task.Verify || reviewer.ReviewInputs.Tests != task.Tests || reviewer.ReviewInputs.ExecutionRequest != worker || reviewer.ReviewInputs.UnverifiedWorkerReport != results[0].Output {
+		t.Fatal("typed advisory inputs not handed to the actual owning reviewer")
 	}
 	for _, want := range []string{"frozen task request: " + task.Prompt, "current: " + task.Current, "target: " + task.Target, "sketch: " + task.Sketch, "tests: " + task.Tests, "acceptance: " + task.Acceptance, "Verify instructions: " + task.Verify} {
 		if !strings.Contains(review, want) {

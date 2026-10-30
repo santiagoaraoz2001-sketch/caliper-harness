@@ -51,16 +51,26 @@ func TestOwningInterfaceFullBriefAndOverflow(t *testing.T) {
 		if !strings.Contains(r.Context, "current: now") || !strings.Contains(r.Context, "verify: run it") {
 			t.Error("complete brief not judged", r.Context)
 		}
-		return decision.Verdict{Option: servesGoal, Confidence: 1}, nil
+		return decision.Verdict{Option: r.Options[0], Confidence: 1}, nil
 	}
-	d.CoherenceMaxChars = 0
 	if err := ReadyCheck(context.Background(), d, id); err != nil {
 		t.Fatal(err)
 	}
+	// A provider capacity refusal on the collective request falls back to
+	// per-task plus collective chunked judgments instead of failing.
 	calls = 0
-	d.CoherenceMaxChars = 1
-	if err := ReadyCheck(context.Background(), d, id); err == nil || calls != 0 {
-		t.Errorf("oversize input judged: calls=%d err=%v", calls, err)
+	d.Judge = func(_ context.Context, r decision.Request) (decision.Verdict, error) {
+		calls++
+		if strings.Count(r.Context, "acceptance:") > 1 {
+			return decision.Verdict{}, &decision.ContextCapacityError{Message: "provider limit", EncodedRequest: true}
+		}
+		return decision.Verdict{Option: r.Options[0], Confidence: 0.9}, nil
+	}
+	if err := ReadyCheck(context.Background(), d, id); err != nil {
+		t.Fatalf("chunked coherence failed: %v", err)
+	}
+	if calls < 3 {
+		t.Errorf("chunked coherence made %d judge calls, want per-task plus collective", calls)
 	}
 }
 

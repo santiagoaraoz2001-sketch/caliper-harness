@@ -96,10 +96,10 @@ func TestCompactPreservesBehavior(t *testing.T) {
 	reg.Register(echoTool(&calls))
 	model := &scriptModel{
 		replies: []string{echoBlock(strings.Repeat("x", 5000)), echoBlock("b"), "Observed source read; verification pending.", "done"},
-		usages:  []llm.Usage{{In: 20, Out: 5, Reported: true}, {In: 1450, Out: 5, Reported: true}, {In: 50, Out: 5, Reported: true}, {In: 100, Out: 5, Reported: true}},
+		usages:  []llm.Usage{{In: 20, Out: 5, Reported: true}, {In: 1750, Out: 5, Reported: true}, {In: 50, Out: 5, Reported: true}, {In: 100, Out: 5, Reported: true}},
 	}
 	sink := &recordSink{}
-	r := &Runner{Model: model, Registry: reg, MaxSteps: 5, MaxTokens: 1500,
+	r := &Runner{Model: model, Registry: reg, MaxSteps: 5, MaxTokens: 1900,
 		SessionID: "b", Session: sink, Behavior: "Always say PINEAPPLE.",
 		Compaction: testCompaction(), TemplatesDir: dir, Judge: acceptCompaction, Threshold: .7}
 	r.Compaction.Keep = 5

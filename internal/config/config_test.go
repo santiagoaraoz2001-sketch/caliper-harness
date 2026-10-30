@@ -89,7 +89,7 @@ func TestDefaultsMatchOwnerPolicy(t *testing.T) {
 		t.Errorf("workflows defaults wrong: %+v", wf)
 	}
 	dc := d.Decision
-	if dc.Server != "http://127.0.0.1:8090" || dc.Model != "typed-decisions" || dc.Device != "auto" || dc.TimeoutSeconds != 30 || dc.RiskThreshold != 0.7 || dc.CoherenceMaxChars != 0 || dc.JudgmentContextChars != 500 {
+	if dc.Server != "http://127.0.0.1:8090" || dc.Model != "typed-decisions" || dc.Device != "auto" || dc.TimeoutSeconds != 30 || dc.RiskThreshold != 0.7 || dc.CoherenceMaxChars != 0 || dc.JudgmentContextChars != 0 {
 		t.Errorf("decision defaults wrong: %+v", dc)
 	}
 	if len(dc.ConfidenceBuckets) != 3 || dc.ConfidenceBuckets[0] != 0.5 || dc.ConfidenceBuckets[1] != 0.7 || dc.ConfidenceBuckets[2] != 0.9 {

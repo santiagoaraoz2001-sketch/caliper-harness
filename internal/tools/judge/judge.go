@@ -65,6 +65,9 @@ func run(ctx context.Context, d Deps, args tool.Args, catalogs ...*prompts.Catal
 	req := decision.Request{Context: contextText, Instructions: instructions, Options: opts}
 	v, err := d.Judge(ctx, req)
 	if err != nil {
+		if decision.EncodedCapacity(err) {
+			return tool.Result{}, fmt.Errorf("%v — %s", err, pc.Text("guidance.judge.capacity"))
+		}
 		return tool.Result{}, fmt.Errorf("the decision sidecar refused or is unreachable (%v) — %s", err, pc.Text("guidance.judge.unreachable"))
 	}
 	decision.LogJudgment(d.Log, decision.SourceJudgeTool, req, v, "returned", d.MaxContextChars)

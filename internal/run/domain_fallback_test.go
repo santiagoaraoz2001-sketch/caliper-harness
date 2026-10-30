@@ -67,12 +67,12 @@ func TestSelectedDomainFallbackIncludesLabelsAndLinksInBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(item)
-	item.Body += strings.Repeat("x", memory.DomainTokens-len(raw))
+	item.Body += strings.Repeat("x", memory.DomainInitialTokens-len(raw))
 	if err := admitGuidanceItem(t.Context(), count, &item); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ = json.Marshal(item)
-	if len(raw) != memory.DomainTokens {
+	if len(raw) != memory.DomainInitialTokens {
 		t.Fatal("wrong full selected envelope boundary")
 	}
 	item.Links = []memory.Reference{{Key: "caliper/guides/ui/layout", Section: "clearance", Label: "Useful next hop"}}

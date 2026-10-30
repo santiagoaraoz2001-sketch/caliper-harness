@@ -84,6 +84,10 @@ type Deps struct {
 	ConfirmReadiness  func(context.Context, string, string, string, string) (bool, error)
 	ConfigureReviewer func(*agent.Runner) // assigned parent is blocked; one live queue consumer
 	OnTaskSettled     func(context.Context, *plan.Task) error
+
+	// ReadinessRequirements reads only already-delivered human requests. The
+	// existing coherence check uses the same snapshot for readiness and claim.
+	ReadinessRequirements func() string
 }
 
 // Result is one finished subagent run. Err is task failure, never launch
@@ -620,20 +624,21 @@ func verifyPass(ctx context.Context, d Deps, results []Result, indices []int, wi
 					errs[j] = errors.Join(err, settle(d.Store, r, ctx))
 					return
 				}
-				prompt, err := d.Prompts.Render("templates.review", map[string]string{
+				inputs := map[string]string{
 					"PlanGoal": plan.DisplayStructured(goal), "ApproachTitle": plan.DisplayStructured(strategy),
 					"Title": brief.Title, "Prompt": brief.Verify, "Current": r.Output,
 					"TaskPrompt": brief.Prompt, "TaskCurrent": brief.Current, "Target": brief.Target,
 					"Sketch": brief.Sketch, "Tests": brief.Tests, "Acceptance": brief.Acceptance,
 					"Workspace": coding.Workspace, "CheckCommand": brief.CheckCommand, "AcceptanceCommand": brief.AcceptanceCommand,
-					"ExecutionRequest": r.ExecutionRequest, "ExecutionEvidence": r.ExecutionEvidence,
+					"ExecutionRequest": r.ExecutionRequest, "ExecutionEvidence": r.ExecutionEvidence + reviewEvidenceReference(r, d.Prompts),
 					"CheckReceipt":     string(checkFacts),
 					"FileObservations": reviewFileObservations(r.Transcript, d.Prompts),
-				})
+				}
+				prompt, err := d.Prompts.Render("templates.review", inputs)
 				if err != nil {
 					r.VerificationReason = err.Error()
 				} else {
-					reply, transcript, execution, err := runReviewer(ctx, d, prompt, window, r, t, coding)
+					reply, transcript, execution, err := runReviewer(ctx, d, prompt, window, r, t, coding, reviewProgressInputs(prompt, inputs))
 					record.Output, record.Transcript, record.Outcome = reply, transcript, execution
 					if err != nil {
 						record.Error = err.Error()
@@ -804,6 +809,9 @@ func reviewLineToken(line string, conclusion bool) (string, bool, bool) {
 		break
 	}
 	_, explanation, colon := strings.Cut(fields[0], ":")
+	if !colon {
+		_, explanation, colon = strings.Cut(fields[0], ",")
+	}
 	described := colon && (strings.Trim(explanation, "*_") != "" || len(fields) > 1)
 	if len(fields) > 1 && !colon {
 		switch fields[1] {
@@ -821,13 +829,16 @@ func reviewLineToken(line string, conclusion bool) (string, bool, bool) {
 func reviewWord(word string) string {
 	// Formatting is not part of the verdict. Require a paired wrapper around
 	// the whole word rather than stripping arbitrary punctuation or searching.
-	word = strings.TrimSuffix(word, ":")
+	if strings.HasSuffix(word, ":") || strings.HasSuffix(word, ",") {
+		word = word[:len(word)-1]
+	}
 	for _, marker := range []string{"**", "__", "*", "_"} {
 		if strings.HasPrefix(word, marker) {
 			if len(word) <= 2*len(marker) || !strings.HasSuffix(word, marker) {
 				return ""
 			}
 			word = strings.TrimSuffix(strings.TrimPrefix(word, marker), marker)
+			word = strings.TrimSuffix(word, ",") // ordinary punctuation inside a paired wrapper
 			break
 		}
 	}

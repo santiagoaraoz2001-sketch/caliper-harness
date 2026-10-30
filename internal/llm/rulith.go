@@ -57,20 +57,18 @@ func (c *Client) chatRulithRaw(ctx context.Context, msgs []Message, tools []Tool
 		reply.RawNative, reply.NativeInitialState, reply.Served = prefix.Raw, prefix.InitialState, previous.Served
 		reply.RawContentStreamed = previous.RawContentStreamed
 	} else {
-		var rendered struct {
-			Prompt string `json:"prompt"`
-		}
-		if err := c.rulithJSON(ctx, "/apply-template", render, &rendered); err != nil {
+		rendered, err := c.rulithRenderedPrompt(ctx, render)
+		if err != nil {
 			return reply, err
 		}
-		if rendered.Prompt == "" || !utf8.ValidString(rendered.Prompt) {
+		if rendered == "" || !utf8.ValidString(rendered) {
 			return reply, fmt.Errorf("Rulith template returned no valid rendered prompt")
 		}
 		state := "normal"
-		if strings.HasSuffix(strings.TrimRight(rendered.Prompt, " \t\r\n"), "<think>") {
+		if strings.HasSuffix(strings.TrimRight(rendered, " \t\r\n"), "<think>") {
 			state = "reasoning"
 		}
-		prefix = &ResponsePrefix{Strategy: RulithRawPrefix, Prompt: rendered.Prompt, PromptSHA256: byteHash([]byte(rendered.Prompt)), RequestSHA256: requestHash, InitialState: state}
+		prefix = &ResponsePrefix{Strategy: RulithRawPrefix, Prompt: rendered, PromptSHA256: byteHash([]byte(rendered)), RequestSHA256: requestHash, InitialState: state}
 		reply.NativeInitialState = state
 	}
 	// A native string prompt preserves the exact rendered bytes. In particular,

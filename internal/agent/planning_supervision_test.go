@@ -45,7 +45,7 @@ func TestSettledClaimDoesNotRejudgeEverySuccessfulDraft(t *testing.T) {
 	}
 }
 
-func TestReviewerCapacityMayOmitHostAttachmentsButNeverHumanIntent(t *testing.T) {
+func TestReviewerCapacityPreservesUnknownAttachmentsAndHumanIntent(t *testing.T) {
 	for _, owned := range []bool{false, true} {
 		r := &Runner{Prompts: prompts.Builtin(), Reviewing: owned, TaskSystem: "Frozen task scope: verify public consumer and preserve current failure", Continuation: session.Continuation{Coding: &session.CodingState{TaskID: "task", Attempt: 1}}}
 		original := strings.Repeat("host review attachment; ", 4000)
@@ -61,12 +61,8 @@ func TestReviewerCapacityMayOmitHostAttachmentsButNeverHumanIntent(t *testing.T)
 		before := r.Continuation.Entries[0].Message.Content
 		for p.reduceForCapacity() {
 		}
-		if owned {
-			if p.OriginalUserIntent != "" || len(p.CapacityOmissions) == 0 {
-				t.Fatal("host attachments still protected as human intent")
-			}
-		} else if p.OriginalUserIntent != original {
-			t.Fatal("human intent was omitted based on text")
+		if p.OriginalUserIntent != original {
+			t.Fatal("unknown reviewer obligations or human intent were omitted")
 		}
 		if p.AuthoredTaskInstructions != r.TaskSystem || p.LatestSettled.Error != "current failed evidence" || r.Continuation.Entries[0].Message.Content != before {
 			t.Fatal("scope, failure or original archive changed")
@@ -100,15 +96,19 @@ func TestReviewerCapturedCapacityPacket(t *testing.T) {
 	body, _ := json.Marshal(p)
 	q.Context = string(body)
 	complete, _ := json.Marshal(q)
-	if len(complete) >= 65536 || p.AuthoredTaskInstructions != scope || p.OriginalUserIntent != "" {
-		t.Fatalf("protected scope was lost or request still over byte ceiling: %d", len(complete))
+	if p.AuthoredTaskInstructions != scope || p.OriginalUserIntent == "" {
+		t.Fatalf("unknown archived obligations were discarded: %d", len(complete))
 	}
 	var removed progressOmission
 	for _, omission := range p.CapacityOmissions {
-		if strings.HasPrefix(omission.Field, "OriginalUserIntent (host-assembled") { removed = omission }
+		if strings.HasPrefix(omission.Field, "OriginalUserIntent (host-assembled") {
+			removed = omission
+		}
 	}
-	if removed.SHA256 == "" || removed.Bytes == 0 { t.Fatal("missing exact host attachment omission provenance") }
-	t.Logf("historical packet body %d bytes; reduced complete request %d bytes; frozen scope and Coding remain; host attachment omission=%+v", len(raw), len(complete), removed)
+	if removed.SHA256 != "" {
+		t.Fatal("unknown archived attachment was omitted without owned components")
+	}
+	t.Logf("historical packet body %d bytes; reduced complete request %d bytes; unknown archived attachment retained; no current owned decomposition available", len(raw), len(complete))
 }
 
 func TestReviewerRequestProvenanceIsFreshHostOnly(t *testing.T) {

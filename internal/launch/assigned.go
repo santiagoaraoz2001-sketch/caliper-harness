@@ -377,7 +377,7 @@ func (s reviewSink) Append(ctx context.Context, id string, kind, text string) (e
 	s.r.AttemptLog = t.AttemptLog // Includes concurrently delivered raw comment records.
 	return nil
 }
-func runReviewer(ctx context.Context, d Deps, prompt string, window int, r *Result, t *plan.Task, c *session.CodingState) (string, []llm.Message, outcome.Outcome, error) {
+func runReviewer(ctx context.Context, d Deps, prompt string, window int, r *Result, t *plan.Task, c *session.CodingState, inputs ...*agent.ReviewInputs) (string, []llm.Message, outcome.Outcome, error) {
 	parentCtx := ctx
 	ctx, stopReview := context.WithCancelCause(ctx)
 	defer stopReview(nil)
@@ -431,6 +431,9 @@ func runReviewer(ctx context.Context, d Deps, prompt string, window int, r *Resu
 		d.ConfigureReviewer(sub)
 	}
 	sub.TaskSystem = d.Prompts.Format("agent.reviewer_role", t.Title, t.Prompt, t.Target, t.Acceptance)
+	if len(inputs) == 1 {
+		sub.ReviewInputs = inputs[0]
+	}
 	sub.FinalFeedback = func(text string) string {
 		switch reviewToken(text) {
 		case "PASS", "FAIL", "UNVERIFIED":

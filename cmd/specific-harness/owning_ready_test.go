@@ -90,13 +90,13 @@ func TestOwningCLIReady(t *testing.T) {
 			cmd.Stdout = &out
 			cmd.Stderr = &out
 			err = cmd.Run()
-			if (err == nil) != (mode == "allow") {
+			if (err == nil) != (mode == "allow" || mode == "overflow") {
 				t.Fatalf("exit %v output %s", err, out.String())
 			}
-			if (mode == "overflow" || mode == "missing check") && judges.Load() != 0 {
+			if mode == "missing check" && judges.Load() != 0 {
 				t.Fatal("oversize judged")
 			}
-			if mode != "overflow" && mode != "missing check" && judges.Load() != 1 {
+			if mode != "missing check" && judges.Load() != 1 {
 				t.Fatal(judges.Load())
 			}
 			s, err = store.Open(db)
@@ -107,7 +107,7 @@ func TestOwningCLIReady(t *testing.T) {
 			got, _ := plan.GetApproach(s, a.ID)
 			task, _ := plan.GetTask(s, x.ID)
 			want := plan.ApproachDraft
-			if mode == "allow" {
+			if mode == "allow" || mode == "overflow" {
 				want = plan.ApproachReady
 			}
 			if got.State != want || task.Attempts != 0 || task.Verify != "LATE_VERIFY" {

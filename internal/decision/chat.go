@@ -17,23 +17,6 @@ func chatRuntime(runtime string) bool {
 	return runtime == llm.RuntimeOpenAI || runtime == llm.RuntimeMLX || runtime == llm.RuntimeOllama || runtime == llm.RuntimeRulith
 }
 
-// judgmentTransport admits the actual encoded body, not a second approximation
-// of the LLM wire request. It adds no budget and never changes the shared client.
-type judgmentTransport struct {
-	base     http.RoundTripper
-	maxBytes int
-}
-
-func (t judgmentTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	if t.maxBytes < 0 || t.maxBytes > 0 && r.ContentLength < 0 {
-		return nil, fmt.Errorf("judge complete request bytes %d exceed limit %d", r.ContentLength, t.maxBytes)
-	}
-	if t.maxBytes > 0 && r.ContentLength > int64(t.maxBytes) {
-		return nil, &ContextCapacityError{Message: fmt.Sprintf("judge complete request bytes %d exceed limit %d", r.ContentLength, t.maxBytes), EncodedRequest: true}
-	}
-	return t.base.RoundTrip(r)
-}
-
 func (c *Client) judgeChat(ctx context.Context, r Request) (verdict Verdict, err error) {
 	runtime := c.expected.Runtime
 	if !chatRuntime(runtime) {
@@ -53,7 +36,7 @@ func (c *Client) judgeChat(ctx context.Context, r Request) (verdict Verdict, err
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
-	httpClient.Transport = judgmentTransport{transport, r.MaxBytes}
+	httpClient.Transport = transport
 	client := llm.New(base, c.model).WithRuntime(runtime).WithHTTPClient(&httpClient)
 	if c.params != nil {
 		client.WithParams(*c.params)

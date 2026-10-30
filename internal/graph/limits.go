@@ -29,13 +29,14 @@ type Result struct {
 }
 type budgetKey struct{}
 type requestBudget struct {
-	mu          sync.Mutex
-	metadataMu  sync.Mutex
-	limits      config.GraphQLConfig
-	rows, bytes int
-	effects     []Effect
-	sessionUses []struct{ dir, id string }
-	domains     map[string][]int
+	mu             sync.Mutex
+	metadataMu     sync.Mutex
+	limits         config.GraphQLConfig
+	rows, bytes    int
+	effects        []Effect
+	sessionUses    []struct{ dir, id string }
+	domains        map[string][]int
+	domainArticles []domainArticle
 }
 
 func budget(ctx context.Context) *requestBudget {

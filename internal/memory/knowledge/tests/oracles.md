@@ -19,10 +19,24 @@ Metamorphic tests compare related inputs: translating all geometric points by th
 ## Negative controls
 Show that the test rejects a plausible defect. Temporarily supply a deliberately wrong implementation in an isolated fixture or use an existing injection seam: omit persistence, return the default, duplicate an effect, ignore cancellation, or mark a missing checker as successful. Keep the control bounded and restore exact state. Do not mutate the benchmark product to manufacture evidence.
 
+Start each control from the same known-good baseline and confirm that only the intended defect was applied. Keep the failure diagnostic: a nonzero exit caused by setup, syntax or an earlier mutation does not prove the intended assertion works. Reuse adequate existing controls; do not turn every small task into a broad mutation campaign.
+
 If the wrong implementation still passes, improve the fixture, boundary or assertion. Merely adding more assertions around the same faulty expected value does not strengthen the oracle. A failing control proves sensitivity to that defect, not universal adequacy.
 
 [See a constant-output false positive](knowledge:caliper/guides/tests/oracle-examples#constant-output)
 [Use lifecycle controls for ownership failures](knowledge:caliper/guides/tests/lifecycle-example#negative-controls)
+[Distinguish a real failing control from a contaminated copy](knowledge:caliper/guides/tests/oracles#isolated-control-example)
+
+## Isolated control example
+A browser fixture passes the original filter page. Copy it, change the button label, and observe the expected exact-name lookup failure. That result proves sensitivity to the label change only.
+
+For an overflow control, start from another clean passing copy, widen the page, and verify that the layout assertion fails. Reusing the wrong-label copy may still fail at button lookup before layout is checked. An exit code alone cannot distinguish these causes. Likewise, a focus control must steal focus at the action where the fixture actually measures focus; changing a different interaction proves nothing about that assertion.
+
+Run the control against that copy's root. Copying a baseline aside and repeatedly replacing the working application's file is restoration, not isolation. Keep the original page and checker unchanged while testing each copied variant.
+
+Record the baseline, applied change and decisive diagnostic. If diagnostics were discarded or controls overlapped, label the result inconclusive rather than saving a causal claim in project knowledge. Preserve useful evidence before cleaning up the isolated copy.
+
+[Keep assertions and receipts available for independent review](knowledge:caliper/guides/tests/execution#evidence)
 
 ## Interpreting failures
 A mismatch can come from product code, the test's premise, fixture setup or environment. Inspect the exact action and state before changing an assertion. Preserve the original failing evidence. If the expectation was wrong, derive and document the corrected expectation from the contract; do not simply replace it with the current output.

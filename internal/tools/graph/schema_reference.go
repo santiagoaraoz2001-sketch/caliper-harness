@@ -18,6 +18,36 @@ func schemaReference(query, operation string, problems gqlerror.List) string {
 		return "schema.graphql"
 	}
 	locations := map[gqlerror.Location]bool{}
+	// Repair a missing required operation argument before its result projection.
+	// Type help cannot provide the mutation signature that caused this failure.
+	for _, problem := range problems {
+		if problem.Rule == "ProvidedRequiredArguments" {
+			return api.ModelReference(query, operation)
+		}
+	}
+	inputLocations := map[gqlerror.Location]bool{}
+	for _, problem := range problems {
+		if problem.Rule == "ValuesOfCorrectType" {
+			for _, location := range problem.Locations {
+				inputLocations[location] = true
+			}
+		}
+	}
+	if len(inputLocations) > 0 {
+		references := map[string]bool{}
+		observers := &validator.Events{}
+		observers.OnValue(func(_ *validator.Walker, value *ast.Value) {
+			if value.Kind == ast.ObjectValue && value.Definition != nil && value.Definition.Kind == ast.InputObject && value.Position != nil && inputLocations[gqlerror.Location{Line: value.Position.Line, Column: value.Position.Column}] {
+				references[value.Definition.Name] = true
+			}
+		})
+		validator.Walk(api.ModelSchema(), doc, observers)
+		if len(references) == 1 {
+			for name := range references {
+				return "schema.graphql." + name
+			}
+		}
+	}
 	for _, problem := range problems {
 		if problem.Rule == "FieldsOnCorrectType" {
 			for _, location := range problem.Locations {
@@ -43,4 +73,12 @@ func schemaReference(query, operation string, problems gqlerror.List) string {
 		}
 	}
 	return api.ModelReference(query, operation)
+}
+
+func anonymousOperationWithName(query, operation string) bool {
+	if operation == "" {
+		return false
+	}
+	doc, err := parser.ParseQuery(&ast.Source{Input: query})
+	return err == nil && len(doc.Operations) == 1 && doc.Operations[0].Name == ""
 }

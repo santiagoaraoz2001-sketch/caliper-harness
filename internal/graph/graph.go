@@ -31,6 +31,8 @@ import (
 // API executes GraphQL operations against one store.
 type API struct {
 	allowedFields   map[string]bool
+	evidenceTask    string
+	evidenceAttempt int
 	exec            *executor.Executor
 	scope           *projectScope
 	lifecycle       func(context.Context, string, string, string) error
@@ -133,7 +135,6 @@ func (a *API) ExecBounded(ctx context.Context, query, opName string, vars map[st
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(limits.TimeoutSeconds)*time.Second)
 	defer cancel()
 	b := &requestBudget{limits: limits}
-	ctx = context.WithValue(ctx, budgetKey{}, b)
 	result, err := a.execute(ctx, query, opName, vars, b)
 	if len(result.Data) > 0 && string(result.Data) != "null" {
 		basis, domainErr := a.admitDomains(ctx, b, result.Data)
@@ -171,6 +172,10 @@ func (a *API) ExecBounded(ctx context.Context, query, opName string, vars map[st
 	return data, err
 }
 func (a *API) execute(ctx context.Context, query, opName string, vars map[string]any, b *requestBudget) (Result, error) {
+	// Each operation owns its budget. A raw host operation (notably durable
+	// session logging during readiness) must not inherit its caller's mutex.
+	ctx = context.WithValue(ctx, budgetKey{}, b)
+	ctx = context.WithValue(ctx, domainCounterKey{}, a.domainTokens)
 	if a.scope != nil {
 		ctx = context.WithValue(ctx, projectScopeKey{}, a.scope)
 		if a.scope.model {
@@ -279,6 +284,8 @@ func (introspectionHook) MutateOperationContext(_ context.Context, op *graphql.O
 // Scoped retains a host-captured project; it never accepts a GraphQL root argument.
 type projectScope struct {
 	root, sessionRef string
+	evidenceTask     string
+	evidenceAttempt  int
 	model            bool
 	lifecycle        func(context.Context, string, string, string) error
 	approveContract  func(context.Context, string, string) error
@@ -294,8 +301,15 @@ func (a *API) Scoped(root, sessionRef string, modelCaller bool) (*API, error) {
 		return nil, fmt.Errorf("GraphQL project capture: %w", err)
 	}
 	value := *a
-	value.scope = &projectScope{root: physical, sessionRef: sessionRef, model: modelCaller, lifecycle: a.lifecycle, approveContract: a.approveContract}
+	value.scope = &projectScope{root: physical, sessionRef: sessionRef, model: modelCaller, lifecycle: a.lifecycle, approveContract: a.approveContract, evidenceTask: a.evidenceTask, evidenceAttempt: a.evidenceAttempt}
 	return &value, nil
+}
+
+// WithReviewerEvidence binds the role's task history to one captured attempt.
+func (a *API) WithReviewerEvidence(task string, attempt int) *API {
+	value := *a
+	value.evidenceTask, value.evidenceAttempt = task, attempt
+	return &value
 }
 
 // WithAllowedFields narrows child-role root operations without changing main APIs.

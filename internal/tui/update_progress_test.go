@@ -11,7 +11,7 @@ import (
 )
 
 func TestUpdateProgressIsOneRowAndIgnoresOldAttempt(t *testing.T) {
-	m := New(config.Defaults(), "0.2.3")
+	m := New(config.Defaults(), "0.2.4")
 	m.Width, m.Height = 100, 30
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()

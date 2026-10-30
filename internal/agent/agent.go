@@ -74,6 +74,7 @@ type Runner struct {
 	ProjectContext         func(context.Context, *session.Continuation, string) error // live task ID, never restored identity; completed-response boundary only
 	PlanningCompletion     func(*session.WorkflowScope) (*outcome.Report, error)
 	pendingFocus           *session.WorkflowScope
+	readinessStop          *outcome.ReadinessNotApprovedError // current invocation only; never restored from prose
 	workflowHeader         string
 	Exec                   Exec
 	MaxSteps               int
@@ -139,6 +140,9 @@ type Runner struct {
 	TaskSystem    string
 	Reviewing     bool   // Set by the owning independent-review path, never inferred from prompt prose.
 	reviewRequest string // exact fresh host review prompt, never a restored human intent
+	// ReviewInputs is the owning launch's decomposition of that exact request.
+	// It changes advisory projection only, never the reviewer's actual context.
+	ReviewInputs *ReviewInputs
 	// FinalFeedback repairs a normal final in this same run; empty accepts it.
 	FinalFeedback func(string) string
 	// WorkspaceExcludes contains exact harness-owned state paths.
@@ -201,6 +205,7 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 		defer cancel()
 	}
 	r.pendingFocus = nil
+	r.readinessStop = nil
 	r.turnEffects = false
 	r.assignedClaim = false
 	r.claimPreparationEnd = 0
@@ -1099,9 +1104,14 @@ steps:
 				var note string
 				note, archiveErr = r.keepPartial(native, err, func(kind, text string) error { log(kind, text); return ledger.Err })
 				if archiveErr == nil {
+					retainedBefore := len(r.Continuation.Entries)
 					archiveErr = r.retainUnfinished(native, func(kind, text string) error { log(kind, text); return ledger.Err })
 					if archiveErr == nil {
-						note += "; received thought/text retained for resume; incomplete calls remain unexecuted drafts"
+						if len(r.Continuation.Entries) > retainedBefore {
+							note += "; received model fields retained for resume; incomplete calls remain unexecuted drafts"
+						} else {
+							note += "; no model content or call draft received"
+						}
 					}
 				}
 				partial = "partial reply (not complete; not executed):\n" + note
@@ -1278,6 +1288,12 @@ steps:
 		}
 		if err := ctx.Err(); err != nil {
 			return finish(outcome.Cancelled, err.Error(), obs, err)
+		}
+		if r.readinessStop != nil {
+			if ledger.Err != nil {
+				return finish(outcome.Failed, ledger.Err.Error(), obs, ledger.Err)
+			}
+			return finish(outcome.Stopped, r.readinessStop.Error(), r.readinessStop.Error(), ledger.Err)
 		}
 		if ledger.Err == nil && kind != "schema" {
 			if sig == "" && !productive && r.enforcement.current == nil {
@@ -1568,6 +1584,10 @@ func (r *Runner) invokeValidated(ctx context.Context, def tool.Definition, args 
 		r.workflows[ref] = report
 	}
 	if err != nil {
+		var readinessStop *outcome.ReadinessNotApprovedError
+		if errors.As(err, &readinessStop) {
+			r.readinessStop = readinessStop
+		}
 		obs := "tool error: " + err.Error()
 		if res.Text != "" {
 			obs += "\npartial tool result (failed; not complete):\n" + res.Text

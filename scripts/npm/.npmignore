@@ -1,0 +1,9 @@
+# Internal handovers, plans, qualification evidence and maintainer notes.
+**/HANDOVER*.md
+**/handover/**
+**/test-findings/**
+**/verification/**
+**/future/**
+/docs/**
+/scripts/NPM-PUBLISHING.md
+/scripts/TEST-WORKSPACES.md

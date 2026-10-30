@@ -53,7 +53,7 @@ func TestThinkingLoopReadableJudgeTransport(t *testing.T) {
 		t.Fatalf("decision choices changed: %v", body.Options)
 	}
 	evidence := readThinkingEvidence(t, body.Context)
-	if recorded.Context != body.Context || recorded.MaxBytes != 0 || evidence.Unit != unit || evidence.Sample != thought || evidence.UnitEncoding != "utf8" || evidence.SampleEncoding != "utf8" || evidence.ObservedBytes != len(thought) || evidence.OmittedBytes != 0 || evidence.Repeat != 16 {
+	if recorded.Context != body.Context || evidence.Unit != unit || evidence.Sample != thought || evidence.UnitEncoding != "utf8" || evidence.SampleEncoding != "utf8" || evidence.ObservedBytes != len(thought) || evidence.OmittedBytes != 0 || evidence.Repeat != 16 {
 		t.Fatalf("durable/native evidence mismatch: %+v", evidence)
 	}
 }

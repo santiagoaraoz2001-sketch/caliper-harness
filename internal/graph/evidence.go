@@ -130,6 +130,19 @@ func (r *queryResolver) TaskEvidence(ctx context.Context, taskID string, offset,
 	if err != nil {
 		return nil, err
 	}
+	s, err := scope(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if s.evidenceTask != "" {
+		if taskID != s.evidenceTask || attempt == nil || *attempt != s.evidenceAttempt || plan.CheckProject(r.store, "task", taskID, p.ProjectRoot) != nil {
+			return nil, fmt.Errorf("review evidence requires the captured task and attempt")
+		}
+		t, e := plan.GetTask(r.store, taskID)
+		if e != nil || t.Attempts != s.evidenceAttempt {
+			return nil, fmt.Errorf("review evidence attempt changed")
+		}
+	}
 	if attempt != nil && *attempt < 0 || kind != nil && strings.TrimSpace(*kind) == "" {
 		return nil, fmt.Errorf("task evidence needs a nonnegative stored attempt and nonempty kind when supplied")
 	}
@@ -172,6 +185,7 @@ func (r *queryResolver) TaskEvidence(ctx context.Context, taskID string, offset,
 				ExecutionSession string
 				ReviewerSession  string
 				CheckSession     string
+				Transcript       []llm.Message
 			}
 			if err := json.Unmarshal(raw, &sources); err != nil {
 				return fmt.Errorf("task %s has corrupt saved event sources: %w", taskID, err)
@@ -189,6 +203,12 @@ func (r *queryResolver) TaskEvidence(ctx context.Context, taskID string, offset,
 				return nil
 			}
 			events := map[string]*[]session.Event{"execution": sources.ExecutionEvents, "reviewer": sources.ReviewerEvents, "check": sources.CheckEvents}[*phase]
+			if events == nil && *phase == "execution" && record.Kind == "execution" && sources.Transcript != nil {
+				reference := fmt.Sprintf("task:%s:%d:%s", taskID, index, *phase)
+				return collectEvidencePage(ctx, p, offset, limit, callID, reference, func(visit func(session.EvidenceGroup) error) (int, *session.EvidenceGroup, error) {
+					return visitTranscript(ctx, sources.Transcript, visit)
+				})
+			}
 			if events == nil {
 				return fmt.Errorf("task record %d has no saved %s events; inspect its labeled raw history instead", index, *phase)
 			}
@@ -230,6 +250,12 @@ func (r *queryResolver) TaskEvidence(ctx context.Context, taskID string, offset,
 	if err != nil {
 		return nil, err
 	}
+	if s.evidenceTask != "" {
+		t, e := plan.GetTask(r.store, taskID)
+		if e != nil || t.Attempts != s.evidenceAttempt {
+			return nil, fmt.Errorf("review evidence attempt changed during read")
+		}
+	}
 	if phase != nil {
 		if !foundRecord {
 			return nil, fmt.Errorf("task attempt-record index is unavailable; discover its absolute offset first")
@@ -240,6 +266,48 @@ func (r *queryResolver) TaskEvidence(ctx context.Context, taskID string, offset,
 		return nil, fmt.Errorf("task evidence offset is outside the recorded attempt log")
 	}
 	return p, nil
+}
+
+// Transcript messages have no event time or workspace attribution. Only a
+// complete matching native call array is exposed as recorded tool evidence.
+func visitTranscript(ctx context.Context, messages []llm.Message, visit func(session.EvidenceGroup) error) (int, *session.EvidenceGroup, error) {
+	found := false
+	for i := 0; i < len(messages); i++ {
+		if err := ctx.Err(); err != nil {
+			return 0, nil, err
+		}
+		m := messages[i]
+		if m.Role != "assistant" || len(m.ToolCalls) == 0 {
+			continue
+		}
+		found = true
+		seen := map[string]bool{}
+		for _, call := range m.ToolCalls {
+			if call.ID == "" || call.Name == "" || seen[call.ID] {
+				return 0, nil, fmt.Errorf("saved transcript has ambiguous native calls at offset %d", i)
+			}
+			seen[call.ID] = true
+		}
+		g := session.EvidenceGroup{Offset: i, Calls: m.ToolCalls}
+		entry := session.Entry{Message: m}
+		g.Records = append(g.Records, session.EvidenceRecord{Offset: i, Event: session.Event{Kind: "native_reply"}, Entry: &entry})
+		for j, call := range m.ToolCalls {
+			at := i + j + 1
+			if at >= len(messages) || messages[at].Role != "tool" || messages[at].ToolCallID != call.ID || messages[at].Name != call.Name {
+				return len(messages), &g, nil
+			}
+			e := session.Entry{Message: messages[at]}
+			g.Records = append(g.Records, session.EvidenceRecord{Offset: at, Event: session.Event{Kind: "native_result"}, Entry: &e})
+		}
+		if err := visit(g); err != nil {
+			return 0, nil, err
+		}
+		i += len(m.ToolCalls)
+	}
+	if !found {
+		return 0, nil, fmt.Errorf("saved transcript has no native call groups; text-mode receipts are unavailable through this view")
+	}
+	return len(messages), nil, nil
 }
 
 func projectEvidenceGroup(ctx context.Context, out *model.EvidenceGroup, g session.EvidenceGroup, set ast.SelectionSet, taskSource ...string) error {

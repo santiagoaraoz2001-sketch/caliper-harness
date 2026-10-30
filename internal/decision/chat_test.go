@@ -81,12 +81,7 @@ func TestChatJudgeBudgetCancelAndCatalog(t *testing.T) {
 	if err != nil || h.Status != "model_available" || h.IsReady() || h.Active != nil || h.Loaded != nil {
 		t.Fatalf("%+v %v", h, err)
 	}
-	r := Request{Context: "x", Options: []string{"yes", "no"}, MaxBytes: 1}
-	var capacity *ContextCapacityError
-	if _, err := c.Judge(context.Background(), r); !errors.As(err, &capacity) || !capacity.EncodedRequest || calls != 1 {
-		t.Fatal("byte budget not enforced", calls, err)
-	}
-	r.MaxBytes = 0
+	r := Request{Context: "x", Options: []string{"yes", "no"}}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := c.Judge(ctx, r); !errors.Is(err, context.Canceled) {
@@ -110,14 +105,9 @@ func TestChatJudgeCompleteBodyLimit(t *testing.T) {
 			if _, err := c.Judge(t.Context(), req); err != nil {
 				t.Fatal(err)
 			}
-			req.MaxBytes = actual - 1
-			var capacity *ContextCapacityError
-			if _, err := c.Judge(t.Context(), req); !errors.As(err, &capacity) || !capacity.EncodedRequest || calls != 1 {
-				t.Fatalf("over-limit body reached HTTP or lost typed capacity: %v calls=%d", err, calls)
-			}
-			req.MaxBytes = actual
-			if _, err := c.Judge(t.Context(), req); err != nil || calls != 2 || actual != req.MaxBytes {
-				t.Fatalf("exact body did not fit: %v calls=%d bytes=%d", err, calls, actual)
+			req.Context = strings.Repeat("large legitimate brief ", 20000)
+			if _, err := c.Judge(t.Context(), req); err != nil || calls != 2 || actual <= 400000 {
+				t.Fatalf("large body did not reach HTTP: %v calls=%d bytes=%d", err, calls, actual)
 			}
 		})
 	}

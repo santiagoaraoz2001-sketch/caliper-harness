@@ -185,6 +185,9 @@ func (g *Gate) risky(next agent.Exec) agent.Exec {
 			return tool.Result{}, ctx.Err()
 		}
 		if err != nil {
+			if decision.EncodedCapacity(err) {
+				return tool.Result{Text: fmt.Sprintf("blocked: %v — %s", err, g.Prompts.Text("guidance.judge.capacity")), Blocked: true}, nil
+			}
 			return tool.Result{Text: fmt.Sprintf("blocked: the decision sidecar refused or is unreachable (%v) — check the configured decision.server and decision.runtime; restore that selected sidecar before retrying", err), Blocked: true}, nil
 		}
 		if v.Confidence < g.Threshold {

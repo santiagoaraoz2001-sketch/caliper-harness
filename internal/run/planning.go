@@ -222,8 +222,8 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 		return def, fmt.Errorf("unsupported planning phase %q", st.Phase)
 	}
 	// A receipt includes current owner facts, not another mutable progress ledger.
-	if st.Phase == "goal" || st.Phase == "approach" || st.Phase == "observe" {
-		def.Params = append(def.Params, tool.Param{Name: "guidance", Type: tool.TypeString, Desc: "Returned knowledge:key#section locators, one per line. Pin exact versions; omitted inherits, empty clears."})
+	if st.Phase == "goal" || st.Phase == "approach" || st.Phase == "observe" || st.Phase == "proof" {
+		def.Params = append(def.Params, tool.Param{Name: "guidance", Type: tool.TypeString, Desc: guidanceLocatorHelp + " One per line. Pins exact versions for execution/review. Omitted inherits; supplied replaces the selection (include still-needed sections); empty clears."})
 	}
 	if st.Plan != nil {
 		facts := map[string]any{"plan": st.Plan.ID, "plan_state": st.Plan.State}
@@ -503,18 +503,18 @@ func planningDefinition(d launch.Deps, reg *tool.Registry, scope *session.Workfl
 			vars["id"] = st.Plan.ID
 		default:
 			t := *st.Task
+			if guidance != nil {
+				var sketch planningSketch
+				if t.Sketch != "" && json.Unmarshal([]byte(t.Sketch), &sketch) != nil {
+					return def, nil, fmt.Errorf("existing sketch is not guided; revise its owner explicitly")
+				}
+				sketch.Guidance = guidance
+				raw, _ := json.Marshal(sketch)
+				t.Sketch = string(raw)
+			}
 			switch st.Phase {
 			case "observe":
 				t.Current, t.Target = get("current"), get("target")
-				if guidance != nil {
-					var sketch planningSketch
-					if t.Sketch != "" && json.Unmarshal([]byte(t.Sketch), &sketch) != nil {
-						return def, nil, fmt.Errorf("existing sketch is not guided; revise its owner explicitly")
-					}
-					sketch.Guidance = guidance
-					raw, _ := json.Marshal(sketch)
-					t.Sketch = string(raw)
-				}
 			case "proof":
 				t.Acceptance, t.Tests, t.AcceptanceCommand = get("acceptance"), get("tests"), get("acceptance_command")
 				t.CheckCommand = command

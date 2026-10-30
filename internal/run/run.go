@@ -209,6 +209,7 @@ func New(d Deps, prompt string) (*agent.Runner, []string, error) {
 		}
 	}
 	ld.ReviewGate = gate.Wrap
+	ld.ReadinessRequirements = r.ReadinessRequirements
 	assigned := &launch.Assigned{Deps: ld, Root: w.Path, Command: d.Cfg.Coding.CheckCommand}
 	r.TaskComments = assigned.Comments
 	r.CommentAppend = func(ctx context.Context, text string) error { return assigned.AppendComment(ctx, text, r.SessionID) }
@@ -285,9 +286,14 @@ func New(d Deps, prompt string) (*agent.Runner, []string, error) {
 		}
 		withPlan := func(source *tool.Registry) *tool.Registry {
 			view := tool.NewRegistry(pc)
+			a := r.Continuation.Assignment
+			claimed := a != nil && r.ClaimedTaskScope(&session.WorkflowScope{Store: a.Store, Kind: "task", ID: a.TaskID})
 			for _, name := range source.Names() {
 				if name != "plan" {
 					def, _ := source.Lookup(name)
+					if name == "workflow_focus" && !claimed {
+						def = planningFocusReturn(ld, scope, def)
+					}
 					view.Register(def)
 				}
 			}
@@ -689,8 +695,17 @@ func launchDeps(cfg config.Config, s *store.Store, server, model string, maxStep
 			fields := []string{"knowledge"}
 			if !readOnly {
 				fields = append(fields, "appendKnowledge")
+			} else {
+				fields = append(fields, "taskEvidence")
 			}
 			a := graph.New(s, "v1", cfg.Sessions.Path).WithDomainTokenCounter(counter).WithAllowedFields(fields...)
+			if readOnly {
+				task, err := plan.GetTask(s, sessionRef)
+				if err != nil || task.Attempts <= 0 {
+					return tool.Definition{}, fmt.Errorf("review evidence requires current task attempt")
+				}
+				a = a.WithReviewerEvidence(task.ID, task.Attempts)
+			}
 			return graphTool.New(a, cfg.Tools.GraphQL, w.Path, sessionRef, s.Identity(), cfg.PromptCatalog)
 		},
 		WorkspaceExcludes: workspaceExcludes(cfg, s),

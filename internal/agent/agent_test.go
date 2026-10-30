@@ -196,18 +196,18 @@ func TestRunPersistenceFailureIsLoud(t *testing.T) {
 }
 
 func TestTokenBudgetStopsOnServerCount(t *testing.T) {
-	for _, lastPrompt := range []int{2250, 1500} {
+	for _, lastPrompt := range []int{2400, 1900} {
 		reg := tool.NewRegistry()
 		var calls []string
 		reg.Register(echoTool(&calls))
 		model := &scriptModel{replies: []string{echoBlock("a"), "done"},
 			usage: llm.Usage{In: lastPrompt, Out: 5, Reported: true}}
-		r := &Runner{Model: model, Registry: reg, MaxSteps: 5, MaxTokens: 1500}
+		r := &Runner{Model: model, Registry: reg, MaxSteps: 5, MaxTokens: 1900}
 		final, _, err := r.Run(context.Background(), "go")
 		if err != nil {
 			t.Fatalf("in=%d: budget stop must not error: %v", lastPrompt, err)
 		}
-		if !strings.Contains(final, "content estimate") || !strings.Contains(final, "reached budget 1500") {
+		if !strings.Contains(final, "content estimate") || !strings.Contains(final, "reached budget 1900") {
 			t.Fatalf("in=%d: wrong stop message: %q", lastPrompt, final)
 		}
 		if len(model.seen) != 1 {

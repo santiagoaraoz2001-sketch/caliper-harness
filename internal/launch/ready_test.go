@@ -332,13 +332,13 @@ func TestReadyUncertaintyShowsExactJudgedContext(t *testing.T) {
 	if after.State != plan.TaskQueued || after.Attempts != 0 {
 		t.Fatalf("decline changed queued task: %+v", after)
 	}
-	d.CoherenceMaxChars = 1
+	d.CoherenceMaxChars = 1 // legacy accepted value; no byte ceiling enforces it
 	judges, asks = 0, 0
-	if _, err := Ready(context.Background(), d, aid); err == nil || !strings.Contains(err.Error(), "coherence_max_chars") {
-		t.Fatalf("cap refusal=%v", err)
+	if _, err := Ready(context.Background(), d, aid); err == nil || strings.Contains(err.Error(), "coherence_max_chars") {
+		t.Fatalf("legacy cap refusal=%v", err)
 	}
-	if judges != 0 || asks != 0 {
-		t.Fatalf("overcap judge/ask=%d/%d", judges, asks)
+	if judges != 1 || asks != 1 {
+		t.Fatalf("no-ceiling judge/ask=%d/%d", judges, asks)
 	}
 }
 

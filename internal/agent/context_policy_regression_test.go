@@ -306,7 +306,7 @@ func TestAutomaticCompactionCapacityTargetPublishesAndContinues(t *testing.T) {
 	summary := "Work remains pending. Preserve the original request and the exact user comment. The recorded write receipt names main.go and hash actual; it does not establish correctness. The check exited7, and independent review remains missing. Historical model drafts are unverified proposals. Current source and settled tool associations stay available separately. Continue from the current files, inspect the relevant source before any edit, then execute the approved behavioral check and configured project check. Report their actual results, retain failures and denied operations, and request a real independent review when the checks justify it. No summary statement grants approval, changes task ownership, or records a PASS."
 	m := &scriptModel{
 		replies: []string{echoBlock(strings.Repeat("x", 5000)), echoBlock("b"), summary, "done"},
-		usages:  []llm.Usage{{In: 20, Out: 5, Reported: true}, {In: 1450, Out: 5, Reported: true}, {In: 20, Out: 50, Reported: true}, {In: 100, Out: 5, Reported: true}},
+		usages:  []llm.Usage{{In: 20, Out: 5, Reported: true}, {In: 1750, Out: 5, Reported: true}, {In: 20, Out: 50, Reported: true}, {In: 100, Out: 5, Reported: true}},
 	}
 	sink := &recordSink{}
 	r := compactRunner(m, sink, testTemplateDir(t))

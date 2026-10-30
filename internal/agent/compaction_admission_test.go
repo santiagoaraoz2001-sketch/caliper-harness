@@ -254,7 +254,7 @@ func TestCompactionOwnerConfidence(t *testing.T) {
 func TestUncertainCompactionContinuesExecution(t *testing.T) {
 	model := &scriptModel{
 		replies: []string{echoBlock(strings.Repeat("x", 5000)), echoBlock("b"), "UNCERTAIN SUMMARY", "done"},
-		usages:  []llm.Usage{{In: 20, Reported: true}, {In: 1450, Reported: true}, {In: 20, Reported: true}, {In: 100, Reported: true}},
+		usages:  []llm.Usage{{In: 20, Reported: true}, {In: 1750, Reported: true}, {In: 20, Reported: true}, {In: 100, Reported: true}},
 	}
 	sink := &recordSink{}
 	r := compactRunner(model, sink, testTemplateDir(t))
