@@ -361,6 +361,15 @@ func (r *Runner) codingOutcome() (outcome.Status, string) {
 		return outcome.Completed, "declared check passed; coverage/test count unknown"
 	}
 	if c != nil && c.Receipt != nil && c.Receipt.Acceptance != nil && c.Receipt.Acceptance.Status == "failed" {
+		// Same episode, same workspace revision: if the configured
+		// suite passed while the frozen acceptance failed, the two
+		// commands disagree about the same code. Name the acceptance
+		// command itself as suspect (it may be unable to start or
+		// discover tests) instead of reporting a plain product
+		// failure; remediation then revises the command first.
+		if c.Receipt.Status == "passed" {
+			return outcome.Failed, "behavioral acceptance failed while the configured suite passed — the commands disagree, so the frozen acceptance command itself may be invalid; revise it before treating this as a product failure: " + c.Receipt.Acceptance.Reason
+		}
 		return outcome.Failed, "behavioral acceptance failed: " + c.Receipt.Acceptance.Reason
 	}
 	if c != nil && c.Receipt != nil && c.Receipt.Status == "failed" {
@@ -455,4 +464,10 @@ func (r *Runner) completionEvidence() string {
 // WorkspaceFingerprint observes the same project scope for workers and reviewers.
 func (r *Runner) WorkspaceFingerprint(ctx context.Context) (string, error) {
 	return projectFingerprint(ctx, r.Workspace, r.WorkspaceExcludes)
+}
+
+// CaptureWorkspaceSnapshot records current project contents so effects
+// of a frozen check episode can be undone exactly (see ProjectSnapshot).
+func (r *Runner) CaptureWorkspaceSnapshot(ctx context.Context) (*ProjectSnapshot, error) {
+	return captureProjectSnapshot(ctx, r.Workspace, r.WorkspaceExcludes)
 }

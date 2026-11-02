@@ -206,11 +206,12 @@ func TestWorkflowToolsKeepSameProjectLifecycle(t *testing.T) {
 	if r.Workflow == nil || strings.Contains(r.Text, "outside captured project") {
 		t.Fatalf("same-project resume refused by scope: %+v %v", r, err)
 	}
-	// Scope permits the call, but cannot bypass the normal lifecycle.
+	// Scope permits the call; draft retirement is the normal lifecycle
+	// cleanup for never-executed graphs.
 	for _, id := range []string{newApproach.Created.ID, newPlan.Created.ID} {
 		_, err := workflowTool(t, d, "workflow_retire").Execute(t.Context(), tool.Args{"target": id})
-		if err == nil || strings.Contains(err.Error(), "outside captured project") {
-			t.Fatalf("draft retirement must reach the existing lifecycle refusal: %v", err)
+		if err != nil {
+			t.Fatalf("same-project draft retirement refused: %v", err)
 		}
 	}
 }

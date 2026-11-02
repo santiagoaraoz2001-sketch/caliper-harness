@@ -171,6 +171,11 @@ func NewBuild(d Deps, configuredCommand ...string) []tool.Definition {
 					if behavior != nil {
 						t.AcceptanceCommand = *behavior
 					}
+					// Mirror setTaskBlock's single-source default for
+					// this completeness preview.
+					if strings.TrimSpace(t.AcceptanceCommand) == "" && strings.TrimSpace(t.CheckCommand) != "" {
+						t.AcceptanceCommand = t.CheckCommand
+					}
 					if err := requiredCommands(d, []*plan.Task{t}); err != nil {
 						return tool.Result{}, err
 					}

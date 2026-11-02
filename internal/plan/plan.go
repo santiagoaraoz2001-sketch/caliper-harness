@@ -68,6 +68,9 @@ type Approach struct {
 	Title      string
 	State      string
 	CreatedAt  time.Time
+	// AdmittedBrief is the sha256 of the exact judged coherence context
+	// whose readiness admission succeeded; empty until first admission.
+	AdmittedBrief string
 }
 
 // Task is one subagent prompt node. The six block fields hold its lab
@@ -101,13 +104,16 @@ type Task struct {
 
 var (
 	planNext = map[string][]string{
-		PlanDraft:    {PlanActive},
+		// Draft may retire directly: a never-executed graph (for
+		// example one created by mistake) must be cleanable without
+		// activating it first.
+		PlanDraft:    {PlanActive, PlanRetired},
 		PlanActive:   {PlanComplete},
 		PlanComplete: {PlanRetired},
 		PlanRetired:  {},
 	}
 	approachNext = map[string][]string{
-		ApproachDraft:    {ApproachReady},
+		ApproachDraft:    {ApproachReady, ApproachRetired},
 		ApproachReady:    {ApproachRunning},
 		ApproachRunning:  {ApproachComplete, ApproachPaused},
 		ApproachPaused:   {ApproachRunning, ApproachReady},
@@ -227,6 +233,12 @@ func setTaskBlock(s stateStore, id, current, target, sketch, acceptance, tests, 
 	if acceptanceCommand != nil {
 		behaviorCommand = *acceptanceCommand
 	}
+	// One command, one source: a blank acceptance command binds the
+	// task check command instead of forcing the author to restate the
+	// same command as a second copy that can silently diverge.
+	if strings.TrimSpace(behaviorCommand) == "" && strings.TrimSpace(command) != "" {
+		behaviorCommand = command
+	}
 	if t.State != TaskQueued && t.State != TaskFailed && t.State != TaskStopped && t.State != TaskCancelled {
 		return nil, fmt.Errorf("task %q is %s — edit briefs only while queued, failed, stopped or cancelled", id, t.State)
 	}
@@ -294,7 +306,7 @@ func GetPlan(s stateStore, id string) (*Plan, error) {
 
 // GetApproach loads one approach node.
 func GetApproach(s stateStore, id string) (*Approach, error) {
-	rows, err := s.Query(`MATCH (a:Approach) WHERE a.id = $id RETURN a.id AS id, a.title AS title, a.state AS state, a.created_at AS created_at, a.needs_ready AS needs_ready`,
+	rows, err := s.Query(`MATCH (a:Approach) WHERE a.id = $id RETURN a.id AS id, a.title AS title, a.state AS state, a.created_at AS created_at, a.needs_ready AS needs_ready, a.admitted_brief AS admitted_brief`,
 		map[string]any{"id": id})
 	if err != nil {
 		return nil, err
@@ -303,6 +315,15 @@ func GetApproach(s stateStore, id string) (*Approach, error) {
 		return nil, fmt.Errorf("no approach %q: %w", id, ErrNotFound)
 	}
 	return approachOf(rows[0])
+}
+
+// MarkBriefAdmitted records the judged-brief hash whose readiness admission
+// succeeded, so later claims of the identical brief reuse that admission
+// instead of re-judging or re-asking. Brief edits change the hash and
+// therefore re-judge; lifecycle state is deliberately not part of the hash.
+func MarkBriefAdmitted(s stateStore, id, briefHash string) error {
+	return s.Write(`MATCH (a:Approach) WHERE a.id = $id SET a.admitted_brief = $hash`,
+		map[string]any{"id": id, "hash": briefHash})
 }
 
 // ApproachPlan returns the plan owning an approach.
@@ -377,7 +398,7 @@ func RetiredPlans(s stateStore) ([]*Plan, error) {
 
 // PlanApproaches returns an approach list for tree views.
 func PlanApproaches(s stateStore, planID string) ([]*Approach, error) {
-	rows, err := s.Query(`MATCH (p:Plan)-[:HAS_APPROACH]->(a:Approach) WHERE p.id = $id RETURN a.id AS id, a.title AS title, a.state AS state, a.created_at AS created_at, a.needs_ready AS needs_ready ORDER BY created_at`,
+	rows, err := s.Query(`MATCH (p:Plan)-[:HAS_APPROACH]->(a:Approach) WHERE p.id = $id RETURN a.id AS id, a.title AS title, a.state AS state, a.created_at AS created_at, a.needs_ready AS needs_ready, a.admitted_brief AS admitted_brief ORDER BY created_at`,
 		map[string]any{"id": planID})
 	if err != nil {
 		return nil, err
@@ -651,7 +672,7 @@ func approachOf(r map[string]any) (*Approach, error) {
 	title, _ := r["title"].(string)
 	state, _ := r["state"].(string)
 	needsReady, _ := r["needs_ready"].(bool)
-	return &Approach{ID: id, Title: title, State: state, CreatedAt: ts, NeedsReady: needsReady}, nil
+	return &Approach{ID: id, Title: title, State: state, CreatedAt: ts, NeedsReady: needsReady, AdmittedBrief: stringField(r, "admitted_brief")}, nil
 }
 
 func taskOf(r map[string]any) (*Task, error) {

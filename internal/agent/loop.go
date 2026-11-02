@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -601,6 +602,21 @@ func (r *Runner) progressJudgment(ctx context.Context, input any, req decision.R
 		if err != nil {
 			return req, decision.Verdict{}, err
 		}
+		// A previous real refusal in this process proves packets of
+		// this size cannot be admitted. Reduce before the first
+		// attempt instead of repeating build-refuse-rebuild on every
+		// settle; omissions stay disclosed inside the packet itself.
+		if admission == 0 && r.progressRefusedBytes > 0 && len(raw) >= r.progressRefusedBytes {
+			for len(raw) >= r.progressRefusedBytes && reduce() {
+				if e := ctx.Err(); e != nil {
+					return req, decision.Verdict{}, e
+				}
+				raw, err = json.Marshal(input)
+				if err != nil {
+					return req, decision.Verdict{}, err
+				}
+			}
+		}
 		req.Context = string(raw)
 		// The stored copy is capped like stored verdict contexts: the full
 		// packet (up to the decision input token ceiling) would otherwise
@@ -621,6 +637,9 @@ func (r *Runner) progressJudgment(ctx context.Context, input any, req decision.R
 			return req, v, nil
 		}
 		var capacity *decision.ContextCapacityError
+		if errors.As(err, &capacity) && (r.progressRefusedBytes == 0 || len(raw) < r.progressRefusedBytes) {
+			r.progressRefusedBytes = len(raw)
+		}
 		if !errors.As(err, &capacity) || admission >= 12 {
 			return req, decision.Verdict{}, &progressJudgeError{fmt.Errorf("progress advice unavailable: %w", err)}
 		}
@@ -755,8 +774,56 @@ func (p *progressPacket) reduceForCapacity() bool {
 		if len(facts.Unfinished) > 0 && p.omitSmaller("Facts.Unfinished", string(facts.Unfinished), func() { copy := facts; copy.Unfinished = nil; p.Facts = copy }, func() { p.Facts = previous }) {
 			return true
 		}
+		// Stub knowledge bodies before dropping entries: keys with exact
+		// digests keep currentness visible, so a capacity-reduced packet
+		// cannot look like missing product knowledge.
+		if len(facts.Knowledge) > 0 {
+			stubbed := make([]map[string]string, len(facts.Knowledge))
+			changed := false
+			for i, e := range facts.Knowledge {
+				cp := make(map[string]string, len(e)+2)
+				for k, v := range e {
+					cp[k] = v
+				}
+				if body := cp["body"]; body != "" {
+					cp["bytes"] = strconv.Itoa(len(body))
+					cp["sha256"] = fmt.Sprintf("%x", sha256.Sum256([]byte(body)))
+					cp["body"] = ""
+					changed = true
+				}
+				stubbed[i] = cp
+			}
+			raw, err := json.Marshal(facts.Knowledge)
+			if changed && err == nil && p.omitSmaller("Facts.Knowledge bodies", string(raw), func() { copy := facts; copy.Knowledge = stubbed; p.Facts = copy }, func() { p.Facts = previous }) {
+				return true
+			}
+		}
 		raw, err := json.Marshal(facts.Knowledge)
 		if len(facts.Knowledge) > 0 && err == nil && p.omitSmaller("Facts.Knowledge", string(raw), func() { copy := facts; copy.Knowledge = nil; p.Facts = copy }, func() { p.Facts = previous }) {
+			return true
+		}
+	}
+	// Last resort, after every optional omission above: stub the latest
+	// settled output/argument bodies. The receipt keeps Tool, Failed,
+	// ExitCode, OutputBytes and OutputSHA256, and the omission digest
+	// is disclosed — only the verbatim body gives way, and only so an
+	// advisory judgment is not lost entirely to capacity. Answered
+	// ask receipts stay protected (user intent).
+	for _, item := range []struct {
+		name    string
+		receipt *loopObservation
+	}{{"LatestSettled", p.LatestSettled}, {"Latest", p.Latest}, {"LatestDiscovery", p.LatestDiscovery}} {
+		receipt := item.receipt
+		if receipt == nil || receipt.Tool == "ask" {
+			continue
+		}
+		text := receipt.OutputText
+		if text != "" && p.omitSmaller(item.name+".OutputText (call "+receipt.CallID+")", text, func() { receipt.OutputText = "" }, func() { receipt.OutputText = text }) {
+			return true
+		}
+		args := receipt.Args
+		raw, err := json.Marshal(args)
+		if len(args) > 0 && err == nil && p.omitSmaller(item.name+".Args (call "+receipt.CallID+")", string(raw), func() { receipt.Args = nil }, func() { receipt.Args = args }) {
 			return true
 		}
 	}

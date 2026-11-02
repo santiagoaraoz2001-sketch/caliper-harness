@@ -2,11 +2,13 @@ package plan
 
 import (
 	"context"
-	"strings"
 	"testing"
 )
 
-func TestReadinessRequiresAuthoredAcceptanceCommand(t *testing.T) {
+// Omitting the acceptance command binds the authored check command
+// as the behavioral acceptance (one command, one source) instead of
+// refusing readiness for a missing second copy.
+func TestReadinessBindsCheckCommandWhenAcceptanceOmitted(t *testing.T) {
 	s := open(t)
 	p, _ := CreatePlan(s, "goal", "repair the requested behavior")
 	a, _ := CreateApproach(s, p.ID, "repair")
@@ -15,10 +17,16 @@ func TestReadinessRequiresAuthoredAcceptanceCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	judged := false
-	_, err := Ready(context.Background(), s, a.ID, func(context.Context, *Plan, []*Task) error { judged = true; return nil })
+	_, err := Ready(context.Background(), s, a.ID, func(_ context.Context, _ *Plan, tasks []*Task) error {
+		judged = true
+		if len(tasks) != 1 || tasks[0].AcceptanceCommand != "true" {
+			t.Fatal("readiness brief omitted the bound acceptance command")
+		}
+		return nil
+	})
 	actual, _ := GetApproach(s, a.ID)
-	if err == nil || !strings.Contains(err.Error(), "acceptance_command") || judged || actual.State != ApproachDraft {
-		t.Fatalf("missing authored command admitted: state=%s judged=%t err=%v", actual.State, judged, err)
+	if err != nil || !judged || actual.State != ApproachReady {
+		t.Fatalf("bound acceptance not admitted: state=%s judged=%t err=%v", actual.State, judged, err)
 	}
 }
 

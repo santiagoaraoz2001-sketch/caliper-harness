@@ -15,6 +15,7 @@ import (
 	"specific-harness/internal/plan"
 	"specific-harness/internal/session"
 	"specific-harness/internal/tool"
+	"strings"
 	"time"
 )
 
@@ -450,15 +451,23 @@ func runReviewer(ctx context.Context, d Deps, prompt string, window int, r *Resu
 		if def.Name != "check" {
 			return effects(ctx, def, args)
 		}
-		before, beforeErr := sub.WorkspaceFingerprint(ctx)
+		// The frozen check itself may write artifacts (screenshots,
+		// coverage, snapshots). Those writes are the declared command's
+		// effects, not reviewer edits: snapshot first, restore after,
+		// and disclose exactly what the check wrote. Only an inability
+		// to observe or restore project contents is a role violation.
+		snap, snapErr := sub.CaptureWorkspaceSnapshot(ctx)
 		res, execErr := agent.Direct(ctx, def, args)
-		after, afterErr := sub.WorkspaceFingerprint(ctx)
-		if beforeErr != nil || afterErr != nil || before != after {
-			if beforeErr != nil || afterErr != nil {
-				roleViolation = fmt.Errorf("reviewer project-content observation unavailable: before=%v after=%v", beforeErr, afterErr)
-			} else {
-				roleViolation = fmt.Errorf("reviewer shell modified project contents; return findings instead of modifying the task")
-			}
+		if snapErr != nil {
+			roleViolation = fmt.Errorf("reviewer project-content observation unavailable: %v", snapErr)
+		} else if changed, restoreErr := snap.Restore(ctx); restoreErr != nil {
+			roleViolation = fmt.Errorf("reviewer check changed project contents and restore failed: %v", restoreErr)
+		} else if len(changed) > 0 {
+			note := fmt.Sprintf("[frozen check wrote %d workspace file(s); restored to pre-check contents: %s]", len(changed), strings.Join(changed, ", "))
+			res.Text += "\n" + note
+			_ = sub.Session.Append(context.WithoutCancel(ctx), t.ID, "review_check_artifacts_restored", note)
+		}
+		if roleViolation != nil {
 			sub.Continuation.Coding.Invalidate(roleViolation.Error())
 			res.Failed = true
 			execErr = errors.Join(execErr, roleViolation, sub.Session.Append(context.WithoutCancel(ctx), t.ID, "role_violation", roleViolation.Error()))

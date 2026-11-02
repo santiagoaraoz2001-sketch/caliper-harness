@@ -134,6 +134,11 @@ func Preparation(graph tool.Definition, s *store.Store, limits config.GraphQLCon
 	}
 	for _, field := range fields {
 		p := tool.Param{Name: field.name, Type: tool.TypeString, Required: true, Desc: field.desc}
+		if field.name == "acceptance_command" {
+			// Optional: omission binds the check command as the
+			// behavioral acceptance (one command, one source).
+			p.Required, p.AllowEmpty = false, true
+		}
 		if field.name == "check_command" && command != "" {
 			// Preserve explicit text empty so binding refuses it instead of substituting the default.
 			p.Required, p.Default, p.AllowEmpty = false, command, true
@@ -151,11 +156,11 @@ func Preparation(graph tool.Definition, s *store.Store, limits config.GraphQLCon
 			}
 			input[field.graph] = value
 		}
-		if strings.TrimSpace(input["acceptanceCommand"]) == "" {
-			return tool.Definition{}, nil, fmt.Errorf("acceptance_command must be a nonblank authored behavior command")
-		}
 		if strings.TrimSpace(input["checkCommand"]) == "" {
 			return tool.Definition{}, nil, fmt.Errorf("check_command must be nonblank; %s", pc.Text("guidance.graph.configured_omission"))
+		}
+		if strings.TrimSpace(input["acceptanceCommand"]) == "" {
+			input["acceptanceCommand"] = input["checkCommand"]
 		}
 		source := "proposedCheckCommand"
 		if command != "" && input["checkCommand"] != command {
@@ -179,9 +184,12 @@ func Preparation(graph tool.Definition, s *store.Store, limits config.GraphQLCon
 		if err != nil {
 			return tool.Definition{}, nil, err
 		}
-		deadline := time.Now().Add(time.Duration(limits.TimeoutSeconds) * time.Second)
 		read := func(parent context.Context) ([]any, error) {
-			c, cancel := context.WithDeadline(parent, deadline)
+			c := parent
+			var cancel context.CancelFunc = func() {}
+			if limits.TimeoutSeconds > 0 {
+				c, cancel = context.WithTimeout(parent, time.Duration(limits.TimeoutSeconds)*time.Second)
+			}
 			defer cancel()
 			// Six selected strings: allow six escaped bytes per character plus envelope overhead.
 			rows, err := s.QueryContext(c, `MATCH(p:Plan)-[:HAS_APPROACH]->(a:Approach)-[:HAS_TASK]->(t:Task) WHERE t.id=$id AND p.project_root=$root WITH p,a,t,(size(p.id)+size(p.state)+size(a.id)+size(a.state)+size(t.id)+size(t.state))*6+64 AS bytes RETURN CASE WHEN bytes <= $max THEN [p.id,p.state,a.id,a.state,t.id,t.state] ELSE [] END AS identity LIMIT 2`, map[string]any{"id": id, "root": scope["_project_root"], "max": limits.MaxResultBytes})

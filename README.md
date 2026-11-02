@@ -269,7 +269,7 @@ including the disclosed basis label and links. This is not a measured token coun
 or universal tokenizer guarantee. Native tokenizer failures, cancellation, unknown
 runtime and missing counters remain explicit errors; they never trigger fallback.
 Ordinary graph facts and PAT retain their own limits. Exact counting and performance
-across backends remain separate gates. See [domain guidance](https://github.com/santiagoaraoz2001-sketch/caliper-harness/blob/v0.2.4/docs/domain-guidance.md).
+across backends remain separate gates. See [domain guidance](https://github.com/santiagoaraoz2001-sketch/caliper-harness/blob/v0.2.5/docs/domain-guidance.md).
 
 ## Configuration
 
@@ -374,7 +374,7 @@ framework-neutral `caliper-test-report-v1` adapter validates declared stages
 against the current execution ID. `caliper-test-report-v2` also declares each
 stage's prerequisites and expected observations, retaining actual observations
 beside host-recorded prerequisite presence. See the
-[report contract](https://github.com/santiagoaraoz2001-sketch/caliper-harness/blob/v0.2.4/docs/testing-report-contract.md) for configuration and producer
+[report contract](https://github.com/santiagoaraoz2001-sketch/caliper-harness/blob/v0.2.5/docs/testing-report-contract.md) for configuration and producer
 examples. These formats distinguish executed, failed and
 skipped tests. Missing required tests or stages, malformed/truncated reports and
 zero executed tests do not establish declared coverage. Without a report format,

@@ -2,6 +2,7 @@ package launch
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -83,6 +84,27 @@ func checkCoherence(ctx context.Context, d Deps, approachID string, p *plan.Plan
 	if err != nil {
 		return err
 	}
+	// Admission is keyed to the exact judged brief, not lifecycle state:
+	// an identical brief that already passed this gate (judge-admitted,
+	// asked-admitted, or manually approved) is not judged or asked again.
+	briefHash := fmt.Sprintf("%x", sha256.Sum256([]byte(req.Context)))
+	// A pause (or an explicit needs-ready mark) is an independent lifecycle
+	// change that deliberately re-gates admission; never reuse across it.
+	if a.AdmittedBrief == briefHash && !a.NeedsReady && a.State != plan.ApproachPaused {
+		if d.Log != nil {
+			raw, _ := json.Marshal(struct{ Approach, BriefHash string }{approachID, briefHash})
+			d.Log("readiness-reused", string(raw))
+		}
+		return nil
+	}
+	markAdmitted := func() {
+		if err := plan.MarkBriefAdmitted(d.Store, approachID, briefHash); err != nil && d.Log != nil {
+			raw, _ := json.Marshal(struct {
+				Approach, BriefHash, Error string
+			}{approachID, briefHash, err.Error()})
+			d.Log("readiness-admission-record-failed", string(raw))
+		}
+	}
 	if d.ManualReadiness {
 		prompt := fmt.Sprintf("Decision model disabled — approve approach %q as ready for execution? Review the complete task briefs below; this is readiness approval, not evidence that code passed checks or independent review.\n", approachID)
 		prompt += humanReadinessContext(p, a, tasks, req)
@@ -119,6 +141,7 @@ func checkCoherence(ctx context.Context, d Deps, approachID string, p *plan.Plan
 			}
 			return fmt.Errorf("readiness not approved; approve the exact brief in an interactive session or enable the decision model")
 		}
+		markAdmitted()
 		return nil
 	}
 	if d.Judge == nil {
@@ -175,6 +198,7 @@ func checkCoherence(ctx context.Context, d Deps, approachID string, p *plan.Plan
 			return ctx.Err()
 		}
 		decision.LogJudgment(d.Log, decision.SourceCoherence, req, v, "asked-admitted", d.JudgmentContextChars)
+		markAdmitted()
 		return nil
 	}
 	if v.Option == req.Options[1] {
@@ -182,6 +206,7 @@ func checkCoherence(ctx context.Context, d Deps, approachID string, p *plan.Plan
 		return fmt.Errorf("launch refused: the decision model judged approach %q incoherent or insufficiently bounded for goal %q (confidence %.2f)", approachID, p.Goal, v.Confidence)
 	}
 	decision.LogJudgment(d.Log, decision.SourceCoherence, req, v, "admitted", d.JudgmentContextChars)
+	markAdmitted()
 	return nil
 }
 

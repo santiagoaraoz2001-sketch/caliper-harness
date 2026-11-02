@@ -388,11 +388,9 @@ func TestGraphRetire(t *testing.T) {
 	made = exec(`mutation { createPlan(title: "fresh", goal: "g") { id } }`)
 	fresh := field(made, "createPlan")["id"].(string)
 
-	// Retire of incomplete rejected.
-	if _, err := api.Exec(ctx, `mutation { retirePlan(id: "`+fresh+`") { id } }`, "", nil); err == nil {
-		t.Fatal("retire draft accepted, want rejection")
-	} else if !strings.Contains(err.Error(), "legal moves: active") {
-		t.Fatalf("wrong error: %s", err)
+	// Draft retire is the cleanup path for never-executed graphs.
+	if _, err := api.Exec(ctx, `mutation { retirePlan(id: "`+fresh+`") { id } }`, "", nil); err != nil {
+		t.Fatalf("retire draft rejected, want cleanup accepted: %s", err)
 	}
 
 	// Retire mutations flip to terminal retired.
@@ -422,12 +420,12 @@ func TestGraphRetire(t *testing.T) {
 		return out
 	}
 	got = exec(`{ plans { id } }`)
-	if ids := planIDs(got); len(ids) != 1 || ids[0] != fresh {
-		t.Fatalf("default plans=%v, want only fresh", ids)
+	if ids := planIDs(got); len(ids) != 0 {
+		t.Fatalf("default plans=%v, want none (old and fresh both retired)", ids)
 	}
 	got = exec(`{ plans(state: "retired") { id } }`)
-	if ids := planIDs(got); len(ids) != 1 || ids[0] != pid {
-		t.Fatalf("retired plans=%v, want only old", ids)
+	if ids := planIDs(got); len(ids) != 2 {
+		t.Fatalf("retired plans=%v, want old and fresh", ids)
 	}
 
 	// Retired stays queryable by id.

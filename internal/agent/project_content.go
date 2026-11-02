@@ -20,17 +20,20 @@ import (
 // files. Exclusions are exact harness-owned state paths, never arbitrary data
 // directories. This detects persistent changes, not temporary writes or effects
 // outside the project, and is not a filesystem sandbox.
-func projectFingerprint(ctx context.Context, root string, excludes []string) (string, error) {
+// projectInventory resolves the root and lists project file names under
+// the same scope rules as projectFingerprint (git tracked/nonignored, or
+// a full walk), returning the exclusion predicate for per-file checks.
+func projectInventory(ctx context.Context, root string, excludes []string) (string, []string, func(string) bool, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
-		return "", err
+		return "", nil, nil, err
 	}
 	root, err = pathutil.EvalSymlinks(root)
 	if err != nil {
-		return "", err
+		return "", nil, nil, err
 	}
 	if _, err := os.Stat(root); err != nil {
-		return "", err
+		return "", nil, nil, err
 	}
 	excluded := func(path string) bool {
 		for _, ex := range excludes {
@@ -52,7 +55,7 @@ func projectFingerprint(ctx context.Context, root string, excludes []string) (st
 	if raw, e := probe.Output(); e == nil && filepath.Clean(strings.TrimSpace(string(raw))) == root {
 		raw, e := exec.CommandContext(ctx, "git", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", ".").Output()
 		if e != nil {
-			return "", e
+			return "", nil, nil, e
 		}
 		for _, name := range strings.Split(string(raw), "\x00") {
 			if name != "" {
@@ -83,10 +86,18 @@ func projectFingerprint(ctx context.Context, root string, excludes []string) (st
 			return nil
 		})
 		if err != nil {
-			return "", err
+			return "", nil, nil, err
 		}
 	}
 	sort.Strings(names)
+	return root, names, excluded, nil
+}
+
+func projectFingerprint(ctx context.Context, root string, excludes []string) (string, error) {
+	root, names, excluded, err := projectInventory(ctx, root, excludes)
+	if err != nil {
+		return "", err
+	}
 	h := sha256.New()
 	previous := ""
 	for _, name := range names {

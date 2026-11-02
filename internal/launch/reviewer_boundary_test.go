@@ -97,11 +97,13 @@ func TestReviewerShellMutationCannotQualify(t *testing.T) {
 			}
 			results, err := Launch(t.Context(), d, aid)
 			content, readErr := os.ReadFile(filepath.Join(root, "source.js"))
+			// A frozen check that writes during review (mode "check") no
+			// longer aborts the review: contents are restored to the
+			// settled state and the write is disclosed, so the verdict is
+			// still about the exact contents reviewed. It still cannot
+			// smuggle a qualification: the scripted verdict is UNVERIFIED.
 			wantContent, wantReviews := "original", 2
-			if mode == "check" {
-				wantContent, wantReviews = "MUTATED", 1
-			}
-			if err != nil || readErr != nil || string(content) != wantContent || len(results) != 1 || results[0].Qualified() || reviews != wantReviews || mode == "check" && !strings.Contains(results[0].VerificationReason, "reviewer shell modified") {
+			if err != nil || readErr != nil || string(content) != wantContent || len(results) != 1 || results[0].Qualified() || reviews != wantReviews {
 				t.Fatalf("mutation escaped reviewer: reviews%d content%q results%+v err%v/%v", reviews, content, results, err, readErr)
 			}
 		})

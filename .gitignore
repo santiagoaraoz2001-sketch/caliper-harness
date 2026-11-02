@@ -52,6 +52,7 @@ scripts/npm/*.tgz
 !/docs/release-v0.2.2.md
 !/docs/release-v0.2.3.md
 !/docs/release-v0.2.4.md
+!/docs/release-v0.2.5.md
 !/docs/testing-report-contract.md
 /scripts/NPM-PUBLISHING.md
 /scripts/TEST-WORKSPACES.md

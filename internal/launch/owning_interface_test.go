@@ -57,7 +57,9 @@ func TestOwningInterfaceFullBriefAndOverflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A provider capacity refusal on the collective request falls back to
-	// per-task plus collective chunked judgments instead of failing.
+	// per-task plus collective chunked judgments instead of failing. A fresh
+	// approach is required: the identical admitted brief above is reused.
+	_, id, d = gateDeps(t, 2)
 	calls = 0
 	d.Judge = func(_ context.Context, r decision.Request) (decision.Verdict, error) {
 		calls++

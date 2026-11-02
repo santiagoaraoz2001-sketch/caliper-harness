@@ -56,7 +56,12 @@ type Runner struct {
 	phaseRegistry       *tool.Registry // unprojected owning definitions, not execution authority
 	phaseView           *tool.Registry
 	progressWatch       *watcher // current run only; one evidence window for advisory touchpoints
-	enforcement         enforcement
+	// Smallest encoded advisory packet the judge has actually refused
+	// for capacity in this process; later packets at or above it are
+	// reduced before their first admission attempt. Learned from real
+	// admission, never a configured limit.
+	progressRefusedBytes int
+	enforcement          enforcement
 	// StyleEnforcement, when true with a non-empty Styleguide, sends a
 	// validated task to the style judge once per run before handoff.
 	StyleEnforcement       bool

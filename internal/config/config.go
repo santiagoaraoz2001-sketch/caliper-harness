@@ -269,6 +269,12 @@ type GraphQLConfig struct {
 	// Shared result/source budget; source admission conservatively charges four
 	// bytes per character. Keep enough headroom for complete guided PAT briefs.
 	MaxResultBytes int `yaml:"max_result_bytes"`
+
+	// TimeoutSeconds is retained so existing configuration files keep
+	// loading. It no longer bounds operations: they run under the
+	// caller's context, because resolvers include permission gates
+	// (judging and human approval) that a fixed request deadline
+	// would silently override.
 	TimeoutSeconds int `yaml:"timeout_seconds"`
 }
 
@@ -278,14 +284,11 @@ func (g GraphQLConfig) Validate() error {
 		n    int
 	}{
 		{"max_request_bytes", g.MaxRequestBytes}, {"max_selections", g.MaxSelections},
-		{"max_rows", g.MaxRows}, {"max_result_bytes", g.MaxResultBytes}, {"timeout_seconds", g.TimeoutSeconds},
+		{"max_rows", g.MaxRows}, {"max_result_bytes", g.MaxResultBytes},
 	} {
 		if v.n <= 0 {
 			return fmt.Errorf("tools.graphql.%s must be positive", v.name)
 		}
-	}
-	if g.TimeoutSeconds > 9223372036 {
-		return fmt.Errorf("tools.graphql.timeout_seconds exceeds representable duration")
 	}
 	return nil
 }

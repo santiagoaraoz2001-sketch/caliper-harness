@@ -283,7 +283,9 @@ func TestReadGroundingDirectoryAliasesAndBoundaries(t *testing.T) {
 			t.Fatalf("boundary read admitted: %+v %v", r, e)
 		}
 	}
-	for _, path := range []string{"missing/a", "escape/new"} {
+	// Creating through a linked escape stays refused; creating a
+	// missing in-workspace parent is admitted (write_parent_dirs_test.go).
+	for _, path := range []string{"escape/new"} {
 		if r, e := invokeDefinitions(t, writer, "write", map[string]string{"path": path, "content": "BAD\n"}); e == nil || r.Changed {
 			t.Fatalf("boundary create admitted: %+v %v", r, e)
 		}

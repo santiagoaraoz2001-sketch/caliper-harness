@@ -536,8 +536,9 @@ texts:
     Use the actual delivered user requirements below, including later changes that supersede earlier choices.
     A brief that contradicts those requirements needs revision before claim.
     Do these tasks cover the Approach's entire declared scope and strategy? Do they serve the actual goal and requested grouping? Is each task individually bounded,
-    tasks, clear behavior to implement and verify, and their own acceptance assertions, not a
-    future task? For a defect, regression, repair and current verification belong inside its
+    with clear behavior to implement and verify, and its own acceptance assertions, not a
+    future task? If any brief assumes a deliverable (a module, behavior or artifact) that no
+    task in this Approach produces, the scope is uncovered. For a defect, regression, repair and current verification belong inside its
     behavior task; a regression-only task cannot promise post-fix acceptance. Judge actual
     prerequisites/worker order without imposing task or file counts. Pick the true statement.
 
@@ -1246,6 +1247,7 @@ texts:
     Ordinary commands stop their descendants on return. Commands start in the current
     task workspace, so relative paths already refer there. Quote paths containing spaces.
     Timeout/output caps are configured. Nonzero exit is a failure receipt, not a product success.
+    A compound command's receipt uses its final exit code; run one purpose per call.
     On Windows prefer pwsh for UTF-8 scripts; legacy Windows PowerShell 5.1 needs a UTF-8 BOM for non-ASCII .ps1 files.
     Shell inspection preserves a prior declared-check pass when project contents are observed unchanged. Changed or unobserved contents make it stale. Do not treat raw
     shell output as verified task qualification.
@@ -2208,7 +2210,8 @@ texts:
   # Fields: none. Supplied by the owning Go caller.
   tools.prepare_task.parameters.acceptance_command: >2-
     literal command exercising this task's behavioral assertions; planned assertions are
-    owned by this task; distinguish planned assertions from executed checks and run before the project check
+    owned by this task; distinguish planned assertions from executed checks and run before the project check;
+    omit to bind check_command
 
   # Argument explanation for prepare_task.approach_title; GraphQL name/type/required rules remain
   # host-owned.
@@ -2297,7 +2300,8 @@ texts:
   # Original use sites: internal/tools/graph/graph.go:88 (Preparation).
   # Fields: none. Supplied by the owning Go caller.
   tools.prepare_task.purpose: >2-
-    Author a fresh Draft PAT from inspected source. Omit check_command to bind the configured
+    Author a fresh Draft PAT (new plan/approach/task; never adds to an existing approach)
+    from inspected source. Omit check_command to bind the configured
     literal; otherwise propose it from inspected files. Existing nodes use graphql. This saves
     metadata, not code: retain all four effect receipts/IDs. For planning only, summarize and stop;
     authorized readiness and execution use ready_task and task_start separately. Repair partial creation using actual IDs.
@@ -2434,7 +2438,7 @@ texts:
   # Original use sites: internal/launch/build.go:122 (NewBuild).
   # Fields: none. Supplied by the owning Go caller.
   tools.workflow_block.parameters.acceptance_command: >-
-    behavioral assertion command run by check before the project suite; omit preserves existing
+    behavioral assertion command run by check before the project suite; omit preserves existing, or binds check_command
 
   # Argument explanation for workflow_block.check_command; executable schema remains Go-owned.
   # Original use sites: internal/launch/build.go:123 (NewBuild).

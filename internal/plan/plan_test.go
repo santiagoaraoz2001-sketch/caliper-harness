@@ -60,7 +60,7 @@ func TestPlanLifecycleChain(t *testing.T) {
 		}
 		return m
 	}
-	if got := moves("plan"); len(got) != 1 || got[0] != PlanActive {
+	if got := moves("plan"); len(got) != 2 || got[0] != PlanActive || got[1] != PlanRetired {
 		t.Fatalf("plan next=%v", got)
 	}
 
@@ -376,14 +376,16 @@ func TestPlanRetireIncomplete(t *testing.T) {
 			t.Fatalf("%s: got %q, want substring %q", name, err.Error(), want)
 		}
 	}
-	reject("plan draft→retired", func() error {
-		_, err := TransitionPlan(s, p.ID, PlanRetired)
-		return err
-	}, "legal moves: active")
-	reject("approach draft→retired", func() error {
-		_, err := TransitionApproach(s, a.ID, ApproachRetired)
-		return err
-	}, "legal moves: ready")
+	// Draft graphs may retire directly (cleanup of never-executed
+	// work); retire stays rejected once execution has begun.
+	orphanPlan, _ := CreatePlan(s, "orphan", "g")
+	orphanApproach, _ := CreateApproach(s, orphanPlan.ID, "orphan")
+	if _, err := TransitionApproach(s, orphanApproach.ID, ApproachRetired); err != nil {
+		t.Fatalf("approach draft→retired: %s", err)
+	}
+	if _, err := TransitionPlan(s, orphanPlan.ID, PlanRetired); err != nil {
+		t.Fatalf("plan draft→retired: %s", err)
+	}
 	if _, err := TransitionPlan(s, p.ID, PlanActive); err != nil {
 		t.Fatalf("plan→active: %s", err)
 	}

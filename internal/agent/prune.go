@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"math"
+	"strings"
+
 	"specific-harness/internal/session"
 )
 
@@ -52,8 +54,19 @@ type Prune struct {
 	SchemasKeep int
 }
 
+// Latest failure/evidence bodies stay verbatim at any age; older ones are
+// stubbed like outputs so protected kinds cannot grow without bound and
+// defeat compaction. Counts mirror the latest-N schema protection pattern.
+const (
+	pruneKeepLatestFailures = 8
+	pruneKeepLatestEvidence = 4
+	pruneMinStubBytes       = 512
+)
+
 // prune replaces only old consumed tool-output bodies with stubs. Reasoning,
-// calls, visible text, user history and schemas remain exact.
+// calls, visible text, user history and schemas remain exact. Consumed
+// failure/evidence bodies past the same age bound are stubbed in place
+// (kind and first lines retained) beyond the latest few of each kind.
 // Age counts all later message context,
 // including reasoning and later schema messages, using admission's calibration.
 // Leading tool definitions contribute to occupancy, not to an output's age.
@@ -63,7 +76,19 @@ func (r *Runner) prune(c *session.Continuation) (int, string) {
 		return c.Estimate(), ""
 	}
 	keep := c.Protected(r.Prune.SchemasKeep)
-	size, messages, n := 0, 0, 0
+	latestKept := make([]bool, len(c.Entries))
+	failures, evidences := 0, 0
+	for i := len(c.Entries) - 1; i >= 0; i-- {
+		switch c.Entries[i].Kind {
+		case "failure":
+			failures++
+			latestKept[i] = failures <= pruneKeepLatestFailures
+		case "evidence":
+			evidences++
+			latestKept[i] = evidences <= pruneKeepLatestEvidence
+		}
+	}
+	size, messages, n, stubbed := 0, 0, 0, 0
 	for i := len(c.Entries) - 1; i >= 0; i-- {
 		age := size + 20*messages // Continuation's disclosed fallback estimate.
 		if c.BasisChars > 0 && c.BasisTokens > 0 {
@@ -72,10 +97,35 @@ func (r *Runner) prune(c *session.Continuation) (int, string) {
 		e := &c.Entries[i]
 		size += e.Message.Size()
 		messages++
-		if keep[i] || age <= r.Prune.OutputsAgeTokens {
+		if age <= r.Prune.OutputsAgeTokens || e.Message.Role == "system" {
 			continue
 		}
-		if e.Kind != "output" || e.Message.Role == "system" {
+		// Failure/evidence bodies are protected from summary replacement, not
+		// from age stubbing: kind, call association and first lines stay exact.
+		if (e.Kind == "failure" || e.Kind == "evidence") && !e.Unread && !latestKept[i] {
+			old := len(e.Message.Content)
+			if old <= pruneMinStubBytes || strings.Contains(e.Message.Content, "[pruned "+e.Kind+" body") {
+				continue
+			}
+			head := e.Message.Content
+			if lines := strings.SplitN(head, "\n", 3); len(lines) > 2 {
+				head = lines[0] + "\n" + lines[1]
+			}
+			if len(head) > 240 {
+				head = head[:240]
+			}
+			stub := fmt.Sprintf("%s\n[pruned %s body (%d bytes; age %d estimated context tokens); full result in raw session history]", head, e.Kind, old, age)
+			if len(stub) >= old {
+				continue
+			}
+			e.Message.Content = stub
+			stubbed++
+			continue
+		}
+		if keep[i] {
+			continue
+		}
+		if e.Kind != "output" {
 			continue
 		}
 		old := len(e.Message.Content)
@@ -87,11 +137,15 @@ func (r *Runner) prune(c *session.Continuation) (int, string) {
 		e.Kind = "history" // settled stub; never re-prune or lose call association
 		n++
 	}
-	if n == 0 {
+	if n == 0 && stubbed == 0 {
 		return c.Estimate(), ""
 	}
 	c.Invalidate()
-	return c.Estimate(), fmt.Sprintf("pruned %d tool output body(ies) older than %d estimated context tokens; protected entries exempt; raw history retained", n, r.Prune.OutputsAgeTokens)
+	report := fmt.Sprintf("pruned %d tool output body(ies) older than %d estimated context tokens; protected entries exempt; raw history retained", n, r.Prune.OutputsAgeTokens)
+	if stubbed > 0 {
+		report += fmt.Sprintf("; stubbed %d old failure/evidence body(ies) past the same age (latest %d failures/%d evidence kept verbatim)", stubbed, pruneKeepLatestFailures, pruneKeepLatestEvidence)
+	}
+	return c.Estimate(), report
 }
 
 // Kept as a caller-compatible no-op: duplicate discovery exchanges, including

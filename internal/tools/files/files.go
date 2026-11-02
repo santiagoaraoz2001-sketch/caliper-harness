@@ -348,9 +348,30 @@ func (w *Workspace) filePath(p string, discovery bool) (string, string, error) {
 	if !filepath.IsAbs(p) {
 		parentPath = filepath.Join(base, parentPath)
 	}
-	parent, e := pathutil.EvalSymlinks(parentPath)
+	// Resolve the nearest existing ancestor physically. Trailing
+	// segments that do not exist yet cannot be links, so they are
+	// re-appended lexically after the confinement check below; the
+	// write path creates them under the opened root.
+	probe, missing := parentPath, []string(nil)
+	for {
+		if _, e = os.Lstat(probe); e == nil {
+			break
+		} else if !os.IsNotExist(e) {
+			return "", "", e
+		}
+		next := filepath.Dir(probe)
+		if next == probe {
+			return "", "", e
+		}
+		missing = append([]string{filepath.Base(probe)}, missing...)
+		probe = next
+	}
+	parent, e := pathutil.EvalSymlinks(probe)
 	if e != nil {
 		return "", "", e
+	}
+	for _, segment := range missing {
+		parent = filepath.Join(parent, segment)
 	}
 	if discovery && filepath.Join(parent, filepath.Base(p)) == base {
 		p = "."
@@ -379,6 +400,19 @@ func (w *Workspace) execute(ctx context.Context, name string, a tool.Args, cover
 		return tool.Result{}, e
 	}
 	defer r.Close()
+	if name == "write" {
+		// Create missing parent directories inside the root; admission
+		// already proved the resolved parent stays in the workspace.
+		if dir := filepath.Dir(p); dir != "." && dir != "" {
+			current := ""
+			for _, segment := range strings.Split(dir, string(filepath.Separator)) {
+				current = filepath.Join(current, segment)
+				if e := r.Mkdir(current, 0755); e != nil && !os.IsExist(e) {
+					return tool.Result{}, e
+				}
+			}
+		}
+	}
 	if name == "read" || name == "find_dir" {
 		info, err := r.Lstat(p)
 		if err == nil && pathutil.IsLinkMode(info.Mode()) {

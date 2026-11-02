@@ -16,7 +16,6 @@ import (
 	"specific-harness/internal/memory"
 	"specific-harness/internal/pathutil"
 	"strings"
-	"time"
 
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/executor"
@@ -132,8 +131,11 @@ func (a *API) ExecBounded(ctx context.Context, query, opName string, vars map[st
 	if len(query)+len(opName)+n > limits.MaxRequestBytes {
 		return nil, fmt.Errorf("tools.graphql.max_request_bytes exceeded; narrow query or variables")
 	}
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(limits.TimeoutSeconds)*time.Second)
-	defer cancel()
+	// No request deadline is imposed here. Operations run under the
+	// caller's context: resolvers include permission gates (readiness
+	// coherence judging and human approval) whose duration is set by
+	// judge round-trips and people, not by a transport budget. Explicit
+	// caller cancellation still aborts the operation.
 	b := &requestBudget{limits: limits}
 	result, err := a.execute(ctx, query, opName, vars, b)
 	if len(result.Data) > 0 && string(result.Data) != "null" {

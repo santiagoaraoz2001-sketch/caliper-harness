@@ -93,7 +93,7 @@ func GraphRows(ctx context.Context, s *store.Store, kind, id, parent, state stri
 		returning = append(returning, value+" AS "+c)
 	}
 	if kind == "approach" {
-		returning = append(returning, "x.needs_ready AS needs_ready")
+		returning = append(returning, "x.needs_ready AS needs_ready", "x.admitted_brief AS admitted_brief")
 	}
 	if kind == "task" {
 		returning = append(returning, "x.attempts AS attempts")
