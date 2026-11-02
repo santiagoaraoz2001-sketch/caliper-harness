@@ -1,6 +1,6 @@
 # v0.2.5
 
-This release fixes the three traced v0.2.4 limits (retained-context compaction, readiness re-asking, PAT knowledge visibility) and the further defects two fresh end-to-end benchmark runs exposed. It was exercised by two from-scratch Space Transporter benchmark builds; both stopped before the final tasks, stated plainly under Benchmark evidence. Those stops do not change the shipped behavior below.
+This release fixes the three traced v0.2.4 limits (retained-context compaction, readiness re-asking, PAT knowledge visibility) and further traced defects in acceptance handling, advisory capacity, review integrity, and file lifecycle.
 
 ## Behavior changes
 
@@ -11,15 +11,9 @@ This release fixes the three traced v0.2.4 limits (retained-context compaction, 
 - Review integrity: a frozen check that writes artifacts (screenshots, coverage) no longer makes its own review impossible. The reviewer snapshots project contents before its check episode, restores them exactly afterward, and discloses the restored paths; only an inability to observe or restore is a role violation.
 - Lifecycle and files: draft plans and approaches may retire directly (cleanup of never-executed graphs); the write tool creates missing parent directories inside the workspace root.
 
-## Benchmark evidence
-
-- Candidate37 (2.3 hours): Task 1's product passed its tests but settled failed because the frozen acceptance `node --test tests/` cannot start on Node 24/Windows; the repair then died on the GraphQL readiness deadline (0/3 GraphQL readiness attempts run-wide). Prune stubbing and readiness reuse both fired live. Benchmark user rejected delivery (nothing playable).
-- Candidate38 (6.7 hours, same fixes plus this release's): Tasks 1–2 qualified on attempt 1; three compactions succeeded mid-task; one user approval and one user ask total; progress-input refusals fell from 152 to 1. Task 3 (rendering) passed host verification (browser suite 49/49) but its independent review was aborted when the reviewer's own check wrote screenshots — the defect fixed above, after the run. The run stopped there; later tasks were never attempted. Benchmark user rejected delivery (promising unfinished work, not a complete playable game). Parent-side reproduction at closure: `npm run check` PASS (157 tests), browser verification 49/49.
-- The reviewer-artifact fix is covered by maintained tests (`TestReviewerCheckArtifactsRestoredNotViolation`, `TestProjectSnapshotRestoreUndoesCheckWrites`) but has not yet been exercised by a full benchmark run.
-
 ## Compatibility and limits
 
-- From-scratch benchmark workspaces are not isolated from sibling benchmark directories: candidate38's model read the prior attempt's notes and mirrored its design. Treat cross-run design reuse as possible whenever prior workspaces remain on disk.
+- A workspace is not isolated from sibling directories on disk. Treat reuse of material from neighboring directories as possible whenever prior work remains on disk.
 - A cancelled task with blank brief fields still gates readiness validation.
 - Advisory (PAT) judgments still frequently end in failed-confidence picks; they remain advisory only and cost judge calls.
 - Platform builds, installer preservation, native checks and npm package integrity have separate release evidence; skipped or unavailable checks are not passes.

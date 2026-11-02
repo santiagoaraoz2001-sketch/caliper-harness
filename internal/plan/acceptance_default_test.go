@@ -4,8 +4,7 @@ import "testing"
 
 // One command, one source: omitting the acceptance command binds the
 // task check command instead of forcing the author to restate the same
-// command as a second copy that can silently diverge (candidate37
-// dead acceptance: package script fixed, frozen copy stayed invalid).
+// command as a second copy that can silently diverge.
 func TestSetTaskBlockDefaultsAcceptanceToCheckCommand(t *testing.T) {
 	s := open(t)
 	p, e := CreatePlan(s, "p", "g")

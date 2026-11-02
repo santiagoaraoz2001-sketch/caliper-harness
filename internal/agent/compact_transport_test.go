@@ -16,7 +16,7 @@ import (
 )
 
 // Optional replay consumes the retained post-stop continuation, without a
-// provider, process restart or writes to the benchmark workspace.
+// provider, process restart or writes to the workspace.
 func TestCapturedCompactionTransportReplay(t *testing.T) {
 	path := os.Getenv("CALIPER_COMPACTION_REPLAY_EVENT")
 	if path == "" {

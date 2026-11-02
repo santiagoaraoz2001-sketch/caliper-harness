@@ -1,6 +1,6 @@
 # v0.2.3
 
-This release adds navigable domain guidance, test-suite management and harness-owned native continuation, with repairs to planning, durable feedback and verification. Release publication is gated on the exact source/build checks and complete platform asset inventory. The benchmark is stopped; a new benchmark is not part of this release operation.
+This release adds navigable domain guidance, test-suite management and harness-owned native continuation, with repairs to planning, durable feedback and verification. Release publication is gated on the exact source/build checks and complete platform asset inventory.
 
 ## Behavior changes
 

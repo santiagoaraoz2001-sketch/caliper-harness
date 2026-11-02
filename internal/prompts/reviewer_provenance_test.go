@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// ST03/ST06 (v024 Space Transporter): a failing test followed by successful
+// A failing test followed by successful
 // shell commands settled as bash exit 0, and the executor relaxed its own
 // acceptance-test threshold before the suite passed. The reviewer contract
 // must therefore state that composite shell output is not check evidence

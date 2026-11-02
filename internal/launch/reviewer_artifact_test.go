@@ -19,7 +19,7 @@ import (
 // A frozen check that writes artifacts (screenshots, coverage) must not
 // make its own review impossible: the reviewer's check runs, the
 // workspace is restored to its pre-check contents, and the review can
-// still reach a verdict (candidate38 Task 3 died exactly here).
+// still reach a verdict.
 func TestReviewerCheckArtifactsRestoredNotViolation(t *testing.T) {
 	s, parent, approach, task, d := projectWorkflowFixture(t)
 	// Production registries bind bash to the workspace; mirror that so

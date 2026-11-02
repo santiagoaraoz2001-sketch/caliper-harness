@@ -13,7 +13,7 @@ import (
 // configured suite passes on the same workspace revision, the two
 // commands disagree about the same code: the outcome reason must name
 // the acceptance command itself as suspect instead of reporting a
-// plain product failure (candidate37 dead acceptance class).
+// plain product failure.
 func TestCodingOutcomeNamesDisagreeingAcceptance(t *testing.T) {
 	exit := 1
 	r := &Runner{Prompts: prompts.Builtin(), Continuation: session.Continuation{Coding: &session.CodingState{

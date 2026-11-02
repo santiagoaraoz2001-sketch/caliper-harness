@@ -8,8 +8,8 @@ import (
 	"specific-harness/internal/decision"
 )
 
-// C33 fresh benchmark (20261029-204111-6fed): a legitimate large plan made
-// the readiness request exceed the decision transport limit. The refusal
+// A legitimate large plan can make the readiness request exceed the
+// decision transport limit. The refusal
 // blamed an unreachable server and told the model to ask the user to check
 // /manage, which produced a spurious user ask. Capacity refusals must name
 // the size cause and the recoverable next step instead.
