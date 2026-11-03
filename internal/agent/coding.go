@@ -95,14 +95,46 @@ func (r *Runner) CodingExec(next Exec) Exec {
 		}
 		var before string
 		var beforeErr error
+		var beforeHashes map[string]string
 		if d.Name == "bash" {
 			before, beforeErr = r.WorkspaceFingerprint(ctx)
+			if r.CodingRequired && beforeErr == nil {
+				beforeHashes, _ = projectFileHashes(ctx, r.Workspace, r.WorkspaceExcludes)
+			}
 		}
 		res, e := next(ctx, d, a)
 		if d.Name == "bash" {
 			after, afterErr := r.WorkspaceFingerprint(ctx)
 			if beforeErr == nil && afterErr == nil && before != after {
 				res.Changed = true
+				// Name what the shell changed so completion evidence does
+				// not present those files as read-grounded publications.
+				if beforeHashes != nil {
+					if afterHashes, hashErr := projectFileHashes(ctx, r.Workspace, r.WorkspaceExcludes); hashErr == nil {
+						f := &r.fileEvidence
+						if f.bashChanged == nil {
+							f.bashChanged = make(map[string]bool)
+						}
+						for name, sum := range afterHashes {
+							if beforeHashes[name] != sum {
+								if len(f.bashChanged) < 8 {
+									f.bashChanged[name] = true
+								} else {
+									f.bashOverflow = true
+								}
+							}
+						}
+						for name := range beforeHashes {
+							if _, ok := afterHashes[name]; !ok {
+								if len(f.bashChanged) < 8 {
+									f.bashChanged[name] = true
+								} else {
+									f.bashOverflow = true
+								}
+							}
+						}
+					}
+				}
 			}
 			if beforeErr != nil || afterErr != nil || before != after {
 				if r.CodingRequired {
@@ -235,6 +267,14 @@ func (r *Runner) CheckDefinition(bash tool.Definition, acceptanceCommand ...stri
 		if paired {
 			args["cmd"] = acceptance
 			ar.Started, ar.Status = time.Now().UTC().Format(time.RFC3339Nano), "incomplete"
+			// Persist the attempt before executing it, mirroring the suite
+			// staging below: a crash mid-acceptance must not leave a durable
+			// receipt claiming the command never ran.
+			if e := r.codingRecord(ctx); e != nil {
+				ar.Started, ar.Status, ar.Reason = "", "unexecuted", "behavioral acceptance not executed: "+e.Error()
+				receipt.EpisodeEnded = time.Now().UTC().Format(time.RFC3339Nano)
+				return tool.Result{}, e
+			}
 			first, err = Direct(ctx, bash, args)
 			ar.Ended, ar.ExitCode, ar.Text, ar.Truncated = time.Now().UTC().Format(time.RFC3339Nano), first.ExitCode, first.Text, first.Truncated
 			ar.Status, ar.Reason = checkStatus(first, err)
@@ -320,6 +360,9 @@ func checkStatus(res tool.Result, err error) (string, string) {
 		return "incomplete", "command has no complete exit receipt"
 	}
 	if *res.ExitCode != 0 || res.Failed {
+		if *res.ExitCode == 0 {
+			return "failed", "a command segment exited non-zero before the final exit 0"
+		}
 		return "failed", fmt.Sprintf("command exited%d", *res.ExitCode)
 	}
 	return "passed", "declared check passed; command exited0, coverage unknown"
@@ -383,6 +426,8 @@ type fileEvidence struct {
 	paths        map[string]tool.FileEffect
 	publications int
 	partial      bool
+	bashChanged  map[string]bool // files observed changed across a bash call; never read-grounded
+	bashOverflow bool
 }
 
 func (r *Runner) observeFile(res tool.Result, err error) {
@@ -418,7 +463,10 @@ func evidenceQuote(s string) string {
 	return fmt.Sprintf("%q", s)
 }
 func (r *Runner) completionEvidence() string {
-	if !r.CodingObligation() {
+	// A settled check receipt is evidence in its own right: a reviewer (or any
+	// runner without its own coding obligation) must not report an actually
+	// settled receipt as unverified just because the obligation is absent.
+	if !r.CodingObligation() && (r.Continuation.Coding == nil || r.Continuation.Coding.Receipt == nil) {
 		return ""
 	}
 	f := &r.fileEvidence
@@ -443,6 +491,19 @@ func (r *Runner) completionEvidence() string {
 		labels = append(labels, evidenceQuote(p)+":"+kind)
 	}
 	text := fmt.Sprintf(" File-tool publications this run: publications=%d tracked=%d net=%d partial=%t [%s]; first-before versus last-publication comparison only, not current filesystem. Opaque Bash/check/workflow effects not inventoried.", f.publications, len(keys), net, f.partial, strings.Join(labels, ", "))
+	if len(f.bashChanged) > 0 {
+		names := make([]string, 0, len(f.bashChanged))
+		for name := range f.bashChanged {
+			names = append(names, evidenceQuote(name))
+		}
+		sort.Strings(names)
+		text = strings.Replace(text, "Opaque Bash/check/workflow effects not inventoried.", "Opaque check/workflow effects not inventoried.", 1)
+		more := ""
+		if f.bashOverflow {
+			more = " (and more)"
+		}
+		text += fmt.Sprintf(" Bash-mutated files (ungrounded; contents were not read-grounded): [%s]%s.", strings.Join(names, ", "), more)
+	}
 	c := r.Continuation.Coding
 	if c != nil && c.Receipt != nil {
 		exit := "unknown"

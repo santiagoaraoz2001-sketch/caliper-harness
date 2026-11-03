@@ -215,7 +215,7 @@ func (r *Registry) nativeXML(s string) (string, string, string, error) {
 			return "", "", s, nativeFraming(s, "invalid native parameter opening")
 		}
 		if _, exists := values[key]; exists {
-			return "", "", s, fmt.Errorf("duplicate native parameter %q", key)
+			return "", "", s, nativeFraming(s, fmt.Sprintf("duplicate native parameter %q", key))
 		}
 		end := nativeParameterEnd(rest)
 		if end < 0 {

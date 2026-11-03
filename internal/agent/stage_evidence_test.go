@@ -85,7 +85,7 @@ printf '{"format":"caliper-test-report-v2","run_id":"%s","stages":[{"id":"unit",
 				t.Fatal("current host/producer evidence not retained")
 			}
 			events, e := session.Read(sink.dir, "paired")
-			if e != nil || len(events) != 4 || !strings.Contains(events[0].Text, `"prerequisites"`) {
+			if e != nil || len(events) != 5 || !strings.Contains(events[0].Text, `"prerequisites"`) {
 				t.Fatalf("pre-effect host observations missing: %v %+v", e, events)
 			}
 			if mode == "pass" {

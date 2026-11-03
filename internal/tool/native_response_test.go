@@ -122,6 +122,22 @@ func TestNativeResponseRejectsAmbiguousOrIncompleteAtomically(t *testing.T) {
 	}
 }
 
+// A repeated parameter tag is a framing malformation like a missing close:
+// it must enter framing repair with its draft, not kill the run as an
+// ordinary model error.
+func TestNativeResponseDuplicateParameterIsFraming(t *testing.T) {
+	r := nativeResponseRegistry(t)
+	draft := `<tool_call><function=record><parameter=text>x</parameter><parameter=text>y</parameter></function></tool_call>`
+	_, err := r.ParseNativeResponse(draft, "normal", "owner")
+	var framing *llm.ToolFramingError
+	if !errors.As(err, &framing) {
+		t.Fatalf("duplicate parameter not repairable framing: %T %v", err, err)
+	}
+	if framing.Draft != draft || !strings.Contains(framing.Reason, "duplicate") {
+		t.Fatalf("framing evidence wrong: %#v", framing)
+	}
+}
+
 func TestNativeResponseFramingEvidenceAndRoleAdmission(t *testing.T) {
 	r := nativeResponseRegistry(t)
 	draft := "<tool_call><function=record><parameter=text>unfinished 🚚"

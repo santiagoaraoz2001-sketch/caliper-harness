@@ -55,13 +55,19 @@ type Runner struct {
 	settlement          *TaskSettlement
 	phaseRegistry       *tool.Registry // unprojected owning definitions, not execution authority
 	phaseView           *tool.Registry
+	lastToolNames       []string // tool names advertised on the previous request
+	toolSurfaceNote     string   // one-request notice when that advertised set changes
 	progressWatch       *watcher // current run only; one evidence window for advisory touchpoints
 	// Smallest encoded advisory packet the judge has actually refused
 	// for capacity in this process; later packets at or above it are
 	// reduced before their first admission attempt. Learned from real
 	// admission, never a configured limit.
 	progressRefusedBytes int
-	enforcement          enforcement
+	// Set once an actual admission proves the protected remainder of an
+	// advisory packet cannot fit the judge. Nothing is truncated to force
+	// a fit; advisory attempts simply stop repeating a proven-doomed packet.
+	progressAdviceExhausted bool
+	enforcement             enforcement
 	// StyleEnforcement, when true with a non-empty Styleguide, sends a
 	// validated task to the style judge once per run before handoff.
 	StyleEnforcement       bool
@@ -597,6 +603,10 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 			contract := "no declared chat check; correctness/test count unverified"
 			if r.CodingObligation() {
 				contract = "declared check passed; coverage/test count unknown"
+			} else if c := r.Continuation.Coding; c != nil && c.Receipt != nil && c.Passed() {
+				// No obligation of our own (e.g. a reviewer), but a settled
+				// passed receipt exists; do not call it unverified.
+				contract = "settled declared check passed; coverage/test count unknown"
 			}
 			if len(r.workflows) > 0 {
 				contract = "workflow verification follows owning check/review receipts"
@@ -1090,6 +1100,38 @@ steps:
 					}
 				}
 				continue
+			}
+		}
+		if err != nil && ctx.Err() == nil && !native.OutputLimit {
+			// A provider context-window refusal means our occupancy estimate
+			// drifted under the real count. The provider measured what we
+			// missed; record its count, compact through the ordinary judged
+			// path, and retry this step. Nothing was generated or executed.
+			if tokens, overflow := contextOverflow(err); overflow {
+				if tokens > 0 {
+					r.Continuation.Prompt = tokens
+					r.Continuation.BasisTokens = tokens
+					r.Continuation.BasisChars = contentSize(r.Continuation.Messages()) + r.Continuation.SchemaBytes
+					r.Continuation.Measured = true
+				}
+				nt, sum, ran, compactErr := compactModel(r.Continuation)
+				if errors.Is(compactErr, userCommentInterrupt) && ctx.Err() == nil {
+					step--
+					continue steps
+				}
+				if compactErr == nil && ran {
+					if publishErr := publishCompact(nt, sum); publishErr != nil {
+						return finish(outcome.Failed, publishErr.Error(), "", publishErr)
+					}
+					log("note", fmt.Sprintf("provider refused the request as over its context window (%v); compacted and retrying the step", err))
+					if ledger.Err != nil {
+						return finish(outcome.Failed, ledger.Err.Error(), "", ledger.Err)
+					}
+					step-- // Recovery grants no new execution step.
+					continue steps
+				}
+				// No compaction could be published: fall through to the
+				// ordinary terminal handling with the original provider error.
 			}
 		}
 		if err != nil {

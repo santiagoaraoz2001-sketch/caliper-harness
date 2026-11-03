@@ -3,6 +3,7 @@ package search
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -29,6 +30,47 @@ func TestExistingPathResolvesShellEscapedSpaces(t *testing.T) {
 	missing := filepath.Join(root, "Specific\\ Labs", "missing.js")
 	if got, err := ExistingPath(root, missing); err != nil || got != missing {
 		t.Fatalf("unresolvable escaped path must pass through: got %q error %v", got, err)
+	}
+}
+
+// Shell output on Windows also arrives in MSYS spelling (/c/... and /tmp/...),
+// which has no volume and would otherwise be joined under the workspace.
+func TestExistingPathResolvesMSYSForms(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("MSYS spellings are a Windows surface")
+	}
+	root := t.TempDir()
+	real := filepath.Join(root, "shot.png")
+	if err := os.WriteFile(real, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	vol := filepath.VolumeName(real) // e.g. "C:"
+	msys := "/" + strings.ToLower(vol[:1]) + filepath.ToSlash(strings.TrimPrefix(real, vol))
+	if got, err := ExistingPath(root, msys); err != nil || filepath.Clean(got) != filepath.Clean(real) {
+		t.Fatalf("drive-letter MSYS path not resolved: got %q want %q error %v", got, real, err)
+	}
+	tmpDir := filepath.Join(os.TempDir(), "caliper-msys-tmp-probe")
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpFile := filepath.Join(tmpDir, "01-title.png")
+	if err := os.WriteFile(tmpFile, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ExistingPath(root, "/tmp/caliper-msys-tmp-probe/01-title.png"); err != nil || filepath.Clean(got) != filepath.Clean(tmpFile) {
+		t.Fatalf("/tmp MSYS path not resolved: got %q want %q error %v", got, tmpFile, err)
+	}
+	// A literal workspace-relative "tmp/..." file still wins over the /tmp mapping.
+	literal := filepath.Join(root, "tmp", "caliper-msys-tmp-probe", "01-title.png")
+	if err := os.MkdirAll(filepath.Dir(literal), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(literal, []byte("literal"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ExistingPath(root, "/tmp/caliper-msys-tmp-probe/01-title.png"); err != nil || got != "/tmp/caliper-msys-tmp-probe/01-title.png" {
+		t.Fatalf("literal /tmp spelling must win over the mapping: got %q error %v", got, err)
 	}
 }
 

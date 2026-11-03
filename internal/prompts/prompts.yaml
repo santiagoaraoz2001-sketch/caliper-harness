@@ -2720,8 +2720,8 @@ texts:
   # Original use sites: internal/tools/files/files.go:270 (Definitions).
   # Fields: none. Supplied by the owning Go caller.
   tools.write.purpose: >2-
-    Empty expected_hash creates exclusively. Replacing an existing file requires read's
-    complete-file sha256 in expected_hash. Parents must exist.
+    Empty expected_hash creates exclusively; missing parent directories are created.
+    Replacing an existing file requires read's complete-file sha256 in expected_hash.
   # Scoped advice after the actual owning operation; factual receipt remains in Go.
   # Fields: none. Supplied by the owning Go caller.
   continuation.workflow.scoped_ready_next: >2-

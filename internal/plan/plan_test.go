@@ -266,6 +266,23 @@ func TestPlanReadyGateValidation(t *testing.T) {
 	}
 }
 
+// A cancelled task is out of the approach's execution scope; its possibly
+// blank brief must not block readiness for the remaining tasks.
+func TestPlanReadyGateIgnoresCancelledTask(t *testing.T) {
+	s := open(t)
+	p, _ := CreatePlan(s, "p", "g")
+	a, _ := CreateApproach(s, p.ID, "a")
+	live, _ := CreateTask(s, a.ID, "live", "do it")
+	draftBlock(t, s, live.ID)
+	dead, _ := CreateTask(s, a.ID, "dead", "never drafted")
+	if _, err := TransitionTask(s, dead.ID, TaskCancelled); err != nil {
+		t.Fatalf("cancel: %s", err)
+	}
+	if _, err := fixtureApproachTransition(s, a.ID, ApproachReady); err != nil {
+		t.Fatalf("cancelled blank task blocked readiness: %s", err)
+	}
+}
+
 func TestPlanBlockFieldsRequired(t *testing.T) {
 	task := &Task{Current: "observed", Target: "correct", Sketch: "repair", Acceptance: "Current question matches the active question", Tests: "regression", Verify: "inspect independently", AcceptanceCommand: "test -d ."}
 	if err := ValidateTaskBlock(task); err != nil {

@@ -7,7 +7,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -67,6 +69,18 @@ func run(parent context.Context, cfg config.BashConfig, args tool.Args, dir stri
 	if err != nil {
 		return tool.Result{}, err
 	}
+	// A compound script's settled outcome must not hide a failed segment
+	// behind a successful final command. An ERR trap records each unhandled
+	// segment failure to a side file; execution semantics and the captured
+	// output stay exactly as authored (handled failures in conditions and
+	// ||/&& lists stay exempt, matching bash's own rules).
+	segPath := ""
+	if segFile, segErr := os.CreateTemp("", "caliper-segfails-*.txt"); segErr == nil {
+		segPath = segFile.Name()
+		_ = segFile.Close()
+		defer os.Remove(segPath)
+		cmdStr = "trap 'printf \"%s\\n\" \"$?\" >> \"$CALIPER_SEGMENT_FAILURES\"' ERR\n" + cmdStr
+	}
 	argsv, cleanup, err := scriptArgs(cmdStr)
 	if err != nil {
 		return tool.Result{}, err
@@ -74,7 +88,14 @@ func run(parent context.Context, cfg config.BashConfig, args tool.Args, dir stri
 	defer cleanup()
 	cmd := process.Command(ctx, shell, argsv...)
 	cmd.Dir = dir
-	cmd.Env = process.TestEnvironment(ctx, cmd.Environ())
+	env := process.TestEnvironment(ctx, cmd.Environ())
+	if segPath != "" {
+		if env == nil {
+			env = cmd.Environ()
+		}
+		env = append(env, "CALIPER_SEGMENT_FAILURES="+filepath.ToSlash(segPath))
+	}
+	cmd.Env = env
 	out := cappedOutput{maxBytes: cfg.MaxBytes}
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -99,7 +120,22 @@ func run(parent context.Context, cfg config.BashConfig, args tool.Args, dir stri
 		return tool.Result{Text: text, Truncated: truncated, Failed: true}, fmt.Errorf("cannot start command: %w — %s", err, pc.Text("guidance.bash.missing_shell"))
 	}
 	code := 0
-	return tool.Result{Text: text, Truncated: truncated, ExitCode: &code}, nil
+	result := tool.Result{Text: text, Truncated: truncated, ExitCode: &code}
+	if segPath != "" {
+		if recorded, readErr := os.ReadFile(segPath); readErr == nil {
+			failures := 0
+			for _, line := range strings.Fields(string(recorded)) {
+				if line != "0" {
+					failures++
+				}
+			}
+			if failures > 0 {
+				result.Failed = true
+				result.Text += fmt.Sprintf("\n[segment failures: %d command(s) exited non-zero before the final exit 0]", failures)
+			}
+		}
+	}
+	return result, nil
 }
 
 func interruption(cause error, timeout int64) string {

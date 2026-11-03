@@ -458,7 +458,7 @@ func (w *Workspace) execute(ctx context.Context, name string, a tool.Args, cover
 	create := name == "write" && expected == ""
 	if create {
 		if e == nil {
-			return tool.Result{}, fmt.Errorf("%s exists; %s", p, prompts.Select(w.Prompts).Text("guidance.files.existing_create"))
+			return tool.Result{}, fmt.Errorf("%s exists; current sha256=%s; %s", p, digest(b), prompts.Select(w.Prompts).Text("guidance.files.existing_create"))
 		}
 		if !os.IsNotExist(e) {
 			return tool.Result{}, e
@@ -513,7 +513,7 @@ func (w *Workspace) execute(ctx context.Context, name string, a tool.Args, cover
 		if issuedOK && issued.hash == digest(b) && expected != issued.hash {
 			return tool.Result{}, fmt.Errorf("%s: %s", p, prompts.Select(w.Prompts).Format("guidance.files.mistyped_hash", digest(b)))
 		}
-		return tool.Result{}, fmt.Errorf("%s changed; %s", p, prompts.Select(w.Prompts).Text("guidance.files.changed_hash"))
+		return tool.Result{}, fmt.Errorf("%s changed; current sha256=%s; %s", p, digest(b), prompts.Select(w.Prompts).Text("guidance.files.changed_hash"))
 	}
 	content, _ := a["content"].(string)
 	deleted, inserted, scope := string(b), content, "whole-file replacement"

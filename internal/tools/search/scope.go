@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"specific-harness/internal/pathutil"
 	"specific-harness/internal/prompts"
 	"specific-harness/internal/tool"
@@ -40,6 +41,11 @@ func ExistingPath(workspace, input string) (string, error) {
 	if unescaped := strings.ReplaceAll(input, "\\ ", " "); unescaped != input {
 		candidates = append(candidates, unescaped)
 	}
+	if runtime.GOOS == "windows" {
+		if candidate := msysCandidate(input); candidate != "" && candidate != input {
+			candidates = append(candidates, candidate)
+		}
+	}
 	matched := ""
 	for _, candidate := range candidates {
 		if _, err := os.Lstat(abs(candidate)); err == nil {
@@ -55,6 +61,26 @@ func ExistingPath(workspace, input string) (string, error) {
 		return matched, nil
 	}
 	return input, nil
+}
+
+// msysCandidate translates one Git Bash/MSYS spelling copied from shell
+// output (/c/Users/... or /tmp/...) to its Windows form. It is only a
+// respelling candidate: ExistingPath keeps literal precedence, and callers
+// still own scope admission on the returned path.
+func msysCandidate(input string) string {
+	slash := strings.ReplaceAll(input, "\\", "/")
+	if slash == "/tmp" {
+		return os.TempDir()
+	}
+	if strings.HasPrefix(slash, "/tmp/") {
+		return filepath.Join(os.TempDir(), filepath.FromSlash(strings.TrimPrefix(slash, "/tmp/")))
+	}
+	if len(slash) >= 3 && slash[0] == '/' && slash[2] == '/' {
+		if c := slash[1]; ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') {
+			return strings.ToUpper(slash[1:2]) + ":" + filepath.FromSlash(slash[2:])
+		}
+	}
+	return ""
 }
 
 func normalizeSearchPath(dir string, def tool.Definition) tool.Definition {

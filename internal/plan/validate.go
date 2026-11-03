@@ -32,6 +32,12 @@ func ValidateApproachReady(s stateStore, approachID string) error {
 		return err
 	}
 	for _, t := range tasks {
+		// A cancelled task is out of execution scope; its brief (complete
+		// or not) cannot block the remaining tasks' readiness. Reviving it
+		// (cancelled -> queued) restores the full gate on the next check.
+		if t.State == TaskCancelled {
+			continue
+		}
 		if err := requireNoRevision(s, "task", t.ID); err != nil {
 			return err
 		}

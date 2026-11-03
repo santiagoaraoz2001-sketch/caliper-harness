@@ -11,6 +11,44 @@ import (
 	"specific-harness/internal/tool"
 )
 
+// toolSurfaceDelta names what changed in the advertised tool set since the
+// previous request, or "" when nothing changed (including the first request).
+func toolSurfaceDelta(previous, current []string) string {
+	if len(previous) == 0 {
+		return ""
+	}
+	was := make(map[string]bool, len(previous))
+	for _, name := range previous {
+		was[name] = true
+	}
+	now := make(map[string]bool, len(current))
+	for _, name := range current {
+		now[name] = true
+	}
+	var added, removed []string
+	for _, name := range current {
+		if !was[name] {
+			added = append(added, name)
+		}
+	}
+	for _, name := range previous {
+		if !now[name] {
+			removed = append(removed, name)
+		}
+	}
+	if len(added) == 0 && len(removed) == 0 {
+		return ""
+	}
+	parts := []string{}
+	if len(added) > 0 {
+		parts = append(parts, "now available: "+strings.Join(added, ", "))
+	}
+	if len(removed) > 0 {
+		parts = append(parts, "no longer available: "+strings.Join(removed, ", "))
+	}
+	return "Your tool set changed since your last request (" + strings.Join(parts, "; ") + "). Surviving tools may also have new parameters; use only the currently advertised schemas."
+}
+
 func contentSize(messages []llm.Message) int {
 	n := 0
 	for _, m := range messages {
@@ -97,6 +135,14 @@ func (r *Runner) refreshWorkflow(ctx context.Context) error {
 		r.phaseView = r.ProjectPhaseRegistry(r.phaseRegistry)
 		r.Registry = r.phaseView
 	}
+	// A phase transition can add, remove, or reshape tools. Tell the model
+	// once, in-band, instead of letting it discover the new surface through
+	// a discarded generation and a refusal.
+	if r.Registry != nil {
+		names := r.Registry.Names()
+		r.toolSurfaceNote = toolSurfaceDelta(r.lastToolNames, names)
+		r.lastToolNames = names
+	}
 	r.ensurePlanningPublication()
 	// begin owns entry zero; Behavior and legacy system entries are not ours.
 	if entries := r.Continuation.Entries; len(entries) > 0 && entries[0].Kind == "injected" && entries[0].Message.Role == "system" {
@@ -166,6 +212,9 @@ func (r *Runner) basePrompt() string {
 		if construction && execution && !direct {
 			base += "\n" + r.Prompts.Text("system.workflow.hierarchy")
 		}
+	}
+	if r.toolSurfaceNote != "" {
+		base += "\n" + r.toolSurfaceNote
 	}
 	if r.workflowHeader != "" {
 		_, guided := r.Registry.Lookup("plan")

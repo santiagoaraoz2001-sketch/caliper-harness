@@ -390,12 +390,22 @@ func (r *Runner) enforce(ctx context.Context, final bool, provisional string, lo
 	if r.Judge == nil {
 		return "", fmt.Errorf("PAT/product enforcement has no selected decision judge")
 	}
+	if r.progressAdviceExhausted {
+		// Capacity exhaustion was already disclosed once; the same protected
+		// packet cannot fit on retry. Advisory only: continue unjudged.
+		r.enforcement.comments = commentDigest
+		r.enforcement.digest = digest
+		return "", nil
+	}
 	req := decision.Request{Context: string(raw), Instructions: r.Prompts.Text("decision.bookkeeping.instructions"), Options: enforceOptions}
 	req, v, err := r.progressJudgment(ctx, &input, req, input.progressPacket.reduceForCapacity, log)
 	if err != nil {
 		var unavailable *progressJudgeError
 		if !errors.As(err, &unavailable) {
 			return "", fmt.Errorf("PAT/product decision unavailable: %w", err)
+		}
+		if unavailable.exhausted {
+			r.progressAdviceExhausted = true
 		}
 		// The enforcer is advisory: an unavailable judgment is recorded and
 		// the executor continues unchanged, as on the discovery path.

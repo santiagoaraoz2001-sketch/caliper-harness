@@ -93,6 +93,59 @@ func projectInventory(ctx context.Context, root string, excludes []string) (stri
 	return root, names, excluded, nil
 }
 
+// projectFileHashes observes per-file content digests under the same scope
+// as projectFingerprint, so a shell mutation can name the files it touched.
+// Evidence naming only; invalidation still uses the whole-project fingerprint.
+func projectFileHashes(ctx context.Context, root string, excludes []string) (map[string]string, error) {
+	root, names, excluded, err := projectInventory(ctx, root, excludes)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(names))
+	for _, name := range names {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		path := filepath.Join(root, name)
+		if excluded(path) {
+			continue
+		}
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if pathutil.IsLinkMode(info.Mode()) {
+			target, e := os.Readlink(path)
+			if e != nil {
+				continue
+			}
+			out[name] = "link:" + target
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		content := sha256.New()
+		_, copyErr := io.Copy(content, f)
+		closeErr := f.Close()
+		if copyErr != nil {
+			return nil, copyErr
+		}
+		if closeErr != nil {
+			return nil, closeErr
+		}
+		out[name] = hex.EncodeToString(content.Sum(nil))
+	}
+	return out, ctx.Err()
+}
+
 func projectFingerprint(ctx context.Context, root string, excludes []string) (string, error) {
 	root, names, excluded, err := projectInventory(ctx, root, excludes)
 	if err != nil {

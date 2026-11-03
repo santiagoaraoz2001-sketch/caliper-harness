@@ -88,6 +88,33 @@ func TestNonZeroExitMarksFailed(t *testing.T) {
 	}
 }
 
+func TestCompoundSegmentFailureMarksFailed(t *testing.T) {
+	res, err := call(t, testCfg(), map[string]string{"cmd": "false; echo done"})
+	if err != nil {
+		t.Fatalf("compound must not error: %v", err)
+	}
+	if !res.Failed {
+		t.Errorf("Failed=false for 'false; echo done' — the segment failure is masked by the final exit; text=%q", res.Text)
+	}
+	if !strings.Contains(res.Text, "done") {
+		t.Errorf("execution must continue after the failed segment; text=%q", res.Text)
+	}
+}
+
+func TestCompoundHandledFailureStaysClean(t *testing.T) {
+	res, err := call(t, testCfg(), map[string]string{"cmd": "false || echo handled"})
+	if err != nil {
+		t.Fatalf("handled compound must not error: %v", err)
+	}
+	if res.Failed {
+		t.Errorf("Failed=true for a handled '||' failure; text=%q", res.Text)
+	}
+	ok, err := call(t, testCfg(), map[string]string{"cmd": "echo one; echo two"})
+	if err != nil || ok.Failed {
+		t.Errorf("clean compound: failed=%v err=%v text=%q", ok.Failed, err, ok.Text)
+	}
+}
+
 func TestDefaultTimeoutApplies(t *testing.T) {
 	d := New(testCfg())
 	args, _ := tool.Validate(d, map[string]string{"cmd": "true"})

@@ -79,7 +79,7 @@ func TestPairedEpisodeBehaviorFailureRetainsPassingSuite(t *testing.T) {
 		t.Fatalf("behavioral failure qualified: %+v", res)
 	}
 	events, err := session.Read(sink.dir, "paired")
-	if err != nil || len(events) != 4 || !strings.Contains(events[1].Text, "ACTUAL=WRONG") || !strings.Contains(events[3].Text, `"status":"passed"`) {
+	if err != nil || len(events) != 5 || !strings.Contains(events[2].Text, "ACTUAL=WRONG") || !strings.Contains(events[4].Text, `"status":"passed"`) {
 		t.Fatalf("actual failure/tail not archived: %+v %v", events, err)
 	}
 	if err := r.Continuation.Coding.Validate(); err != nil {
@@ -100,7 +100,7 @@ func TestPairedEpisodeApprovalCurrentnessAndDurability(t *testing.T) {
 			case "sink-between":
 				sink.fail = 2
 			case "sink-final":
-				sink.fail = 4
+				sink.fail = 5
 			}
 			args, repair := tool.ValidateJSON(def, `{}`)
 			if repair != "" {
@@ -123,7 +123,7 @@ func TestPairedEpisodeApprovalCurrentnessAndDurability(t *testing.T) {
 					t.Fatalf("pair not current %+v %v %+v", res, err, c)
 				}
 				events, e := session.Read(sink.dir, "paired")
-				if e != nil || len(events) != 4 || !strings.Contains(events[1].Text, "OBSERVED") {
+				if e != nil || len(events) != 5 || !strings.Contains(events[2].Text, "OBSERVED") {
 					t.Fatalf("pair durable %+v %v", events, e)
 				}
 				clone := r.Continuation.Clone()

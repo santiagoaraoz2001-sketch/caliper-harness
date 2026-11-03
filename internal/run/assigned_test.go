@@ -1132,9 +1132,10 @@ func TestAssignedLoopActualFailureEvidence(t *testing.T) {
 				return
 			}
 			if kind == "missing-read" {
-				// A returned Go error is separate from Result.Failed. Preserve both
-				// channels and compare the actual archived failure, not OS wording.
-				if observed.Latest.Tool != "read" || observed.Latest.Failed || !strings.Contains(observed.Latest.Error, "absent") || observed.Latest.OutputBytes != 0 || observed.Latest.OutputSHA256 != fmt.Sprintf("%x", sha256.Sum256(nil)) {
+				// The judgment packet derives settled failure from either channel:
+				// a returned Go error must not be presented to the judge as a
+				// success. The Error text itself is still preserved verbatim.
+				if observed.Latest.Tool != "read" || !observed.Latest.Failed || !strings.Contains(observed.Latest.Error, "absent") || observed.Latest.OutputBytes != 0 || observed.Latest.OutputSHA256 != fmt.Sprintf("%x", sha256.Sum256(nil)) {
 					t.Fatalf("missing actual read error identity/provenance %+v", observed)
 				}
 				exactFailure := false

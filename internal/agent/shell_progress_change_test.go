@@ -81,7 +81,7 @@ func TestShellObservedChangesReachProgress(t *testing.T) {
 				t.Fatalf("missing actual progress evidence: %+v err=%v", packet, err)
 			}
 			for _, receipt := range []*loopObservation{packet.Latest, packet.LatestSettled, packet.RecentReceipts[0]} {
-				if receipt.Changed != tc.wantChanged || receipt.CallID != "actual-shell-call" || receipt.Failed != tc.failed || receipt.ExitCode == nil || *receipt.ExitCode != code {
+				if receipt.Changed != tc.wantChanged || receipt.CallID != "actual-shell-call" || receipt.Failed != (tc.failed || tc.err != nil) || receipt.ExitCode == nil || *receipt.ExitCode != code {
 					t.Fatalf("progress receipt differs from execution: %+v", receipt)
 				}
 			}

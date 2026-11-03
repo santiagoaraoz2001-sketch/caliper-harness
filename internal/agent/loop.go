@@ -128,7 +128,7 @@ func loopObserved(note *observed) *loopObservation {
 		observedAt = &value
 	}
 	return &loopObservation{Tool: note.Tool, Args: note.Args, CallID: note.CallID, ObservedAt: observedAt,
-		Changed: note.Result.Changed, StateChanged: note.Result.StateChanged, Failed: note.Result.Failed, Blocked: note.Result.Blocked,
+		Changed: note.Result.Changed, StateChanged: note.Result.StateChanged, Failed: note.Result.Failed || note.Error != "" || note.Result.ExitCode != nil && *note.Result.ExitCode != 0, Blocked: note.Result.Blocked,
 		Truncated: note.Result.Truncated, NoMatches: note.Result.NoMatches, ExitCode: note.Result.ExitCode,
 		Error: note.Error, OutputBytes: len(note.Result.Text), OutputSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(note.Result.Text))), ArgumentsSHA256: fmt.Sprintf("%x", sha256.Sum256(args)), TextBasis: basis}
 }
@@ -427,6 +427,9 @@ func (r *Runner) groundProgressRefusal(packet *progressPacket, refusal string, n
 }
 
 func (r *Runner) progressAdvice(ctx context.Context, w *watcher, packet progressPacket, source, instructions string, log func(string, string) error) (string, error) {
+	if r.progressAdviceExhausted {
+		return "", nil // Unavailability already disclosed once; do not retry a proven-doomed packet.
+	}
 	reviewedPhase := r.progressPhase(packet)
 	packet.deduplicateEvidence()
 	options := []string{r.Prompts.Text("decision.discovery.continue"), r.Prompts.Text("decision.discovery.act"), r.Prompts.Text("decision.discovery.reconsider")}
@@ -440,6 +443,7 @@ func (r *Runner) progressAdvice(ctx context.Context, w *watcher, packet progress
 		}
 		if w != nil {
 			w.phaseFacts = reviewedPhase
+			w.consecutiveFailures = 0 // This touchpoint reviewed the failure run.
 			if r.LoopStall > 0 {
 				w.discoveryCalls %= r.LoopStall
 			}
@@ -449,6 +453,9 @@ func (r *Runner) progressAdvice(ctx context.Context, w *watcher, packet progress
 	if err != nil {
 		var unavailable *progressJudgeError
 		if errors.As(err, &unavailable) {
+			if unavailable.exhausted {
+				r.progressAdviceExhausted = true
+			}
 			return failed(err)
 		}
 		return "", err // Encoding and evidence writes remain authoritative failures.
@@ -499,6 +506,7 @@ func (r *Runner) progressAdvice(ctx context.Context, w *watcher, packet progress
 	if w != nil {
 		// Both touchpoints reviewed this settled phase, including silent verdicts.
 		w.phaseFacts = reviewedPhase
+		w.consecutiveFailures = 0 // One review per failure run, whichever touchpoint judged first.
 		if r.LoopStall > 0 {
 			w.discoveryCalls %= r.LoopStall
 		}
@@ -590,7 +598,10 @@ func (r *Runner) progressPhase(packet progressPacket) [32]byte {
 // Advisory callers (discovery advice and PAT/product enforcement) may
 // continue after a failed Judge call. Encoding, recording and all other
 // callers retain their existing error semantics.
-type progressJudgeError struct{ error }
+type progressJudgeError struct {
+	error
+	exhausted bool // protected remainder proven not to fit; retrying cannot succeed
+}
 
 func (e *progressJudgeError) Unwrap() error { return e.error }
 
@@ -641,7 +652,7 @@ func (r *Runner) progressJudgment(ctx context.Context, input any, req decision.R
 			r.progressRefusedBytes = len(raw)
 		}
 		if !errors.As(err, &capacity) || admission >= 12 {
-			return req, decision.Verdict{}, &progressJudgeError{fmt.Errorf("progress advice unavailable: %w", err)}
+			return req, decision.Verdict{}, &progressJudgeError{error: fmt.Errorf("progress advice unavailable: %w", err)}
 		}
 		// A refusal is local admission, not inference. Batch optional omissions
 		// before retrying: one refusal per small field caused thousands of native
@@ -663,7 +674,7 @@ func (r *Runner) progressJudgment(ctx context.Context, input any, req decision.R
 			}
 		}
 		if removed == 0 {
-			return req, decision.Verdict{}, &progressJudgeError{fmt.Errorf("progress advice unavailable: protected evidence exceeds capacity: %w", err)}
+			return req, decision.Verdict{}, &progressJudgeError{error: fmt.Errorf("progress advice unavailable: protected evidence exceeds capacity: %w", err), exhausted: true}
 		}
 		if err := log("note", fmt.Sprintf("progress input refused before inference; retrying after %d disclosed optional evidence omissions", removed)); err != nil {
 			return req, decision.Verdict{}, err

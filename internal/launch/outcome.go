@@ -45,6 +45,29 @@ type attemptRecord struct {
 	Transcript       []llm.Message
 }
 
+// UnmarshalJSON tolerates foreign AttemptLog records. Revision records carry
+// a plan.Revision object under the Revision key; the counter here is numeric,
+// so a non-numeric value belongs to another record kind and decodes as zero.
+func (r *attemptRecord) UnmarshalJSON(data []byte) error {
+	type plain attemptRecord
+	var wire struct {
+		plain
+		Revision json.RawMessage `json:"Revision"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*r = attemptRecord(wire.plain)
+	r.Revision = 0
+	if len(wire.Revision) > 0 {
+		var n int
+		if err := json.Unmarshal(wire.Revision, &n); err == nil {
+			r.Revision = n
+		}
+	}
+	return nil
+}
+
 func (r Result) Qualified() bool {
 	command, acceptance := "", ""
 	if r.brief != nil {
