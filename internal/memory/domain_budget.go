@@ -15,6 +15,12 @@ import (
 const DomainInitialTokens = 1000
 const DomainTokens = 2000
 
+// Acceptance keeps the stated limits above as the authoring target while
+// allowing a small unadvertised margin for near-limit model-authored text.
+func authoredTokenAcceptanceLimit(limit int) int {
+	return (limit*6 + 4) / 5
+}
+
 const DomainNativeTokens = "native-token-ids"
 const DomainUTF8Bytes = "utf8-bytes-conservative"
 
@@ -123,7 +129,7 @@ func AdmitDomainEnvelopeLimit(ctx context.Context, count TokenCounter, limit int
 	if n < 0 {
 		return "", fmt.Errorf("domain tokenizer returned an invalid count")
 	}
-	if n > limit {
+	if n > authoredTokenAcceptanceLimit(limit) {
 		unit := "tokens"
 		if basis == DomainUTF8Bytes {
 			unit = "UTF-8 bytes (conservative estimate, not measured tokens)"

@@ -374,9 +374,17 @@ func TestPreparationRecoveryPartialEffectsNextWire(t *testing.T) {
 			http.NotFound(w, req)
 			return
 		}
-		var body struct{ Messages []llm.Message }
+		var body struct {
+			Messages []llm.Message
+			Tools    []json.RawMessage
+		}
 		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 			t.Error(err)
+			return
+		}
+		if len(body.Tools) == 0 && len(body.Messages) >= 2 && strings.Contains(body.Messages[1].Content, "[kind=") {
+			frame, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "Partial preparation effects are preserved."}, "finish_reason": "stop"}}})
+			fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", frame)
 			return
 		}
 		var latest graph.Result

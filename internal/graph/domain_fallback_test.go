@@ -48,10 +48,11 @@ func TestDomainFallbackBoundsActualGraphEnvelopeAndExemptsFacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body += strings.Repeat("x", memory.DomainTokens-sectionBytes)
+	accepted := memory.DomainTokens * 6 / 5
+	body += strings.Repeat("x", accepted-sectionBytes)
 	put()
 	raw, err = a.ExecBounded(t.Context(), query, "", nil, config.Defaults().Tools.GraphQL)
-	if err != nil || len(raw) >= memory.DomainTokens {
+	if err != nil || len(raw) >= accepted {
 		t.Fatalf("exact enriched section boundary: emitted bytes=%d err=%v", len(raw), err)
 	}
 	_, err = memory.PutKnowledge(t.Context(), s, root, "test", "project/design/identity", strings.Repeat("ordinary ", 2000), "", "", "")

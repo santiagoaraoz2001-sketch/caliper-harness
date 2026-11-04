@@ -33,10 +33,10 @@ func TestDomainAuthoringBoundsEachSectionBeforeIDOnlyAppend(t *testing.T) {
 		} // Separate actual retrieval envelope.
 		for _, ref := range section.References {
 			if ref.Label == "oversized navigation" {
-				return 1001, nil
+				return memory.DomainInitialTokens*6/5 + 1, nil
 			}
 			if ref.Label == "oversized inherited navigation" {
-				return 2001, nil
+				return memory.DomainTokens*6/5 + 1, nil
 			}
 		}
 		_, value, ok := strings.Cut(section.Body, "budget=")
@@ -63,20 +63,20 @@ func TestDomainAuthoringBoundsEachSectionBeforeIDOnlyAppend(t *testing.T) {
 		}
 		return result
 	}
-	appendGuide("## choices\nbudget=1001", "", "", true)
+	appendGuide("## choices\nbudget=1201", "", "", true)
 	if got := projectExec(t, a, `{knowledge(key:"project/guides/new-domain/topic"){id}}`); string(got.Data) != `{"knowledge":[]}` {
 		t.Fatal("first oversized guide saved")
 	}
 	first := appendGuide("## choices\nbudget=1000", "", "", false).Effects[0].ID
 	// A revision can enrich an existing anchor, but cannot grant a new anchor
 	// the expanded allowance or consume the previous ID on rejection.
-	appendGuide("## choices\nbudget=2000\n## new section\nbudget=1001", first, "", true)
+	appendGuide("## choices\nbudget=2000\n## new section\nbudget=1201", first, "", true)
 	current := projectExec(t, a, `{knowledge(key:"project/guides/new-domain/topic"){id}}`)
 	if !strings.Contains(string(current.Data), first) {
 		t.Fatal("rejection changed current immutable version")
 	}
 	second := appendGuide("## choices\nbudget=2000\n## new section\nbudget=1000", first, "", false).Effects[0].ID
-	appendGuide("## choices\nbudget=2001\n## new section\nbudget=1000", second, "", true)
+	appendGuide("## choices\nbudget=2401\n## new section\nbudget=1000", second, "", true)
 	appendGuide("## choices\nbudget=2000\n## new section\nbudget=2000", second, "", false)
 	// Direct navigation is part of a new section's bound even for ID-only output.
 	key = "project/guides/new-domain/navigation"
@@ -111,7 +111,7 @@ func TestDomainReadRejectsOversizedInitialHostDataButKeepsOrdinaryPageValue(t *t
 	}
 	bounded := a.WithDomainTokenCounter(func(_ context.Context, raw string) (int, error) {
 		if strings.Contains(raw, `"section":`) {
-			return 1001, nil
+			return memory.DomainInitialTokens*6/5 + 1, nil
 		}
 		return 100, nil
 	})

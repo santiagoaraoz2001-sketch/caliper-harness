@@ -83,7 +83,7 @@ func TestGuidanceLocatorSyntaxDoesNotRelaxSectionOrAggregateBudgets(t *testing.T
 		t.Fatal(err)
 	}
 	f.d.NewModel = func() agent.Model {
-		return domainContextCountModel{count: func(context.Context, string) (int, error) { return memory.DomainInitialTokens + 1, nil }}
+		return domainContextCountModel{count: func(context.Context, string) (int, error) { return memory.DomainInitialTokens*6/5 + 1, nil }}
 	}
 	for _, prefix := range []string{"", "knowledge:"} {
 		if _, err := planningGuidance(t.Context(), f.d, prefix+key+"#shape"); !errors.Is(err, memory.ErrDomainBudget) {
@@ -108,7 +108,7 @@ func TestGuidanceLocatorSyntaxDoesNotRelaxSectionOrAggregateBudgets(t *testing.T
 	f.d.NewModel = func() agent.Model {
 		return domainContextCountModel{count: func(_ context.Context, raw string) (int, error) {
 			if strings.Contains(raw, `"items":`) {
-				return memory.DomainTokens + 1, nil
+				return memory.DomainTokens*6/5 + 1, nil
 			}
 			return 100, nil
 		}}

@@ -427,8 +427,8 @@ func (r *Runner) groundProgressRefusal(packet *progressPacket, refusal string, n
 }
 
 func (r *Runner) progressAdvice(ctx context.Context, w *watcher, packet progressPacket, source, instructions string, log func(string, string) error) (string, error) {
-	if r.progressAdviceExhausted {
-		return "", nil // Unavailability already disclosed once; do not retry a proven-doomed packet.
+	if r.progressAdviceExhaustedFor(packet) {
+		return "", nil // Unavailability already disclosed for this basis; do not retry a proven-doomed packet.
 	}
 	reviewedPhase := r.progressPhase(packet)
 	packet.deduplicateEvidence()
@@ -454,7 +454,7 @@ func (r *Runner) progressAdvice(ctx context.Context, w *watcher, packet progress
 		var unavailable *progressJudgeError
 		if errors.As(err, &unavailable) {
 			if unavailable.exhausted {
-				r.progressAdviceExhausted = true
+				r.markProgressAdviceExhausted(packet)
 			}
 			return failed(err)
 		}
@@ -585,6 +585,26 @@ func (p *progressPacket) deduplicateEvidence() {
 			dedup(fmt.Sprintf("RecentCompletedReplies[%d].ToolCalls[%d].Arguments", i, j), call.ID, []byte(args), func() { call.Arguments = "" }, func() { call.Arguments = args })
 		}
 	}
+}
+
+// Capacity exhaustion is tied to the evidence basis that proved it. A new
+// compaction can shrink protected history, and a workflow revision can select
+// different owner facts; either gets one fresh advisory probe.
+func (r *Runner) progressAdviceExhaustedFor(packet progressPacket) bool {
+	if !r.progressAdviceExhausted {
+		return false
+	}
+	if r.Continuation.Compactions != r.progressAdviceExhaustedCompactions || r.progressPhase(packet) != r.progressAdviceExhaustedPhase {
+		r.progressAdviceExhausted = false
+		return false
+	}
+	return true
+}
+
+func (r *Runner) markProgressAdviceExhausted(packet progressPacket) {
+	r.progressAdviceExhausted = true
+	r.progressAdviceExhaustedCompactions = r.Continuation.Compactions
+	r.progressAdviceExhaustedPhase = r.progressPhase(packet)
 }
 
 func (r *Runner) progressPhase(packet progressPacket) [32]byte {

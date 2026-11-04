@@ -25,7 +25,7 @@ func TestDomainBudgetUsesTokensAndExplicitNamespace(t *testing.T) {
 	if err := AdmitDomain(t.Context(), func(context.Context, string) (int, error) { return 2000, nil }, payload); err != nil {
 		t.Fatal(err)
 	}
-	if err := AdmitDomain(t.Context(), func(context.Context, string) (int, error) { return 2001, nil }, []byte("x")); err == nil {
+	if err := AdmitDomain(t.Context(), func(context.Context, string) (int, error) { return DomainTokens*6/5 + 1, nil }, []byte("x")); err == nil {
 		t.Fatal("byte length substituted for actual tokens")
 	}
 	if err := AdmitDomain(t.Context(), nil, payload); err == nil {

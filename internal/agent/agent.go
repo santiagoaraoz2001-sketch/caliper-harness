@@ -65,9 +65,12 @@ type Runner struct {
 	progressRefusedBytes int
 	// Set once an actual admission proves the protected remainder of an
 	// advisory packet cannot fit the judge. Nothing is truncated to force
-	// a fit; advisory attempts simply stop repeating a proven-doomed packet.
-	progressAdviceExhausted bool
-	enforcement             enforcement
+	// a fit; advisory attempts stop for that compaction/workflow basis.
+	// A later compaction or workflow revision gets one new probe.
+	progressAdviceExhausted            bool
+	progressAdviceExhaustedCompactions int
+	progressAdviceExhaustedPhase       [32]byte
+	enforcement                        enforcement
 	// StyleEnforcement, when true with a non-empty Styleguide, sends a
 	// validated task to the style judge once per run before handoff.
 	StyleEnforcement       bool

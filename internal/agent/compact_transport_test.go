@@ -108,21 +108,46 @@ func TestCompactionTransportProjectionPreservesOwningFacts(t *testing.T) {
 	}
 }
 
-func TestCompactionTransportPreflightStopsBeforeSummary(t *testing.T) {
+func TestCompactionTransportTruncatesEssentialReview(t *testing.T) {
+	c := passedCompactionFixture()
+	c.Add("note", "user", "ESSENTIAL HEAD "+strings.Repeat("USER AUTHORITY <&> ", 10000)+" ESSENTIAL TAIL", false)
+	original := c.Clone()
+	r := truthRunner(t, &scriptModel{}, 262144)
+	r.JudgePreflight = systemOnePreflight()
+	req, err := r.compactionRequest(c, "source kept on disk", "SUMMARY MUST SURVIVE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = r.JudgePreflight(req); err != nil {
+		t.Fatalf("truncated request does not fit judge transport: %v", err)
+	}
+	for _, want := range []string{"SUMMARY MUST SURVIVE", "ESSENTIAL HEAD", "ESSENTIAL TAIL", "[TRUNCATED FOR DECISION TRANSPORT", "original_bytes="} {
+		if !strings.Contains(req.Context, want) {
+			t.Fatalf("truncated request lost %q", want)
+		}
+	}
+	if !reflect.DeepEqual(c, original) {
+		t.Fatal("truncation mutated the continuation")
+	}
+}
+
+func TestCompactionTransportTruncationAllowsSummaryGeneration(t *testing.T) {
 	c := passedCompactionFixture()
 	c.Add("note", "user", strings.Repeat("USER AUTHORITY <&> ", 10000), false)
-	m := &scriptModel{replies: []string{"Must never be generated"}}
+	m := &scriptModel{replies: []string{"Generated after truncated transport preflight"}}
 	r := truthRunner(t, m, 262144)
 	r.JudgePreflight = systemOnePreflight()
 	judged := 0
-	r.Judge = func(context.Context, decision.Request) (decision.Verdict, error) {
+	r.Judge = func(_ context.Context, req decision.Request) (decision.Verdict, error) {
 		judged++
+		if !strings.Contains(req.Context, "[TRUNCATED FOR DECISION TRANSPORT") {
+			t.Fatal("judge did not receive the disclosed truncated transport copy")
+		}
 		return decision.Verdict{}, nil
 	}
 	next, _, ran, err := r.Compact(context.Background(), c)
-	var capacity *decision.ContextCapacityError
-	if !errors.As(err, &capacity) || ran || len(m.seen) != 0 || judged != 0 || !reflect.DeepEqual(next, c) {
-		t.Fatalf("preflight failed: ran=%v generated=%d judged=%d err=%v", ran, len(m.seen), judged, err)
+	if err != nil || ran || len(m.seen) != 1 || judged != 1 || !reflect.DeepEqual(next, c) {
+		t.Fatalf("truncated preflight failed: ran=%v generated=%d judged=%d err=%v", ran, len(m.seen), judged, err)
 	}
 }
 

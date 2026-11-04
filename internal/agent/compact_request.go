@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"unicode/utf8"
 
 	"specific-harness/internal/decision"
 	"specific-harness/internal/session"
@@ -151,6 +152,27 @@ func (r *Runner) compactionRequestLimit(c session.Continuation, source, summary 
 			optional = append(optional, i)
 		}
 		if len(optional) == 0 {
+			// User-directed last resort: truncate only this judge-transport
+			// copy, keeping the head (summary/early anchors) and tail
+			// (latest anchors/owning facts). The continuation itself is
+			// unchanged; the marker and digest disclose the truncation.
+			target := len(raw) / 2
+			if maxContextBytes > 0 && target > maxContextBytes {
+				target = maxContextBytes
+			}
+			for target >= 1024 {
+				candidate := req
+				candidate.Context = truncateDecisionContext(raw, target)
+				if r.JudgePreflight == nil {
+					return candidate, nil
+				}
+				if e := r.JudgePreflight(candidate); e == nil {
+					return candidate, nil
+				} else if !errors.As(e, &capacity) {
+					return candidate, e
+				}
+				target /= 2
+			}
 			return req, fmt.Errorf("compaction protected review exceeds decision capacity; context intact: %w", err)
 		}
 		// Halve optional history per dry retry rather than marshal once per
@@ -160,6 +182,26 @@ func (r *Runner) compactionRequestLimit(c session.Continuation, source, summary 
 			omitted = append(omitted, anchors[i])
 		}
 	}
+}
+
+func truncateDecisionContext(raw []byte, max int) string {
+	if max <= 0 || len(raw) <= max {
+		return string(raw)
+	}
+	marker := fmt.Sprintf("\n[TRUNCATED FOR DECISION TRANSPORT original_bytes=%d sha256=%x]\n", len(raw), sha256.Sum256(raw))
+	if max <= len(marker) {
+		return marker[:max]
+	}
+	budget := max - len(marker)
+	head := budget / 2
+	for head > 0 && !utf8.RuneStart(raw[head]) {
+		head--
+	}
+	tailStart := len(raw) - (budget - head)
+	for tailStart < len(raw) && !utf8.RuneStart(raw[tailStart]) {
+		tailStart++
+	}
+	return string(raw[:head]) + marker + string(raw[tailStart:])
 }
 
 // An Ask result carries human input inside a tool envelope. Keep its whole

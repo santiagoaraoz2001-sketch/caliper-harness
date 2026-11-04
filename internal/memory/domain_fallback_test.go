@@ -12,7 +12,8 @@ import (
 )
 
 func TestDomainFallbackBoundsExactUnicodeEnvelopeWithBasis(t *testing.T) {
-	for _, size := range []int{2000, 2001} {
+	accepted := DomainTokens * 6 / 5
+	for _, size := range []int{DomainTokens + 1, accepted, accepted + 1} {
 		t.Run(fmt.Sprint(size), func(t *testing.T) {
 			body := "漢🚀"
 			var emitted []byte
@@ -28,7 +29,7 @@ func TestDomainFallbackBoundsExactUnicodeEnvelopeWithBasis(t *testing.T) {
 				calls++
 				return 0, fmt.Errorf("adapter: %w", llm.ErrTokenCountingUnsupported)
 			}, encode)
-			if basis != DomainUTF8Bytes || calls != 1 || len(emitted) != size || (err != nil) != (size > DomainTokens) {
+			if basis != DomainUTF8Bytes || calls != 1 || len(emitted) != size || (err != nil) != (size > accepted) {
 				t.Fatalf("basis=%q calls=%d bytes=%d err=%v", basis, calls, len(emitted), err)
 			}
 			if err != nil && !strings.Contains(err.Error(), "not measured tokens") {

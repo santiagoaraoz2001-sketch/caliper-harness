@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"specific-harness/internal/auth"
 	"specific-harness/internal/decision"
+	"specific-harness/internal/llm"
 	"specific-harness/internal/outcome"
 	"specific-harness/internal/plan"
 )
@@ -106,8 +108,8 @@ func checkCoherence(ctx context.Context, d Deps, approachID string, p *plan.Plan
 		}
 	}
 	if d.ManualReadiness {
-		prompt := fmt.Sprintf("Decision model disabled — approve approach %q as ready for execution? Review the complete task briefs below; this is readiness approval, not evidence that code passed checks or independent review.\n", approachID)
-		prompt += humanReadinessContext(p, a, tasks, req)
+		header := fmt.Sprintf("Decision model disabled — approve approach %q as ready for execution? Review the plan summary first, then the complete task briefs below; this is readiness approval, not evidence that code passed checks or independent review.", approachID)
+		prompt := readinessApprovalPrompt(ctx, d, header, p, a, tasks, req)
 		accepted := false
 		var confirmedSnapshot string
 		if d.ConfirmReadiness != nil {
@@ -164,9 +166,26 @@ func checkCoherence(ctx context.Context, d Deps, approachID string, p *plan.Plan
 	if v.Option != req.Options[0] && v.Option != req.Options[1] {
 		return fmt.Errorf("launch refused: decision returned unknown readiness option %q", v.Option)
 	}
-	if v.Confidence < d.Threshold {
-		prompt := fmt.Sprintf("unsure — leans %s (confidence %.3f) — admit approach %q anyway?", v.Option, v.Confidence, approachID)
-		prompt += "\nComplete judged brief:\n" + humanReadinessContext(p, a, tasks, req)
+	refusalError := func() error {
+		return fmt.Errorf("launch refused: the decision model judged approach %q incoherent or insufficiently bounded for goal %q (confidence %.2f) — revise the owning briefs so the tasks collectively cover the declared scope, each task is bounded, and each task has current acceptance assertions; then request readiness again", approachID, p.Goal, v.Confidence)
+	}
+	askUser := v.Confidence < d.Threshold
+	repeatedRevision := false
+	if v.Option == req.Options[1] && !askUser {
+		refusals, err := plan.RecordReadinessRefusal(d.Store, approachID)
+		if err != nil {
+			decision.LogJudgment(d.Log, decision.SourceCoherence, req, v, "refused", d.JudgmentContextChars)
+			return fmt.Errorf("launch refused: record readiness refusal: %w", err)
+		}
+		repeatedRevision = refusals >= 2
+		askUser = repeatedRevision
+	}
+	if askUser {
+		header := fmt.Sprintf("unsure — leans %s (confidence %.3f) — admit approach %q anyway?", v.Option, v.Confidence, approachID)
+		if repeatedRevision {
+			header = fmt.Sprintf("The coherence judge recommends revision again (confidence %.3f) — admit approach %q anyway? Approval admits this exact brief.", v.Confidence, approachID)
+		}
+		prompt := readinessApprovalPrompt(ctx, d, header, p, a, tasks, req)
 		accepted := false
 		var confirmedSnapshot string
 		if d.ConfirmReadiness != nil {
@@ -192,6 +211,9 @@ func checkCoherence(ctx context.Context, d Deps, approachID string, p *plan.Plan
 			if confirmedSnapshot != "" {
 				return &outcome.ReadinessNotApprovedError{Store: d.Store.Identity(), ApproachID: approachID, Snapshot: confirmedSnapshot}
 			}
+			if repeatedRevision {
+				return refusalError()
+			}
 			return fmt.Errorf("launch refused: coherence unsure (confidence %.2f)", v.Confidence)
 		}
 		if ctx.Err() != nil {
@@ -203,11 +225,101 @@ func checkCoherence(ctx context.Context, d Deps, approachID string, p *plan.Plan
 	}
 	if v.Option == req.Options[1] {
 		decision.LogJudgment(d.Log, decision.SourceCoherence, req, v, "refused", d.JudgmentContextChars)
-		return fmt.Errorf("launch refused: the decision model judged approach %q incoherent or insufficiently bounded for goal %q (confidence %.2f)", approachID, p.Goal, v.Confidence)
+		return refusalError()
 	}
 	decision.LogJudgment(d.Log, decision.SourceCoherence, req, v, "admitted", d.JudgmentContextChars)
 	markAdmitted()
 	return nil
+}
+
+const (
+	readinessSummaryRequestedTokens = 300
+	readinessSummaryAcceptedTokens  = 500
+)
+
+// readinessApprovalPrompt is presentation only. The complete judged brief
+// remains below the summary and is still passed separately to snapshot-bound
+// confirmation; the summary never changes admission identity.
+func readinessApprovalPrompt(ctx context.Context, d Deps, header string, p *plan.Plan, a *plan.Approach, tasks []*plan.Task, req decision.Request) string {
+	full := humanReadinessContext(p, a, tasks, req)
+	summary := readinessSummary(ctx, d, full, p, a, tasks)
+	return strings.TrimRight(header, "\n") + "\nPlan summary:\n" + summary + "\n\nComplete judged brief:\n" + full
+}
+
+func readinessSummary(ctx context.Context, d Deps, full string, p *plan.Plan, a *plan.Approach, tasks []*plan.Task) string {
+	fallback := func() string { return fallbackReadinessSummary(p, a, tasks) }
+	if d.NewSummaryModel == nil || (d.ConfirmReadiness == nil && d.Ask == nil && (d.In == nil || d.Out == nil)) {
+		return fallback()
+	}
+	model := d.NewSummaryModel()
+	if model == nil {
+		return fallback()
+	}
+	instructions := d.Prompts.Text("launch.readiness.summary_instructions")
+	condense := d.Prompts.Text("launch.readiness.summary_condense")
+	requested := fmt.Sprintf("no more than %d tokens", readinessSummaryRequestedTokens)
+	if !strings.Contains(instructions, requested) || !strings.Contains(condense, requested) {
+		return fallback()
+	}
+	messages := []llm.Message{
+		{Role: "system", Content: instructions},
+		{Role: "user", Content: full},
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		reply, _, usage, err := model.Chat(ctx, messages)
+		if err != nil || ctx.Err() != nil {
+			return fallback()
+		}
+		reply = strings.TrimSpace(plan.DisplayText(reply))
+		if reply == "" {
+			return fallback()
+		}
+		if tokens, ok := readinessSummaryTokens(ctx, model, reply, usage); ok && tokens <= readinessSummaryAcceptedTokens {
+			return reply
+		}
+		if attempt == 0 {
+			messages = []llm.Message{
+				{Role: "system", Content: condense},
+				{Role: "user", Content: reply},
+			}
+			continue
+		}
+		return fallback()
+	}
+	return fallback()
+}
+
+func readinessSummaryTokens(ctx context.Context, model any, text string, usage llm.Usage) (int, bool) {
+	if usage.Reported && usage.Out > 0 {
+		return usage.Out, true
+	}
+	if counter, ok := model.(interface {
+		CountTokens(context.Context, string) (int, error)
+	}); ok {
+		n, err := counter.CountTokens(ctx, text)
+		if err == nil {
+			return n, n >= 0
+		}
+		if !errors.Is(err, llm.ErrTokenCountingUnsupported) {
+			return 0, false
+		}
+	}
+	// Match the existing conservative fallback where no native tokenizer is
+	// available: bytes overstate tokens, so acceptance stays within budget.
+	return len([]byte(text)), true
+}
+
+func fallbackReadinessSummary(p *plan.Plan, a *plan.Approach, tasks []*plan.Task) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Goal: %s\nApproach: %s\nTasks:\n", plan.DisplayStructured(p.Goal), plan.DisplayStructured(a.Title))
+	for i, task := range tasks {
+		fmt.Fprintf(&b, "%d. %s — %s\n", i+1, task.Title, task.Prompt)
+	}
+	summary := strings.TrimSpace(plan.DisplayText(b.String()))
+	if len([]byte(summary)) <= readinessSummaryAcceptedTokens {
+		return summary
+	}
+	return fmt.Sprintf("This approach contains %d task(s). Read the complete judged brief below for the goal, approach and every task before approving.", len(tasks))
 }
 
 // ReadinessBudget reports the current complete request, without judging or transitioning.

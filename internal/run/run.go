@@ -683,6 +683,9 @@ func LaunchDeps(cfg config.Config, s *store.Store, server, model string, maxStep
 }
 func launchDeps(cfg config.Config, s *store.Store, server, model string, maxSteps, window int, in io.Reader, out io.Writer, w *files.Workspace, behavior string, services ...*bash.ServiceOwner) launch.Deps {
 	counter := llm.New(server, model).WithRuntime(cfg.Model.Runtime).CountTokens
+	newModel := func() agent.Model {
+		return llm.New(server, model).WithPlainTimeout(time.Duration(cfg.Model.PlainRequestTimeoutSeconds) * time.Second).WithRuntime(cfg.Model.Runtime).WithToolProtocol(cfg.Model.ToolProtocol).WithParams(ModelParams(cfg.Params))
+	}
 	return launch.Deps{Prompts: cfg.PromptCatalog, CheckReport: cfg.Coding.ReportContract(),
 		KnowledgeLimits:     cfg.Tools.GraphQL,
 		ProjectContext:      projectContext(cfg, s, w.Path, counter),
@@ -710,9 +713,8 @@ func launchDeps(cfg config.Config, s *store.Store, server, model string, maxStep
 		},
 		WorkspaceExcludes: workspaceExcludes(cfg, s),
 		Workspace:         w.Path, Store: s, Behavior: behavior,
-		NewModel: func() agent.Model {
-			return llm.New(server, model).WithPlainTimeout(time.Duration(cfg.Model.PlainRequestTimeoutSeconds) * time.Second).WithRuntime(cfg.Model.Runtime).WithToolProtocol(cfg.Model.ToolProtocol).WithParams(ModelParams(cfg.Params))
-		},
+		NewModel:        newModel,
+		NewSummaryModel: newModel,
 		NewRegistry: func() *tool.Registry {
 			sub := tool.NewRegistry(cfg.PromptCatalog)
 			var current *tool.Registry

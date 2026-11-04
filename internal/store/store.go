@@ -79,6 +79,7 @@ var schemaAlters = []struct{ table, column, ddl string }{
 	{"Approach", "needs_ready", `ALTER TABLE Approach ADD needs_ready BOOL`},
 	// v0.2.5: judged-brief hash whose readiness admission may be reused.
 	{"Approach", "admitted_brief", `ALTER TABLE Approach ADD admitted_brief STRING`},
+	{"Approach", "readiness_refusals", `ALTER TABLE Approach ADD readiness_refusals INT64`},
 	// T3.3: task-block detail columns. Old rows read NULL → "".
 	{"Task", "current", `ALTER TABLE Task ADD current STRING`},
 	{"Task", "target", `ALTER TABLE Task ADD target STRING`},

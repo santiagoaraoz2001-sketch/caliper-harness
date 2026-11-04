@@ -22,7 +22,8 @@ func TestDomainAdmissionCountsProjectedAliasesAndKeepsOrdinaryFactsSeparate(t *t
 	a := projectAPI(t, s, t.TempDir())
 	projectExec(t, a, `mutation {appendKnowledge(key:"project/design/identity",body:"ordinary fact",expectedPreviousId:""){id}}`)
 	query := `{ordinary:knowledge(key:"project/design/identity"){body} first:knowledge(key:"caliper/standards/ui",section:"identity"){words:body wordsAgain:body} second:knowledge(key:"caliper/standards/ui",section:"identity"){body}}`
-	for _, tokens := range []int{1999, 2000, 2001} {
+	accepted := 2400
+	for _, tokens := range []int{accepted - 1, accepted, accepted + 1} {
 		calls := 0
 		counter := func(_ context.Context, raw string) (int, error) {
 			calls++
@@ -45,10 +46,10 @@ func TestDomainAdmissionCountsProjectedAliasesAndKeepsOrdinaryFactsSeparate(t *t
 		}
 		var result Result
 		json.Unmarshal(data, &result)
-		if tokens <= 2000 && (err != nil || result.DataOmitted) {
+		if tokens <= accepted && (err != nil || result.DataOmitted) {
 			t.Fatalf("valid boundary refused: %s %v", data, err)
 		}
-		if tokens > 2000 && (err == nil || !result.DataOmitted || string(result.Data) != `{"ordinary":[{"body":"ordinary fact"}]}` || !strings.Contains(err.Error(), "first[0], second[0]")) {
+		if tokens > accepted && (err == nil || !result.DataOmitted || string(result.Data) != `{"ordinary":[{"body":"ordinary fact"}]}` || !strings.Contains(err.Error(), "first[0], second[0]")) {
 			t.Fatalf("domain omission changed ordinary sibling or lost omission paths: %s %v", data, err)
 		}
 	}
@@ -57,7 +58,7 @@ func TestDomainAdmissionCountsProjectedAliasesAndKeepsOrdinaryFactsSeparate(t *t
 	// Successful nullable siblings must not leak uncounted guidance when another
 	// resolver fails. The same counter must survive the public scope wrapper.
 	calls := 0
-	rebound, err := a.WithDomainTokenCounter(func(context.Context, string) (int, error) { calls++; return 2001, nil }).Scoped(a.scope.root, "second", true)
+	rebound, err := a.WithDomainTokenCounter(func(context.Context, string) (int, error) { calls++; return accepted + 1, nil }).Scoped(a.scope.root, "second", true)
 	if err != nil {
 		t.Fatal(err)
 	}

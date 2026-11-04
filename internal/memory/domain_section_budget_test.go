@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -19,7 +20,8 @@ func TestDomainSectionInitialAndEnrichedBoundaries(t *testing.T) {
 		if limit != want {
 			t.Fatalf("section lineage selected %d, want %d", limit, want)
 		}
-		for _, count := range []int{want - 1, want, want + 1} {
+		accepted := (want*6 + 4) / 5 // Hidden +20% acceptance headroom; the stated limit remains want.
+		for _, count := range []int{want - 1, want, want + 1, accepted, accepted + 1} {
 			_, err := AdmitDomainSections(t.Context(), func(_ context.Context, payload string) (int, error) {
 				for _, field := range []string{`"key":"project/guides/custom/topic"`, `"section":"choices"`, `"body":`, `"label":"Follow a useful next hop"`, `"domain_budget_basis":"native-token-ids"`} {
 					if !strings.Contains(payload, field) {
@@ -28,15 +30,19 @@ func TestDomainSectionInitialAndEnrichedBoundaries(t *testing.T) {
 				}
 				return count, nil
 			}, "project/guides/custom/topic", previous, Sections("## choices\n漢🚀", "", ""), []Reference{{Key: "project/guides/custom/deeper", SourceSection: "choices", Label: "Follow a useful next hop"}})
-			if (err != nil) != (count > want) {
-				t.Fatalf("count=%d limit=%d err=%v", count, want, err)
+			if (err != nil) != (count > accepted) {
+				t.Fatalf("count=%d stated=%d accepted=%d err=%v", count, want, accepted, err)
+			}
+			if err != nil && !strings.Contains(err.Error(), "maximum is "+strconv.Itoa(want)) {
+				t.Fatalf("refusal disclosed a limit other than the stated maximum %d: %v", want, err)
 			}
 		}
 	}
 }
 
 func TestDomainInitialFallbackCountsCompleteUnicodeSection(t *testing.T) {
-	for _, size := range []int{DomainInitialTokens, DomainInitialTokens + 1} {
+	accepted := (DomainInitialTokens*6 + 4) / 5
+	for _, size := range []int{DomainInitialTokens, accepted, accepted + 1} {
 		body := "## choices\n漢🚀"
 		initial := 0
 		_, err := AdmitDomainSections(t.Context(), func(_ context.Context, payload string) (int, error) {
@@ -48,7 +54,7 @@ func TestDomainInitialFallbackCountsCompleteUnicodeSection(t *testing.T) {
 		}
 		body += strings.Repeat("x", size-initial)
 		basis, err := AdmitDomainSections(t.Context(), func(context.Context, string) (int, error) { return 0, llm.ErrTokenCountingUnsupported }, "project/guides/custom/topic", "", Sections(body, "", ""), nil)
-		if basis != DomainUTF8Bytes || (err != nil) != (size > DomainInitialTokens) {
+		if basis != DomainUTF8Bytes || (err != nil) != (size > accepted) {
 			t.Fatalf("size=%d basis=%s err=%v", size, basis, err)
 		}
 	}

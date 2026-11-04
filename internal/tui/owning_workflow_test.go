@@ -37,7 +37,7 @@ func TestOwningWorkflowCommandDialog(t *testing.T) {
 			cfg.Decision.Device = "cpu"
 			cfg.Decision.Runtime = "laya"
 			sel := decision.SelectionFor(cfg.Decision)
-			var forwards atomic.Int32
+			var forwards, summaries atomic.Int32
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				switch r.URL.Path {
@@ -52,16 +52,27 @@ func TestOwningWorkflowCommandDialog(t *testing.T) {
 					}
 					json.NewEncoder(w).Encode(map[string]any{"pick": 0, "option": q.Options[0], "confidence": .1, "model": "component", "device": "cpu"})
 				case "/chat/completions":
-					forwards.Add(1)
 					var body struct {
 						Messages []llm.Message
 						Stream   bool
 					}
 					json.NewDecoder(r.Body).Decode(&body)
 					text := "worker completed"
+					summary := false
 					for _, message := range body.Messages {
-						if message.Role == "user" && strings.HasPrefix(message.Content, "Review ") {
-							text = "PASS: actual true check"
+						if message.Role == "system" && (strings.Contains(message.Content, "Write a plain-language summary of the complete plan") || strings.Contains(message.Content, "Rewrite the summary below")) {
+							summary = true
+						}
+					}
+					if summary {
+						summaries.Add(1)
+						text = "Summary fixture."
+					} else {
+						forwards.Add(1)
+						for _, message := range body.Messages {
+							if message.Role == "user" && strings.HasPrefix(message.Content, "Review ") {
+								text = "PASS: actual true check"
+							}
 						}
 					}
 					if body.Stream {
@@ -225,11 +236,11 @@ func TestOwningWorkflowCommandDialog(t *testing.T) {
 			defer s.Close()
 			task, _ := plan.GetTask(s, x.ID)
 			if answer == "y" {
-				if settled.err != nil || !task.Qualified() || forwards.Load() != 2 {
-					t.Fatalf("accept: %+v %+v forwards%d", settled, task, forwards.Load())
+				if settled.err != nil || !task.Qualified() || forwards.Load() != 2 || summaries.Load() != 1 {
+					t.Fatalf("accept: %+v %+v forwards%d summaries%d", settled, task, forwards.Load(), summaries.Load())
 				}
-			} else if settled.err == nil || task.Attempts != 0 || forwards.Load() != 0 {
-				t.Fatalf("decline executed %+v %+v forwards%d", settled, task, forwards.Load())
+			} else if settled.err == nil || task.Attempts != 0 || forwards.Load() != 0 || summaries.Load() != 1 {
+				t.Fatalf("decline executed %+v %+v forwards%d summaries%d", settled, task, forwards.Load(), summaries.Load())
 			}
 		})
 	}

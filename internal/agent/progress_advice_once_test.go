@@ -80,3 +80,33 @@ func TestProgressAdviceStopsAfterCapacityExhaustion(t *testing.T) {
 		t.Fatalf("unavailability must be disclosed exactly once, got %d (%s)", judgmentErrors, strings.Join(errKinds, ","))
 	}
 }
+
+func TestProgressAdviceReprobesAfterCompactionOrRevision(t *testing.T) {
+	attempts := 0
+	r, w := adviceFixture(t, func(q decision.Request) (decision.Verdict, error) {
+		attempts++
+		return decision.Verdict{}, &decision.ContextCapacityError{Message: "provider context limit"}
+	})
+	log := func(string, string) error { return nil }
+	probe := func(want int) {
+		t.Helper()
+		packet, err := r.progressEvidence(t.Context(), w)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.progressAdvice(t.Context(), w, packet, "discovery-checkpoint", "instructions", log); err != nil {
+			t.Fatal(err)
+		}
+		if attempts != want {
+			t.Fatalf("attempts=%d, want %d", attempts, want)
+		}
+	}
+	probe(1)
+	probe(1) // Same compaction and workflow revision: still exhausted.
+	r.Continuation.Compactions++
+	probe(2) // A published compaction can change the protected packet.
+	probe(2)
+	r.Continuation.Workflow = &session.WorkflowScope{Store: "owner", Kind: "task", ID: "revised"}
+	probe(3) // A revised workflow selection is a new advisory basis.
+	probe(3)
+}

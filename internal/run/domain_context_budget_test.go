@@ -90,7 +90,7 @@ func TestDomainContextRefusesLocatorOverflowAndPreservesCountFailures(t *testing
 	if _, err := boundGuidanceItems(t.Context(), func(context.Context, string) (int, error) {
 		calls++
 		if calls == 1 {
-			return memory.DomainTokens + 1, nil
+			return memory.DomainTokens*6/5 + 1, nil
 		}
 		if calls == 2 {
 			return 100, nil
@@ -102,7 +102,8 @@ func TestDomainContextRefusesLocatorOverflowAndPreservesCountFailures(t *testing
 }
 
 func TestDomainContextCollectiveExactNativeBoundary(t *testing.T) {
-	for _, n := range []int{memory.DomainTokens - 1, memory.DomainTokens, memory.DomainTokens + 1} {
+	accepted := memory.DomainTokens * 6 / 5
+	for _, n := range []int{memory.DomainTokens + 1, accepted, accepted + 1} {
 		items := []projectContextItem{{Key: "project/design/identity", Body: "ordinary owner fact"}, {Key: "project/guides/custom/topic", ID: "version", Section: "shape", Selection: "pinned", Status: "supplied", Body: "漢🚀", Links: []memory.Reference{{Key: "project/guides/custom/deep", Section: "example", Label: "Useful next hop"}}}}
 		calls := 0
 		err := admitGuidanceItems(t.Context(), func(_ context.Context, raw string) (int, error) {
@@ -117,7 +118,7 @@ func TestDomainContextCollectiveExactNativeBoundary(t *testing.T) {
 			}
 			return n, nil
 		}, items)
-		if calls != 1 || (err != nil) != (n > memory.DomainTokens) {
+		if calls != 1 || (err != nil) != (n > accepted) {
 			t.Fatalf("count=%d calls=%d err=%v", n, calls, err)
 		}
 	}
@@ -166,8 +167,9 @@ func TestSelectedDomainEnrichedFallbackUsesFetchedPreviousSectionLineage(t *test
 	if err := admitGuidanceItem(t.Context(), count, &item); err != nil {
 		t.Fatal(err)
 	}
+	accepted := memory.DomainTokens * 6 / 5
 	raw, _ := json.Marshal(item)
-	item.Body += strings.Repeat("x", memory.DomainTokens-len(raw))
+	item.Body += strings.Repeat("x", accepted-len(raw))
 	if err := admitGuidanceItem(t.Context(), count, &item); err != nil {
 		t.Fatal("enriched boundary refused", err)
 	}
@@ -258,7 +260,7 @@ func TestDomainContextAdmissionFailurePreservesExactOrdinaryFacts(t *testing.T) 
 						}
 					}
 					if failure == "locator-budget" {
-						return memory.DomainTokens + 1, nil
+						return memory.DomainTokens*6/5 + 1, nil
 					}
 					if failure == "native-count-timeout" {
 						return 0, context.DeadlineExceeded

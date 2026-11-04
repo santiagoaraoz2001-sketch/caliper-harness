@@ -71,6 +71,9 @@ type Approach struct {
 	// AdmittedBrief is the sha256 of the exact judged coherence context
 	// whose readiness admission succeeded; empty until first admission.
 	AdmittedBrief string
+	// ReadinessRefusals counts consecutive confident coherence refusals.
+	// Admission resets it; it is admission metadata, not brief content.
+	ReadinessRefusals int
 }
 
 // Task is one subagent prompt node. The six block fields hold its lab
@@ -306,7 +309,7 @@ func GetPlan(s stateStore, id string) (*Plan, error) {
 
 // GetApproach loads one approach node.
 func GetApproach(s stateStore, id string) (*Approach, error) {
-	rows, err := s.Query(`MATCH (a:Approach) WHERE a.id = $id RETURN a.id AS id, a.title AS title, a.state AS state, a.created_at AS created_at, a.needs_ready AS needs_ready, a.admitted_brief AS admitted_brief`,
+	rows, err := s.Query(`MATCH (a:Approach) WHERE a.id = $id RETURN a.id AS id, a.title AS title, a.state AS state, a.created_at AS created_at, a.needs_ready AS needs_ready, a.admitted_brief AS admitted_brief, a.readiness_refusals AS readiness_refusals`,
 		map[string]any{"id": id})
 	if err != nil {
 		return nil, err
@@ -322,8 +325,24 @@ func GetApproach(s stateStore, id string) (*Approach, error) {
 // instead of re-judging or re-asking. Brief edits change the hash and
 // therefore re-judge; lifecycle state is deliberately not part of the hash.
 func MarkBriefAdmitted(s stateStore, id, briefHash string) error {
-	return s.Write(`MATCH (a:Approach) WHERE a.id = $id SET a.admitted_brief = $hash`,
+	return s.Write(`MATCH (a:Approach) WHERE a.id = $id SET a.admitted_brief = $hash, a.readiness_refusals = 0`,
 		map[string]any{"id": id, "hash": briefHash})
+}
+
+// RecordReadinessRefusal increments the approach's consecutive confident
+// coherence-refusal count and returns the new count.
+func RecordReadinessRefusal(s *store.Store, id string) (int, error) {
+	count := 0
+	err := s.Update(func(tx *store.Tx) error {
+		a, err := GetApproach(tx, id)
+		if err != nil {
+			return err
+		}
+		count = a.ReadinessRefusals + 1
+		return tx.Write(`MATCH (a:Approach) WHERE a.id = $id SET a.readiness_refusals = $n`,
+			map[string]any{"id": id, "n": int64(count)})
+	})
+	return count, err
 }
 
 // ApproachPlan returns the plan owning an approach.
@@ -398,7 +417,7 @@ func RetiredPlans(s stateStore) ([]*Plan, error) {
 
 // PlanApproaches returns an approach list for tree views.
 func PlanApproaches(s stateStore, planID string) ([]*Approach, error) {
-	rows, err := s.Query(`MATCH (p:Plan)-[:HAS_APPROACH]->(a:Approach) WHERE p.id = $id RETURN a.id AS id, a.title AS title, a.state AS state, a.created_at AS created_at, a.needs_ready AS needs_ready, a.admitted_brief AS admitted_brief ORDER BY created_at`,
+	rows, err := s.Query(`MATCH (p:Plan)-[:HAS_APPROACH]->(a:Approach) WHERE p.id = $id RETURN a.id AS id, a.title AS title, a.state AS state, a.created_at AS created_at, a.needs_ready AS needs_ready, a.admitted_brief AS admitted_brief, a.readiness_refusals AS readiness_refusals ORDER BY created_at`,
 		map[string]any{"id": planID})
 	if err != nil {
 		return nil, err
@@ -672,7 +691,8 @@ func approachOf(r map[string]any) (*Approach, error) {
 	title, _ := r["title"].(string)
 	state, _ := r["state"].(string)
 	needsReady, _ := r["needs_ready"].(bool)
-	return &Approach{ID: id, Title: title, State: state, CreatedAt: ts, NeedsReady: needsReady, AdmittedBrief: stringField(r, "admitted_brief")}, nil
+	refusals, _ := r["readiness_refusals"].(int64)
+	return &Approach{ID: id, Title: title, State: state, CreatedAt: ts, NeedsReady: needsReady, AdmittedBrief: stringField(r, "admitted_brief"), ReadinessRefusals: int(refusals)}, nil
 }
 
 func taskOf(r map[string]any) (*Task, error) {

@@ -9,7 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"specific-harness/internal/agent"
 	"specific-harness/internal/decision"
+	"specific-harness/internal/llm"
 	"specific-harness/internal/plan"
 	"specific-harness/internal/prompts"
 	"specific-harness/internal/store"
@@ -57,6 +59,116 @@ func TestReadyCheckRejectsIncoherent(t *testing.T) {
 	}
 	if a.State != plan.ApproachReady {
 		t.Errorf("reject must leave the approach ready, state=%s", a.State)
+	}
+}
+
+type readinessSummaryModel struct {
+	replies  []string
+	tokens   []int
+	calls    int
+	requests [][]llm.Message
+}
+
+func (m *readinessSummaryModel) Chat(_ context.Context, msgs []llm.Message) (string, string, llm.Usage, error) {
+	m.requests = append(m.requests, append([]llm.Message(nil), msgs...))
+	i := m.calls
+	m.calls++
+	if i >= len(m.replies) {
+		i = len(m.replies) - 1
+	}
+	return m.replies[i], "summary-model", llm.Usage{Out: m.tokens[i], Reported: true}, nil
+}
+
+func TestReadyCheckConfidentRevisionEscalatesToUser(t *testing.T) {
+	_, aid, d := gateDeps(t, 2)
+	d.Judge = stubVerdict(decision.Verdict{Option: offGoal, Confidence: 0.9}, nil)
+	d.NewSummaryModel = func() agent.Model { return nil }
+	asks := 0
+	d.Ask = func(_ context.Context, prompt string) bool {
+		asks++
+		if !strings.Contains(prompt, "recommends revision") || !strings.Contains(prompt, "Plan summary:") || !strings.Contains(prompt, "Complete judged brief:") {
+			t.Fatalf("revision was not escalated with summary and full brief: %s", prompt)
+		}
+		if strings.Index(prompt, "Plan summary:") > strings.Index(prompt, "Complete judged brief:") {
+			t.Fatalf("summary must precede the full brief: %s", prompt)
+		}
+		return true
+	}
+	if err := ReadyCheck(context.Background(), d, aid); err == nil || !strings.Contains(err.Error(), "incoherent") || asks != 0 {
+		t.Fatalf("first confident revision must remain a refusal without asking: asks=%d err=%v", asks, err)
+	}
+	if err := ReadyCheck(context.Background(), d, aid); err != nil {
+		t.Fatalf("user override after repeated confident revision failed: %v", err)
+	}
+	if asks != 1 {
+		t.Fatalf("repeated confident revision asked %d times, want 1", asks)
+	}
+}
+
+func TestReadinessApprovalSummaryUses300RequestAnd500Acceptance(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		tokens []int
+		want   string
+		calls  int
+	}{
+		{"accepts hidden ceiling", []int{500}, "SUMMARY AT CEILING", 1},
+		{"condenses above hidden ceiling", []int{501, 280}, "CONDENSED SUMMARY", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, aid, d := gateDeps(t, 2)
+			d.ManualReadiness = true
+			model := &readinessSummaryModel{replies: []string{"SUMMARY AT CEILING", "CONDENSED SUMMARY"}, tokens: tc.tokens}
+			if tc.calls == 1 {
+				model.replies = []string{tc.want}
+			} else {
+				model.replies = []string{"OVERLONG SUMMARY", tc.want}
+			}
+			d.NewSummaryModel = func() agent.Model { return model }
+			d.Ask = func(_ context.Context, prompt string) bool {
+				if !strings.Contains(prompt, "Plan summary:\n"+tc.want) || strings.Contains(prompt, "OVERLONG SUMMARY") {
+					t.Fatalf("accepted summary not presented: %s", prompt)
+				}
+				if !strings.Contains(prompt, "Complete judged brief:") || !strings.Contains(prompt, "1. t0") || !strings.Contains(prompt, "2. t1") {
+					t.Fatalf("full brief is not available below the summary: %s", prompt)
+				}
+				return true
+			}
+			if err := ReadyCheck(context.Background(), d, aid); err != nil {
+				t.Fatal(err)
+			}
+			if model.calls != tc.calls {
+				t.Fatalf("summary calls=%d, want %d", model.calls, tc.calls)
+			}
+			for _, request := range model.requests {
+				joined := ""
+				for _, message := range request {
+					joined += message.Content + "\n"
+				}
+				if !strings.Contains(joined, "no more than 300 tokens") || strings.Contains(joined, "500 tokens") {
+					t.Fatalf("model was not asked only for the stated limit: %s", joined)
+				}
+			}
+		})
+	}
+}
+
+func TestReadinessApprovalSummaryFallsBackWithoutOverlongModelText(t *testing.T) {
+	_, aid, d := gateDeps(t, 2)
+	d.ManualReadiness = true
+	model := &readinessSummaryModel{replies: []string{"OVERLONG FIRST", "OVERLONG SECOND"}, tokens: []int{900, 800}}
+	d.NewSummaryModel = func() agent.Model { return model }
+	d.Ask = func(_ context.Context, prompt string) bool {
+		if strings.Contains(prompt, "OVERLONG") || !strings.Contains(prompt, "Plan summary:") || !strings.Contains(prompt, "Complete judged brief:") {
+			t.Fatalf("overlong model summary leaked or fallback missing: %s", prompt)
+		}
+		return true
+	}
+	if err := ReadyCheck(context.Background(), d, aid); err != nil {
+		t.Fatal(err)
+	}
+	if model.calls != 2 {
+		t.Fatalf("summary should get one condense retry, calls=%d", model.calls)
 	}
 }
 

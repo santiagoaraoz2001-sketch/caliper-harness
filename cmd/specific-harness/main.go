@@ -16,6 +16,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"specific-harness/internal/agent"
 	"specific-harness/internal/auth"
 	"specific-harness/internal/config"
 	"specific-harness/internal/decision"
@@ -548,7 +549,9 @@ func runGraph(args cliArgs) {
 			return nil, err
 		}
 		defer input.Close()
-		d := launch.Deps{ManualReadiness: cfg.Decision.Disabled, Prompts: pc, Store: s, Wf: cfg.Workflows, Judge: dj.Judge, Threshold: cfg.Decision.RiskThreshold, CoherenceMaxChars: cfg.Decision.CoherenceMaxChars, In: input, Out: os.Stderr}
+		d := launch.Deps{ManualReadiness: cfg.Decision.Disabled, Prompts: pc, Store: s, Wf: cfg.Workflows, Judge: dj.Judge, Threshold: cfg.Decision.RiskThreshold, CoherenceMaxChars: cfg.Decision.CoherenceMaxChars, In: input, Out: os.Stderr, NewSummaryModel: func() agent.Model {
+			return llm.New(cfg.Model.Server, cfg.Model.Name).WithPlainTimeout(time.Duration(cfg.Model.PlainRequestTimeoutSeconds) * time.Second).WithRuntime(cfg.Model.Runtime).WithToolProtocol(cfg.Model.ToolProtocol).WithParams(run.ModelParams(cfg.Params))
+		}}
 		return launch.Ready(ctx, d, id)
 	})
 	w, err := files.Capture(cfg.Tools.Bash, pc)

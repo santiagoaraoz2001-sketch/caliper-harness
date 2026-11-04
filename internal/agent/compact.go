@@ -397,7 +397,8 @@ func (r *Runner) reviewCompaction(ctx context.Context, c session.Continuation, s
 			return false, fmt.Errorf("compaction decision unavailable; context intact: %w", err)
 		}
 		// Retry only a typed pre-inference refusal. Reuse the exact candidate;
-		// halve optional projected history, never mandatory facts or the summary.
+		// halve optional projected history first; compactionRequestLimit may
+		// then truncate only the judge-transport copy as a last resort.
 		maxContextBytes = len(req.Context) / 2
 		if r.Session != nil {
 			if e := r.Session.Append(ctx, r.SessionID, "judgment-error", "compaction-facts admission refused before inference; retaining candidate and reducing optional projection: "+err.Error()); e != nil {

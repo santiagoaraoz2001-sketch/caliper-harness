@@ -29,20 +29,36 @@ import (
 
 // Only provider/decision replies are scripted. Factory binding, GraphQL,
 // readiness, regular-file input, owner state and durable SessionLog are real.
-func readinessProvider(t *testing.T, protocol string, calls []codingCall) (*httptest.Server, *atomic.Int32) {
+func readinessProvider(t *testing.T, protocol string, calls []codingCall) (*httptest.Server, *atomic.Int32, *atomic.Int32) {
 	t.Helper()
 	count := &atomic.Int32{}
+	summaries := &atomic.Int32{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.NotFound(w, r)
 			return
 		}
-		generation := count.Add(1)
 		var req map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Error(err)
 			return
 		}
+		if messages, ok := req["messages"].([]any); ok {
+			for _, rawMessage := range messages {
+				message, _ := rawMessage.(map[string]any)
+				content, _ := message["content"].(string)
+				if strings.Contains(content, "Write a plain-language summary of the complete plan") || strings.Contains(content, "Rewrite the summary below") {
+					summaries.Add(1)
+					if r.URL.Path != "/chat/completions" || req["stream"] == true {
+						t.Error("unexpected summary route/protocol", r.URL.Path)
+					}
+					raw, _ := json.Marshal(map[string]any{"model": "fixture", "choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "Summary fixture."}, "finish_reason": "stop"}}, "usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 3}})
+					_, _ = w.Write(raw)
+					return
+				}
+			}
+		}
+		generation := count.Add(1)
 		if r.URL.Path != "/chat/completions" || req["stream"] != true {
 			t.Error("unexpected model route/protocol", r.URL.Path)
 		}
@@ -71,7 +87,7 @@ func readinessProvider(t *testing.T, protocol string, calls []codingCall) (*http
 		fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", raw)
 	}))
 	t.Cleanup(srv.Close)
-	return srv, count
+	return srv, count, summaries
 }
 
 type readinessReceiptFailure struct{ agent.SessionLog }
@@ -234,7 +250,7 @@ func TestReadinessManualDenialStopsFactoryWithoutAnotherGeneration(t *testing.T)
 				if protocol == "structured" {
 					calls = append(calls, codingCall{"graphql", map[string]any{"query": fmt.Sprintf(`mutation{setTaskBlock(id:%q,current:"",target:"",sketch:"",acceptance:"",tests:"",verify:""){id}}`, task.ID)}})
 				}
-				provider, generations := readinessProvider(t, protocol, calls)
+				provider, generations, summaries := readinessProvider(t, protocol, calls)
 				cfg := config.Defaults()
 				cfg.Auth.Mode = config.AuthYOLO
 				cfg.Model.Runtime = "openai"
@@ -264,8 +280,8 @@ func TestReadinessManualDenialStopsFactoryWithoutAnotherGeneration(t *testing.T)
 					t.Fatal(err)
 				}
 				text, _, err := r.Run(t.Context(), "Implement the prepared task")
-				if err != nil || r.Outcome.Status != outcome.Stopped || !strings.Contains(r.Outcome.Reason, "manual readiness approval was not granted") || !strings.Contains(r.Outcome.Reason, snapshot) || text != r.Outcome.Reason || generations.Load() != 1 || judgments != 1 {
-					t.Fatalf("no authoritative stop: status=%+v generations=%d judgments=%d err=%v", r.Outcome, generations.Load(), judgments, err)
+				if err != nil || r.Outcome.Status != outcome.Stopped || !strings.Contains(r.Outcome.Reason, "manual readiness approval was not granted") || !strings.Contains(r.Outcome.Reason, snapshot) || text != r.Outcome.Reason || generations.Load() != 1 || summaries.Load() != 1 || judgments != 1 {
+					t.Fatalf("no authoritative stop: status=%+v generations=%d summaries=%d judgments=%d err=%v", r.Outcome, generations.Load(), summaries.Load(), judgments, err)
 				}
 				after, err := plan.GetTask(s, task.ID)
 				if err != nil {

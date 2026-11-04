@@ -39,6 +39,7 @@ type Deps struct {
 	Workspace           string // captured physical cwd for Bash and check receipts
 	Store               *store.Store
 	NewModel            func() agent.Model
+	NewSummaryModel     func() agent.Model // presentation-only readiness summary; never a worker
 	NewRegistry         func() *tool.Registry
 	NewKnowledge        func(sessionRef string, readOnly bool) (tool.Definition, error)
 	ProjectContext      func(context.Context, *session.Continuation, string) error
