@@ -65,3 +65,22 @@ func TestSetupDiscoveryStagesSingleDetectedWorkerWithoutWriting(t *testing.T) {
 		t.Fatal("detected decision service missing from judge choices")
 	}
 }
+
+// Retained Setup with a coding model already configured must never scan:
+// discovery is a first-use aid, and the explicit-only probing contract
+// (only the configured endpoint is probed) applies everywhere else.
+func TestSetupDiscoverySkipsScanWhenCodingModelConfigured(t *testing.T) {
+	m := setupFixture(t, 100, 30)
+	if m.Cfg.Model.Name == "" {
+		m.Cfg.Model.Name = "configured-model"
+	}
+	called := false
+	discover := func(context.Context, *http.Client) ([]serve.DiscoveredServer, error) {
+		called = true
+		return nil, nil
+	}
+	m.probeServeWithDiscovery(&http.Client{Transport: offlineTransport{}}, discover)()
+	if called {
+		t.Fatal("discovery scanned local listeners while a coding model was already configured")
+	}
+}

@@ -236,7 +236,7 @@ func (m *Model) probeServeWith(client *http.Client) tea.Cmd {
 // without typing an endpoint. Manage and background refreshes keep the
 // explicit-only contract and never scan.
 func (m *Model) probeServeWithDiscovery(client *http.Client, discover func(context.Context, *http.Client) ([]serve.DiscoveredServer, error)) tea.Cmd {
-	discoverSetup := discover != nil && m.setupActive()
+	discoverSetup := discover != nil && m.setupActive() && m.Cfg.Model.Name == ""
 	endpoints, recipes := m.serveEndpoints(), m.serveRecipes()
 	spawned := make(map[string]*serve.Proc, len(m.Serve.Spawned))
 	for u, p := range m.Serve.Spawned {
