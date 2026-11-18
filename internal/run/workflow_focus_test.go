@@ -112,7 +112,7 @@ func TestWorkflowPublicWireFrozenBatchAndPrefix(t *testing.T) {
 			var approvals []string
 			sink := focusDiskLog{dir: filepath.Join(dir, "sessions"), fail: failure}
 			bindDecisionFixture(t, &cfg, nil)
-			r, _, e := New(Deps{Tools: "full", Cfg: cfg, Store: s, Server: srv.URL, Model: "fixture", Session: sink, SessionID: "scope", MaxSteps: 6, Window: 32768, AskYesNo: func(_ context.Context, p string) bool { approvals = append(approvals, p); return true }}, "ONE_INTENT_λ")
+			r, _, e := New(Deps{Tools: "full", Cfg: cfg, Store: s, Server: srv.URL, Model: "fixture", Session: sink, SessionID: "scope", MaxSteps: 6, Window: 131072, AskYesNo: func(_ context.Context, p string) bool { approvals = append(approvals, p); return true }}, "ONE_INTENT_λ")
 			if e != nil {
 				t.Fatal(e)
 			}

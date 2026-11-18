@@ -163,7 +163,7 @@ func TestPreparedTaskArrayCannotBindFutureCreation(t *testing.T) {
 	cfg.Agent.LoopRepeat = 0
 	cfg.Agent.LoopStall = 0
 	bindDecisionFixture(t, &cfg, func(decision.Request) int { return 0 })
-	r, _, e := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, "root")}, Cfg: cfg, Store: s, Model: "component", Window: 32768, MaxSteps: 5, Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: "array"}, "prepare once")
+	r, _, e := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, "root")}, Cfg: cfg, Store: s, Model: "component", Window: 131072, MaxSteps: 5, Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: "array"}, "prepare once")
 	if e != nil {
 		t.Fatal(e)
 	}

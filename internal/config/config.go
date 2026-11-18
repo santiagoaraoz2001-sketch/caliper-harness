@@ -509,7 +509,7 @@ func Defaults() Config {
 		Retention: RetentionConfig{SessionMonths: 3},
 		Behavior:  BehaviorConfig{MaxTokens: 1000, CharsPerToken: 4, Path: "behavior.md"},
 		Recall:    RecallConfig{TopN: 3, MaxChars: 1000, MinWord: 4},
-		Auth:      AuthConfig{Mode: AuthAll, JudgedTools: []string{"bash", "fetch"}, FreeTools: []string{"grep", "find", "ask", "judge", "recall", "find_file", "find_dir", "help"}, MaxArgChars: 80},
+		Auth:      AuthConfig{Mode: AuthAll, JudgedTools: []string{"bash", "fetch"}, FreeTools: []string{"grep", "find", "ask", "judge", "recall", "find_file", "find_dir", "help", "wait"}, MaxArgChars: 80},
 		Params:    ParamsConfig{Temperature: 0.7, TopK: 40, RepetitionPenalty: 1.0, Thinking: true, MaxOutputTokens: 16384},
 		// MLX default: the Mac-native server. vLLM users point at :8000/v1.
 		Model: ModelConfig{PlainRequestTimeoutSeconds: 300, ToolProtocol: "structured", Runtime: "openai", Server: "http://127.0.0.1:8080/v1"},

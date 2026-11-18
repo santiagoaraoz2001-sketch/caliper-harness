@@ -19,6 +19,17 @@ import (
 	"specific-harness/internal/tool"
 )
 
+// lastTurnContent returns the final non-system message: per-request host
+// state rides on a trailing system tail after the last real turn.
+func lastTurnContent(messages []llm.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role != "system" {
+			return messages[i].Content
+		}
+	}
+	return ""
+}
+
 func TestPATLegacyConfiguredCheckOmission(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
@@ -146,13 +157,13 @@ func TestPATMainChecksReviewsAndHandsOffTwoTasks(t *testing.T) {
 		case 2:
 			call("check", map[string]string{})
 		case 3:
-			if !strings.Contains(body.Messages[len(body.Messages)-1].Content, "Current paired check passed") {
-				t.Error("passed check omitted review handoff", body.Messages[len(body.Messages)-1].Content)
+			if !strings.Contains(lastTurnContent(body.Messages), "Current paired check passed") {
+				t.Error("passed check omitted review handoff", lastTurnContent(body.Messages))
 			}
 			call("plan", map[string]string{"invoke": "STATUS"})
 		case 4, 8:
 			if mainCalls == 4 {
-				last := body.Messages[len(body.Messages)-1].Content
+				last := lastTurnContent(body.Messages)
 				if !strings.Contains(last, "normal final answer") || !strings.Contains(last, "no tool call") || strings.Contains(last, "running, stopped or cancelled") || strings.Contains(last, "answer only the next") {
 					t.Error("STATUS contradicts review completion", last)
 				}

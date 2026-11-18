@@ -40,7 +40,7 @@ func TestPartialFinishRetainsTrailingUsage(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "length") || !strings.Contains(err.Error(), tc.cause) {
 				t.Fatalf("lost failed finish/later cause: %v", err)
 			}
-			if reply.Usage != (Usage{7, 32, true}) || reply.FinishReason != "length" || reply.Served != "fixture" || reply.Message.Content != "before" || deltas.String() != "before" || len(reply.Message.ToolCalls) != 0 {
+			if reply.Usage != (Usage{In: 7, Out: 32, Reported: true}) || reply.FinishReason != "length" || reply.Served != "fixture" || reply.Message.Content != "before" || deltas.String() != "before" || len(reply.Message.ToolCalls) != 0 {
 				t.Fatalf("lost accounting or admitted late output: %+v, deltas %q", reply, deltas.String())
 			}
 		})

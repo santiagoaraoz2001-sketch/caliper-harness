@@ -142,7 +142,7 @@ texts:
   system.task.handoff: |2-
     For work already implemented, reuse passed checks only when host receipts mark them current for this task and attempt;
     otherwise run the bound behavioral check then project check. Source changes invalidate prior passes.
-    A normal final answer with no tool call requests independent review, not completion; no COMPLETE/FINISH call is needed.
+    A normal final answer with no tool call requests independent review, not completion; no COMPLETE/FINISH call is needed. Before it, stop any owned session service and remove scratch files you created this attempt unless one is cited evidence.
     Address remediation through the same task's current requeue/readiness/start route.
     After VALIDATED, report progress and follow plan's current question for the next task or approach.
     A dispatched worker returns its result to the orchestrator. The harness carries IDs and admission.
@@ -361,7 +361,7 @@ texts:
     workspace, commands and attempt; a probe from another directory does not establish failure of the pinned check.
     Use read/search and saved evidence for frozen Verify actions; only the bound check may execute commands.
     Source, DOM data and screenshot paths are not rendered visual inspection. Claim visual quality only
-    from rendered evidence actually available to this role; otherwise mark that requirement unverified.
+    from rendered evidence actually available to this role; otherwise mark that requirement unverified. If acceptance or verify explicitly requires actual play, a real browser, or rendered/user-observed evidence, tests/source/worker claims alone are EVIDENCE_MISSING and cannot support PASS.
     Report UNVERIFIED when required evidence is unavailable. Reuse this review's current passed acceptance-first/project-last
     episode; use check if it is missing or stale. Once required evidence is sufficient, return the verdict;
     repeating unchanged checks adds no coverage. Inspection that leaves project contents unchanged preserves it;
@@ -1554,6 +1554,26 @@ texts:
   # Fields: .MaxBytes. Supplied by the owning Go caller.
   help.oversize_guidance: |-
     help output exceeds tools.bash.max_bytes={{printf "%d" .MaxBytes}}; request a focused topic, e.g. help(topic="schema.read") for compact arguments or help(topic="read") for use cases
+  # Focused help.build_block documentation; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  help.build_block: "## help.build_block\nBuild one reusable block in order: action=start with a stable id and title, then action=set to fill the returned missing fields — pass fields with a JSON object to set several at once, or field/value for one — then action=publish. Set exactly one implementation: tool with impl_tool, main_model or delegated_worker with impl_instructions, or workflow with impl_workflow as workflow-id@version. Every set and publish needs the current expected_revision from the last result. Published versions never change; action=edit creates the next draft version. The /library screen shows the same drafts and published versions."
+
+  # Focused help.build_workflow documentation; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  help.build_workflow: "## help.build_workflow\nRead the library first. Use action=list and keep its search_token. If a workflow fits, use it. If it is close, use a task-local adaptation on attach or action=fork for a distinct specialization. Revise the reusable workflow with action=edit only when the method itself should change for future work. Create new work with action=start (pass the current search_token, or user_requested=true only when the user explicitly requested a new workflow), then action=set, then action=publish. Steps are published blocks, one block-id@version per line. Set applies_to tags, completion_requirements, and a revision_route that returns failures to the owning phase with evidence. Published versions never change. Versions after the first need revision_reason and revision_kind=preference or correction; publish a preference revision only after informing the user and receiving approval (user_approved=true). Enable a published version with library_workflow before attaching it."
+
+  # Focused help.library_workflow documentation; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  help.library_workflow: "## help.library_workflow\nUse action=list (with tag for a task kind) to inspect summary records and get a search_token. Enable one exact published workflow version, then action=attach to think with it as a method lens inside ordinary work or PAT. The attached version and block versions are pinned in protected session state; the current phase is supplied on each request. Use ordinary visible tools for every read, write, command, and check. Use action=phase only to move the method cursor and record observations, risks, and the next check; the final step number completes the lens. Use action=detach when the method no longer fits. A workflow never claims, approves, settles, or qualifies work."
+
+  # Focused help.wait documentation; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  help.wait: "## help.wait\nWait for one or more named conditions: a timer (duration_seconds, then keep the returned deadline_unix), process_id exit, a file_path that exists, is absent, or contains text, or an http_url reaching http_status. Each call polls for one bounded window and returns still_waiting with the unmatched conditions; call wait again with the same conditions and deadline. There is no total limit. Use wait instead of shell sleep loops or repeated status commands, for example while CI runs or a dev server starts."
+
+  # Focused help.elaborate documentation; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  help.elaborate: "## help.elaborate\nSave explanation and sign-off state on one actual Plan, Approach, or Task. First use action=get with kind and id. To revise, use action=set with purpose, inputs, evidence, risks, and expected_previous_id equal to the latest returned ID (empty for version 1); each set creates a new immutable draft version. Use action=submit to mark a draft pending. Add request_decision=true to set or submit only when the user should decide now; yes records approved and no records changes_requested for that exact version. The /plan detail shows the same record and lets the user approve with a or request changes with x. A chat explanation alone is not a saved elaboration or approval."
+
 
   # Model-only operating-guide overview; active schemas are still assembled by Go.
   # Original use sites: internal/tools/model-guide.md:1 (helpDefinition).
@@ -1564,7 +1584,7 @@ texts:
 
     Start with help(topic="schema") for the tools available now. Request schema.<tool> for exact arguments and a compact call template. GraphQL has a separate operation index at schema.graphql; schema.graphql.appendKnowledge saves product decisions or useful paths; schema.graphql.noticed records observations for the current Approach. Request help(topic="<tool>") for use cases and examples, or help(topic="guide") for the comprehensive guide.
 
-    Ordinary coding uses the core tools directly. In the main/orchestrator role, use plan() when useful or requested. Assigned workers/reviewers keep their frozen role. The host binds Plan → Approach → Task identities. Let each answer settle before using the next question. Drafting saves intentions. The later START plan(invoke="EXECUTE") claims work for the main model; explicit launch dispatches workers. Actual checks and independent review qualify work.
+    Ordinary coding uses the core tools directly. In the main/orchestrator role, use plan() when useful or requested. When advertised, use elaborate for graph-linked explanation/sign-off, build_block/build_workflow/library_workflow for reusable skill workflows on major or high-complexity work (check the library at task start; attach a matching method inside PAT or coding; build one only after that search when none fits or the user requests it), and wait for timer/process/file/HTTP readiness instead of shell polling. Assigned workers/reviewers keep their frozen role. The host binds Plan → Approach → Task identities. Let each answer settle before using the next question. Drafting saves intentions. The later START plan(invoke="EXECUTE") claims work for the main model; explicit launch dispatches workers. Actual checks and independent review qualify work.
 
     Only current advertised tools can be called. Documentation does not change scope or authorize an effect. Read failures and partial mutation receipts before retrying; preserve applied IDs and actual check outcomes. A success claim cannot replace execution evidence.
 
@@ -1864,7 +1884,8 @@ texts:
   # Fields: none. Supplied by the owning Go caller.
   tools.bash.purpose: >2-
     Run cmd in the task workspace; timeout is seconds, no cwd argument. Quote paths with spaces.
-    Prefer read/find_file/find_dir/grep for inspection, edit/write for changes, check for verification.
+    Prefer read/find_file/find_dir/grep for inspection and edit/write for changes; do not write files via
+    heredocs or patch scripts when edit/write can express the change. Use check for verification.
     Output combines stdout/stderr and marks truncation. Scope Git status with -- .; resolve porcelain
     paths against git rev-parse --show-toplevel, which may be an ancestor. An unborn HEAD means no
     baseline, not authority to explore unrelated directories.
@@ -2424,6 +2445,8 @@ texts:
     Use the queued UUID, or omit task for one complete unambiguous current-run prepare_task receipt.
     Empty/null refuses. Success consumes the binding and supplies frozen task instructions next request; wait for its receipt.
 
+  tools.task_start.method_check: "Method check: before coding, list library_workflow by a relevant tag and attach a fitting published workflow; if none fits, continue without a lens."
+
   # Model-facing desc prose for the current NewBuild registry constructor; executable
   # schema/authority remain Go-owned.
   # Original use sites: internal/launch/build.go:57 (NewBuild).
@@ -2732,6 +2755,222 @@ texts:
   # Fields: none. Supplied by the owning Go caller.
   tools.write.parameters.content: "complete UTF8 content"
 
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.build_block.description: "build one reusable workflow block field by field"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.build_block.purpose: "Create or revise one reusable block. Use action=start, then action=set to fill the returned missing fields (field/value for one field, or fields with a JSON object to set several at once), then action=publish. Published versions never change; action=edit creates the next draft version. Pass the current revision as expected_revision on every set and publish."
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.build_block.parameters.action: "start, edit, set, publish, get, or list"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.build_block.parameters.id: "stable block id: lowercase letters, digits, _ or -"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.build_block.parameters.title: "short block title for action=start"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.build_block.parameters.field: "one field to set: purpose, inputs, impl_type, impl_tool, impl_instructions, impl_workflow, outputs, completion_evidence, failure_handling, or examples"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.build_block.parameters.value: "field value; lists use one item per line; impl_workflow uses workflow-id@version"
+  tools.build_block.parameters.fields: "JSON object of field names to values to set several fields in one call (same value rules as value); pass instead of field/value"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.build_block.parameters.expected_revision: "current draft revision from the last build_block result"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.build_block.parameters.version: "published version for action=get; 0 means current draft or latest published"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.build_workflow.description: "build one reusable workflow from published blocks"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.build_workflow.purpose: "Create, fork, or revise one reusable skill workflow. Read library first: start needs search_token unless user requested creation. Fork specializations; edit only future method changes. Set fields (always applies_to), publish. Later versions need revision_reason/kind; preference needs user_approved. Published never changes."
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.build_workflow.parameters.action: "start, fork, edit, set, publish, get, or list"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.build_workflow.parameters.id: "stable workflow id: lowercase letters, digits, _ or -"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.build_workflow.parameters.title: "short workflow title for action=start"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.build_workflow.parameters.field: "one field to set: purpose, applies_to, based_on, revision_reason, revision_kind, inputs, steps, completion_requirements, or revision_route"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.build_workflow.parameters.value: "field value; steps use one block-id@version per line; inputs use one item per line"
+  tools.build_workflow.parameters.fields: "JSON object of field names to values to set several fields in one call (same value rules as value); pass instead of field/value"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.build_workflow.parameters.expected_revision: "current draft revision from the last build_workflow result"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.build_workflow.parameters.version: "published version for action=get; 0 means current draft or latest published"
+  tools.build_workflow.parameters.search_token: "current list token; required to start unless user_requested"
+  tools.build_workflow.parameters.user_requested: "true only if user explicitly requested a new workflow"
+  tools.build_workflow.parameters.source_id: "published source id for fork"
+  tools.build_workflow.parameters.source_version: "source version for fork; 0=latest published"
+  tools.build_workflow.parameters.user_approved: "true only after user approves exact preference revision"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.library_workflow.description: "find, enable, and attach published skill workflows as a method lens"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.library_workflow.purpose: "Find/attach published skill workflows. list/tag gives summaries + search_token. Enable exact version; attach lens in ordinary/PAT work; use visible tools; phase updates cursor; detach when unfit. Guidance qualifies nothing."
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.library_workflow.parameters.action: "list, enable, disable, attach, phase, detach, or status"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.library_workflow.parameters.id: "workflow id"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.library_workflow.parameters.version: "published workflow version for enable, disable, attach, or phase; 0 means latest published"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.library_workflow.parameters.execution_id: "legacy execution id for action=status only"
+  tools.library_workflow.parameters.step: "1-based phase; one past last completes lens"
+  tools.library_workflow.parameters.adaptation: "task-local overlay; never edits reusable workflow"
+  tools.library_workflow.parameters.observations: "observed facts for method cursor"
+  tools.library_workflow.parameters.risks: "unresolved risks for method cursor"
+  tools.library_workflow.parameters.next_check: "next concrete check for method cursor"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.library_workflow.parameters.evidence: "observed evidence that the current block completed"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.library_workflow.parameters.output: "output produced by the current block"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.library_workflow.parameters.inputs: "workflow inputs as name=value lines or a JSON object of strings for action=attach"
+  tools.library_workflow.parameters.tag: "optional applies_to tag filter for action=list, for example ui-design"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.wait.description: "wait for a timer or named event with visible polling"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.wait.purpose: "Wait for a duration, a process exit, a file condition, or an HTTP status. A still_waiting result is visible progress, not failure: call wait again with the same conditions and returned deadline_unix. There is no total wait limit. Do not use shell sleep loops instead."
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.wait.parameters.duration_seconds: "timer length in seconds; ignored after deadline_unix is returned"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.wait.parameters.deadline_unix: "absolute Unix deadline returned by an earlier wait call; keep it unchanged across polls"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.wait.parameters.process_id: "wake when this process id is no longer running"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.wait.parameters.file_path: "workspace-relative or absolute file path to observe"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.wait.parameters.file_contains: "optional text that the file must contain"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.wait.parameters.file_absent: "true wakes when the file is absent instead of present"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.wait.parameters.http_url: "HTTP or HTTPS URL to poll with GET"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.wait.parameters.http_status: "expected HTTP status; default 200"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.wait.parameters.poll_seconds: "seconds between checks in one call; default 5"
+
+  # Model-facing prose for the v0.3 workflow library and wait tools; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.wait.parameters.poll_window_seconds: "seconds one call may poll before returning still_waiting; default 30, maximum 120"
+
+  # Model-facing prose for graph-linked plan elaboration; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.elaborate.description: "save, read, submit, or request a decision on a versioned plan elaboration"
+
+  # Model-facing prose for graph-linked plan elaboration; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.elaborate.purpose: "Attach an immutable elaboration version to one actual Plan, Approach, or Task. Use action=get before revising. Use action=set with purpose, inputs, evidence, risks, and expected_previous_id from the latest version (empty for version 1). Use action=submit for an existing draft. Set request_decision=true only when the user is being asked to sign off now; the host records the actual yes/no answer. Chat prose is not approval and does not replace this record."
+
+  # Model-facing prose for graph-linked plan elaboration; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.elaborate.parameters.action: "get, set, or submit"
+
+  # Model-facing prose for graph-linked plan elaboration; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.elaborate.parameters.kind: "plan, approach, or task"
+
+  # Model-facing prose for graph-linked plan elaboration; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.elaborate.parameters.id: "actual Plan, Approach, or Task ID"
+
+  # Model-facing prose for graph-linked plan elaboration; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.elaborate.parameters.elaboration_id: "actual elaboration ID for action=submit; omit to submit the latest draft for kind and id"
+
+  # Model-facing prose for graph-linked plan elaboration; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.elaborate.parameters.purpose: "what this plan node is for and what outcome it owns"
+
+  # Model-facing prose for graph-linked plan elaboration; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.elaborate.parameters.inputs: "facts, artifacts, and prerequisites this node consumes"
+
+  # Model-facing prose for graph-linked plan elaboration; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.elaborate.parameters.evidence: "completion evidence that will be shown; do not claim unobserved results"
+
+  # Model-facing prose for graph-linked plan elaboration; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.elaborate.parameters.risks: "main risks, unknowns, and failure routes"
+
+  # Model-facing prose for graph-linked plan elaboration; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.elaborate.parameters.expected_previous_id: "latest elaboration ID from action=get; empty only when creating version 1"
+
+  # Model-facing prose for graph-linked plan elaboration; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.elaborate.parameters.request_decision: "true asks the user to approve this exact submitted version now; false only saves or submits it"
   # Model-facing desc prose for the current Definitions registry constructor; executable
   # schema/authority remain Go-owned.
   # Original use sites: internal/tools/files/files.go:270 (Definitions).
@@ -2767,7 +3006,7 @@ texts:
 
   # Corrective advice for internal/tools/files/files.go:349; no authority or effects implied.
   # Fields: none. Supplied by the owning Go caller.
-  guidance.files.existing_create: "set expected_hash to the retained current read sha256; read the file if it has not been observed"
+  guidance.files.existing_create: "set expected_hash to the retained current read sha256, or retry the same write once and this disclosed hash is applied if the file is unchanged; read the file if it has not been observed"
 
   # Corrective advice for internal/tools/files/files.go:415; no authority or effects implied.
   # Fields: none. Supplied by the owning Go caller.
@@ -2997,6 +3236,30 @@ texts:
   # Phase-aware advisory prefix for an actual current claim. Fields: none.
   continuation.bookkeeping.claimed_next_action: " Checkpoint claimed-task action (advisory): "
 
+  # Autonomous feature routing. Go includes only entries whose tools are in the current registry.
+  # Fields: none. Supplied by the owning Go caller.
+  system.features.heading: "Autonomous feature selection — use these only when the named tool is currently advertised:"
+
+  # Autonomous feature routing. Go includes this only when plan is advertised.
+  # Fields: none. Supplied by the owning Go caller.
+  system.features.plan: "- plan: PAT is for major work: new subsystem/directory with several connected files, interacting components, unclear dependencies, staged work, or high complexity. Call plan({}) alone first. Use direct coding for localized changes/small defects."
+
+  # Autonomous feature routing. Go includes this only when elaborate is advertised.
+  # Fields: none. Supplied by the owning Go caller.
+  system.features.elaborate: "- elaborate: when a selected Plan, Approach, or Task needs explanation or user sign-off, save its purpose, inputs, completion evidence, and risks with elaborate; submit that exact version for decision when approval is requested. Chat prose is not approval. Trigger: before asking the user to approve a plan whose brief is only a summary, elaborate the selected node first so the approval has a durable record to point at."
+
+  # Autonomous feature routing. Go includes this only when all library tools are advertised.
+  # Fields: none. Supplied by the owning Go caller.
+  system.features.library: "- build_block/build_workflow/library_workflow: for major/high-complexity work, first list for a skill workflow (tag if fits). PAT owns scope/acceptance/check/review/settlement; workflow is only method. Precedence: user > PAT > workflow. If fit, enable exact version and attach; phase updates cursor only. If close, local adaptation or fork. Create only after search when none fits or user requests. Revise reusable method only for future defects; inform user; preference publish needs approval. Lens notes are unverified."
+
+  # Autonomous feature routing. Go includes this only when wait is advertised.
+  # Fields: none. Supplied by the owning Go caller.
+  system.features.wait: "- wait: when progress depends on time, a process, a file, CI, or an HTTP service, call wait with that named condition. On still_waiting, call wait again with the same condition and returned deadline. Do not use shell sleep loops or repeated status polling. Trigger: any command you started whose result is not ready yet — name its process, file, or URL condition in wait instead of re-running status commands."
+
+  # Autonomous feature routing. Go includes this only when check is advertised.
+  # Fields: none. Supplied by the owning Go caller.
+  system.features.check: "- check: verify with the check tool, not with shell test commands. While debugging, run only the tests that cover the files and consumers you changed; when the change is ready to settle, run check once so the frozen acceptance pair produces the receipt the host will re-run. A green shell test run is not a check receipt."
+
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
   system.coding.direct: |2
     Ordinary coding: no PAT is required; plan({}) opens planning. Selected PAT requires all Task briefs for this Approach,
@@ -3004,6 +3267,7 @@ texts:
     Inspect source/tests. For an unfixed reported defect, run a distinguishing regression; preserve work already implemented and reuse its receipts.
     Disclose missing pre-change evidence. A new deliverable needs meaningful assertions. Run the exact configured check,
     or propose one from inspected files if unset. Preserve user constraints; isolate later causal probes, then recheck current source.
+    While debugging, run only the tests that cover the files and consumers you changed; reserve the full configured check for when the change is ready to settle.
     If the declared checker is conclusively unavailable, report its missing prerequisite; continue only to repair it within this task.
     Report actual changes, failures and unverified work.
 
@@ -3081,7 +3345,7 @@ texts:
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
   planning.proof: |2-
     DRAFT PROOF: State observable acceptance, distinguishing existing/proposed assertions and the literal
-    behavioral command. Reuse adequate existing assertions; add tests only for an uncovered obligation.
+    behavioral command. Preserve any user-requested proof mode verbatim in acceptance (actual play/browser means browser-observed evidence; tests/source alone cannot satisfy it). Reuse adequate existing assertions; add tests only for an uncovered obligation.
     Behavior and required verification belong in this task, not a future task.
     Use project/testing/strategy if adequate. For a new test decision, follow the testing guide's relevant topic
     to its oracle or worked example before choosing assertions. Save reusable test policy in project/testing/strategy;
@@ -3156,7 +3420,7 @@ texts:
     Report changes to the user, actual verification and limits. If required work remains and TASK is
     offered, plan(invoke="TASK", title="<gap>", objective="<missing outcome>") pauses the Approach
     and drafts the missing Task; completed evidence stays recorded. Honor the requested stopping point;
-    existing implementation authorization covers remaining work within that scope.
+    existing implementation authorization covers remaining work within that scope. Classify each gap as acceptance-blocking or optional evidence: draft a missing Task only for an acceptance-blocking gap or explicitly required proof mode; optional evidence and explicitly waived proof are limits, not new execution.
     If the objective is satisfied, plan(invoke="NEXT_ARTICLE") completes the Approach and returns to
     the Plan's next deliverable. Follow the next question; do not assume the Plan is finished.
 
@@ -3164,7 +3428,7 @@ texts:
   planning.plan_complete: |2-
     ASSESS PLAN COMPLETION: all authored deliverables have completed Approaches. Compare actual results
     with the original outcome, rules and proof below. If a requirement remains, use the existing revision
-    route; do not claim completion. Otherwise report evidence and plan(invoke="COMPLETE") requests
+    route; do not claim completion. Optional evidence gaps and explicitly waived proof do not reopen execution. Otherwise report evidence/limits and plan(invoke="COMPLETE") requests
     owning completion. Qualified descendants are necessary; their count alone does not prove the outcome.
 
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
@@ -3181,7 +3445,9 @@ texts:
   # Guided planning/direct-mode instruction; Go owns phase/schema/authority. Fields: none.
   planning.running: |2-
     TASK RUNNING: planning is finished for this task. Its current executor uses the frozen brief and
-    advertised coding tools. Once the required work and current paired check are finished, give a
+    advertised coding tools. If this request does not advertise coding tools, this run has not
+    re-entered execution yet: call task_start with this task to resume its recorded claim and
+    restore the coding surface, then continue the same attempt. Once the required work and current paired check are finished, give a
     normal final answer with no tool call to request independent review. Report actual changes,
     check results and remaining problems. Do not call plan to finish, repeat a current passed check,
     or start the next task before qualification. STATUS is optional inspection, not a handoff.
@@ -3481,6 +3747,16 @@ texts:
   # Owning initial run limits; 0 limit and null remaining mean no separate ceiling.
   # Owner: internal/agent/agent.go. Fields: Budget (complete runtime JSON, string).
   continuation.run_budget: "Initial run budget: {{.Budget}}. Null means no ceiling; host checks count as calls."
+  continuation.method_lens.intro: "Method lens {{.WorkflowID}}@{{.WorkflowVersion}} ({{.Title}}): {{.Purpose}} Guidance only. Precedence: latest user instruction, then PAT acceptance/check, then this workflow. It claims, approves, settles, and qualifies nothing; its notes are unverified."
+  continuation.method_lens.applies_to: "Applies to: {{.Tags}}."
+  continuation.method_lens.inputs: "Workflow inputs: {{.Inputs}}."
+  continuation.method_lens.steps: "Phases: {{.Steps}}."
+  continuation.method_lens.phase: "Current phase {{.Step}}/{{.Total}}: {{.Title}}. Purpose: {{.Purpose}} Instructions: {{.Instructions}} Completion evidence: {{.Evidence}} Failure handling: {{.Failure}}"
+  continuation.method_lens.complete: "Method phases are complete. Keep these notes only as unverified context or detach the lens."
+  continuation.method_lens.adaptation: "Task-local adaptation: {{.Adaptation}}."
+  continuation.method_lens.observations: "Method observations: {{.Observations}}."
+  continuation.method_lens.risks: "Method risks: {{.Risks}}."
+  continuation.method_lens.next_check: "Next method check: {{.NextCheck}}."
 
   # Compact reference framing/examples; executable names/arguments are generated from the owning registry/SDL.
   help.schema.index: |-

@@ -57,7 +57,7 @@ func TestPersistedAssignmentCheckpointRemainsPrepareAfterRunReset(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, _, err := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: scope}, Cfg: cfg, Store: s, Model: "fixture", Server: model.URL, MaxSteps: 2, Window: 32768,
+	r, _, err := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: scope}, Cfg: cfg, Store: s, Model: "fixture", Server: model.URL, MaxSteps: 2, Window: 65536,
 		Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: "resume-progress"}, "inspect")
 	if err != nil {
 		t.Fatal(err)

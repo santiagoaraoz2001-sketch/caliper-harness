@@ -49,8 +49,13 @@ func TestPlanningPublicationReplacesOnlyOwnedCurrentFrame(t *testing.T) {
 	if owned != 1 {
 		t.Fatalf("same question accumulated %d owned schema frames", owned)
 	}
+	// The superseded owned frame is retired in place (exact bytes, kind no
+	// longer current) so retained history stays append-only.
+	if retired := r.Continuation.Entries[1]; retired.Kind != "history" || retired.Message.Content != "DRAFT PLAN root children=0\n"+r.currentPlanningQuestion() {
+		t.Fatalf("superseded owned frame not retired in place: %+v", retired)
+	}
 	for i, want := range []session.Entry{legacy, foreign, unread} {
-		if !reflect.DeepEqual(r.Continuation.Entries[i+1], want) {
+		if !reflect.DeepEqual(r.Continuation.Entries[i+2], want) {
 			t.Fatal("unknown/foreign/unread schema changed")
 		}
 	}
@@ -83,8 +88,13 @@ func TestPlanningReceiptRetiresOnlyRedundantOwnedSchema(t *testing.T) {
 	if !r.ensurePlanningPublication() || !r.planningPublished(question) {
 		t.Fatal("actual current receipt did not retire its redundant schema")
 	}
-	if len(r.Continuation.Entries) != 3 || !reflect.DeepEqual(r.Continuation.Entries[1:], group) {
+	// The redundant owned schema is retired in place (exact bytes, kind no
+	// longer current); the actual native group and intent are untouched.
+	if len(r.Continuation.Entries) != 4 || !reflect.DeepEqual(r.Continuation.Entries[2:], group) {
 		t.Fatal("actual native group or intent changed")
+	}
+	if retired := r.Continuation.Entries[1]; retired.Kind != "history" || r.ownsPreparationPublication(retired) {
+		t.Fatalf("redundant owned schema not retired in place: %+v", retired)
 	}
 	if r.ensurePlanningPublication() {
 		t.Fatal("receipt caused another publication")

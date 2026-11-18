@@ -125,8 +125,12 @@ func TestAskFidelityRunnerHTTPAndNativeSession(t *testing.T) {
 			}
 			<-requests
 			messages := <-requests
-			if messages[len(messages)-1].Content != observation {
-				t.Errorf("actual next request got%q want%q", messages[len(messages)-1].Content, observation)
+			foundObservation := false
+			for _, message := range messages {
+				foundObservation = foundObservation || message.Content == observation
+			}
+			if !foundObservation {
+				t.Errorf("actual next request lacks exact Ask observation; last=%q want%q", messages[len(messages)-1].Content, observation)
 			}
 			// Settlement can append factual evidence after the reply; assert the
 			// byte-exact observation and its provenance without a tail index.

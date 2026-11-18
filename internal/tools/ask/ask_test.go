@@ -63,6 +63,39 @@ func TestAskOptionsParse(t *testing.T) {
 	}
 }
 
+func TestAskParsesJSONStringOptionsIntoIndividualChoices(t *testing.T) {
+	var got []Question
+	p := &Prompter{Ask: func(ctx context.Context, qs []Question) ([]Answer, error) {
+		got = qs
+		return []Answer{{Picked: "stop at stops"}}, nil
+	}}
+	res, err := New(p).Execute(context.Background(), tool.Args{
+		"question": "where should a save resume?",
+		"options":  `["stop at stops", "resume mid-flight"]`,
+	})
+	if err != nil || !strings.Contains(res.Text, `"picked":"stop at stops"`) {
+		t.Fatalf("parsed JSON option not accepted: res=%+v err=%v", res, err)
+	}
+	if len(got) != 1 || strings.Join(got[0].Options, "|") != "stop at stops|resume mid-flight|"+NoneOfAbove {
+		t.Fatalf("JSON options not parsed into individual choices: %+v", got)
+	}
+}
+
+func TestAskRejectsMalformedJSONStringOptionsBeforePrompt(t *testing.T) {
+	called := false
+	p := &Prompter{Ask: func(ctx context.Context, qs []Question) ([]Answer, error) {
+		called = true
+		return nil, nil
+	}}
+	_, err := New(p).Execute(context.Background(), tool.Args{"question": "which?", "options": `["a", 2]`})
+	if err == nil || !strings.Contains(err.Error(), "options must be") {
+		t.Fatalf("malformed JSON options accepted: %v", err)
+	}
+	if called {
+		t.Fatal("malformed options reached the user prompt")
+	}
+}
+
 func TestAskNaturalCommaIsNotAnOptionDelimiter(t *testing.T) {
 	got := parseOptions("Industrial, restrained UI\r\nWarm, handcrafted cockpit\n Minimal, quiet")
 	want := []string{"Industrial, restrained UI", "Warm, handcrafted cockpit", "Minimal, quiet", NoneOfAbove}

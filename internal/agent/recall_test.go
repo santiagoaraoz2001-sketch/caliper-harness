@@ -16,8 +16,8 @@ func TestMemoriesInjectAfterPrompt(t *testing.T) {
 		t.Fatalf("final=%q err=%v", final, err)
 	}
 	msgs := model.seen[0]
-	if len(msgs) != 3 || msgs[0].Role != "system" || msgs[1].Role != "user" || msgs[1].Content != "go" ||
-		msgs[2].Role != "user" || msgs[2].Content != "Relevant memories:\n- [note] x" {
+	if len(msgs) != 4 || msgs[0].Role != "system" || msgs[1].Role != "user" || msgs[1].Content != "go" ||
+		msgs[2].Role != "user" || msgs[2].Content != "Relevant memories:\n- [note] x" || msgs[3].Role != "system" {
 		t.Errorf("msgs=%+v", msgs)
 	}
 	var found bool
@@ -39,7 +39,7 @@ func TestMemoriesEmptyOmits(t *testing.T) {
 	if _, _, err := r.Run(context.Background(), "go"); err != nil {
 		t.Fatal(err)
 	}
-	if len(model.seen[0]) != 2 {
+	if len(model.seen[0]) != 3 {
 		t.Errorf("msgs=%+v", model.seen[0])
 	}
 	for _, k := range sink.kinds {

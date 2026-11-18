@@ -230,7 +230,7 @@ func TestOriginalCommandsRemainUnchangedWithAdditions(t *testing.T) {
 			t.Fatalf("original command %s missing", name)
 		}
 	}
-	additions := []string{"open-diff", "changes", "turns", "setup", "update", "manage", "style", "tests"}
+	additions := []string{"open-diff", "changes", "turns", "setup", "update", "manage", "style", "tests", "plan", "library"}
 	for _, name := range additions {
 		if !names[name] {
 			t.Fatalf("added command %s missing", name)

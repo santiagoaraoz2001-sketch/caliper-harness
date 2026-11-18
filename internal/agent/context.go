@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"specific-harness/internal/llm"
+	"specific-harness/internal/prompts"
 	"specific-harness/internal/session"
 	"specific-harness/internal/tool"
 )
@@ -167,7 +168,12 @@ func (r *Runner) ProjectPhaseRegistry(reg *tool.Registry) *tool.Registry {
 		for _, name := range names {
 			discovery := name == "read" || name == "read_outside" || name == "find_outside" || name == "find" || name == "find_file" || name == "find_dir" || name == "grep" || name == "help"
 			metadata := strings.HasPrefix(name, "workflow_") && !executionTool(name)
-			if name == "plan" || name == "ask" || name == "graphql" || name == "prepare_task" || name == "ready_task" || name == "task_start" || metadata || discovery {
+			// Waiting is read-only observation, elaboration writes only
+			// graph-linked explanation state, and library tools write only
+			// user-scoped workflow definitions; none claims or executes
+			// project work, so all stay available during planning.
+			library := name == "wait" || name == "elaborate" || name == "build_block" || name == "build_workflow" || name == "library_workflow"
+			if name == "plan" || name == "ask" || name == "graphql" || name == "prepare_task" || name == "ready_task" || name == "task_start" || metadata || discovery || library {
 				allowed = append(allowed, name)
 			}
 		}
@@ -182,6 +188,46 @@ func (r *Runner) ProjectPhaseRegistry(reg *tool.Registry) *tool.Registry {
 		names = allowed
 	}
 	return reg.View(names)
+}
+
+// autonomousFeatureGuidance lists only feature tools present in the current
+// registry. Frozen worker/reviewer roles retain wait guidance but do not get
+// orchestrator planning or elaboration routing. Library guidance follows
+// library tools into planning and claimed coding alike (the main model uses
+// workflows to design PAT work and to execute it), but never into review.
+func (r *Runner) autonomousFeatureGuidance() string {
+	if r.Registry == nil {
+		return ""
+	}
+	pc := r.Prompts
+	if pc == nil || !pc.Has("system.features.heading") {
+		pc = prompts.Builtin()
+	}
+	has := func(name string) bool {
+		_, ok := r.Registry.Lookup(name)
+		return ok
+	}
+	orchestrator := !r.Reviewing && r.TaskSystem == ""
+	entries := []string{}
+	if orchestrator && has("plan") {
+		entries = append(entries, pc.Text("system.features.plan"))
+	}
+	if orchestrator && has("elaborate") {
+		entries = append(entries, pc.Text("system.features.elaborate"))
+	}
+	if !r.Reviewing && has("build_block") && has("build_workflow") && has("library_workflow") {
+		entries = append(entries, pc.Text("system.features.library"))
+	}
+	if has("check") {
+		entries = append(entries, pc.Text("system.features.check"))
+	}
+	if has("wait") {
+		entries = append(entries, pc.Text("system.features.wait"))
+	}
+	if len(entries) == 0 {
+		return ""
+	}
+	return pc.Text("system.features.heading") + "\n" + strings.Join(entries, "\n")
 }
 
 func (r *Runner) basePrompt() string {
@@ -213,17 +259,8 @@ func (r *Runner) basePrompt() string {
 			base += "\n" + r.Prompts.Text("system.workflow.hierarchy")
 		}
 	}
-	if r.toolSurfaceNote != "" {
-		base += "\n" + r.toolSurfaceNote
-	}
-	if r.workflowHeader != "" {
-		_, guided := r.Registry.Lookup("plan")
-		if !guided || !r.PlanningActive() || direct || r.settlement != nil {
-			base += "\n" + r.workflowHeader
-		}
-		if !direct && r.settlement == nil && (r.Assigned == nil || !r.PlanningActive()) {
-			base += "\n" + r.Prompts.Text("system.workflow.focused")
-		}
+	if guidance := r.autonomousFeatureGuidance(); guidance != "" {
+		base += "\n" + guidance
 	}
 	if direct {
 		base += "\n" + r.Prompts.Format("system.task.execute", a.TaskID, a.Attempt)
@@ -263,14 +300,43 @@ func (r *Runner) basePrompt() string {
 			base += " Bound task check: " + r.CheckCommand
 		}
 	}
+	return base
+}
+
+// dynamicPromptTail carries per-request state that used to be rewritten
+// into the first system message on every request: the tool-surface delta,
+// the current workflow scope header, and the run budget. Any change there
+// invalidated the provider's cached prefix for the entire transcript
+// after it, so every planning transition paid a full re-prefill. The same
+// text now rides as the final message of the request snapshot only; the
+// retained system message and history stay byte-stable across requests.
+func (r *Runner) dynamicPromptTail() string {
+	a := r.Continuation.Assignment
+	direct := a != nil && r.ClaimedTaskScope(&session.WorkflowScope{Store: a.Store, Kind: "task", ID: a.TaskID})
+	var parts []string
+	if r.toolSurfaceNote != "" {
+		parts = append(parts, r.toolSurfaceNote)
+	}
+	if r.workflowHeader != "" {
+		_, guided := r.Registry.Lookup("plan")
+		if !guided || !r.PlanningActive() || direct || r.settlement != nil {
+			parts = append(parts, r.workflowHeader)
+		}
+		if !direct && r.settlement == nil && (r.Assigned == nil || !r.PlanningActive()) {
+			parts = append(parts, r.Prompts.Text("system.workflow.focused"))
+		}
+	}
+	if lens := r.methodLensPrompt(); lens != "" {
+		parts = append(parts, lens)
+	}
 	budget, _ := json.Marshal(struct {
 		StepLimit        int
 		RemainingSteps   *int
 		RunLimitSeconds  int
 		RemainingSeconds *int
 	}{r.MaxSteps, r.remainingSteps(0), r.MaxRunSeconds, r.remainingRunSeconds(0)})
-	base += "\n" + r.Prompts.Format("continuation.run_budget", string(budget))
-	return base
+	parts = append(parts, r.Prompts.Format("continuation.run_budget", string(budget)))
+	return strings.Join(parts, "\n")
 }
 
 // Claim readmission still belongs to this request boundary. Preparation
@@ -289,7 +355,8 @@ func (r *Runner) archiveClaimPreparation(ctx context.Context) error {
 	candidate := r.Continuation.Clone()
 	candidate.Entries = nil
 	for _, e := range r.Continuation.Entries {
-		if !r.ownsPreparationPublication(e) {
+		retired := e.Kind == "history" && e.PreparationScope == r.preparationScope() && !e.Unread && e.Round == nil && e.Message.Role == "user" && len(e.Message.ToolCalls) == 0 && e.Message.ToolCallID == "" && e.Message.Name == ""
+		if !r.ownsPreparationPublication(e) && !retired {
 			candidate.Entries = append(candidate.Entries, e)
 		}
 	}

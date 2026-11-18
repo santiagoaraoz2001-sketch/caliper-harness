@@ -77,7 +77,12 @@ func TestFramingRecoveryDeclinedContinuesWithoutPrefixEffects(t *testing.T) {
 	if err != nil || len(m.seen) != 2 {
 		t.Fatal(err, len(m.seen))
 	}
-	last := m.seen[1][len(m.seen[1])-1].Content
+	last := ""
+	for _, message := range m.seen[1] {
+		if strings.Contains(message.Content, "empty argument key") {
+			last = message.Content
+		}
+	}
 	if !strings.Contains(last, "empty argument key") {
 		t.Fatal(last)
 	}

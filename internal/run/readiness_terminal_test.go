@@ -120,8 +120,14 @@ func TestReadinessStopSignalPreservesOtherDecisionDispositions(t *testing.T) {
 			cfg.Sessions.Path = filepath.Join(root, "sessions")
 			confidence := .6
 			pick := 0
-			if mode == "revise" {
+			manual := mode == "yes" || mode == "cancel" || mode == "record-failure"
+			if mode == "revise" || manual {
 				confidence, pick = .99, 1
+			}
+			if manual {
+				if _, err := plan.RecordReadinessRefusal(s, a.ID); err != nil {
+					t.Fatal(err)
+				}
 			}
 			judgments, prompts := 0, 0
 			bindDecisionFixture(t, &cfg, func(decision.Request) int { judgments++; return pick }, confidence)
@@ -258,8 +264,11 @@ func TestReadinessManualDenialStopsFactoryWithoutAnotherGeneration(t *testing.T)
 				cfg.Behavior.Path, cfg.Recall.TopN, cfg.Agent.LoopStall, cfg.Agent.LoopRepeat = "", 0, 0, 0
 				cfg.Coding.CheckCommand = "true"
 				cfg.Sessions.Path = filepath.Join(root, "sessions")
+				if _, err := plan.RecordReadinessRefusal(s, a.ID); err != nil {
+					t.Fatal(err)
+				}
 				judgments := 0
-				bindDecisionFixture(t, &cfg, func(decision.Request) int { judgments++; return 0 }, .6)
+				bindDecisionFixture(t, &cfg, func(decision.Request) int { judgments++; return 1 }, .99)
 				inputPath := filepath.Join(root, "answer")
 				if err := os.WriteFile(inputPath, []byte(answer), 0600); err != nil {
 					t.Fatal(err)

@@ -195,7 +195,7 @@ func TestBehaviorPropagationCapturedRoles(t *testing.T) {
 			sink := &behaviorLog{}
 			if lane == "parent registry" {
 				bindDecisionFixture(t, &cfg, nil)
-				parent, notes, e := New(Deps{Tools: "full", Cfg: cfg, Store: s, Server: srv.URL, Model: "component", Window: 32768, MaxSteps: 5, In: strings.NewReader(""), Out: io.Discard, Session: sink, SessionID: "parent"}, "PARENT_ROLE")
+				parent, notes, e := New(Deps{Tools: "full", Cfg: cfg, Store: s, Server: srv.URL, Model: "component", Window: 131072, MaxSteps: 5, In: strings.NewReader(""), Out: io.Discard, Session: sink, SessionID: "parent"}, "PARENT_ROLE")
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -212,12 +212,12 @@ func TestBehaviorPropagationCapturedRoles(t *testing.T) {
 					}
 				}
 				assertQualifiedTaskWithOpenParents(t, parent, s)
-				c, _, e := session.Restore(sink.events, 32768)
+				c, _, e := session.Restore(sink.events, 131072)
 				if e != nil {
 					t.Fatal(e)
 				}
 				bindDecisionFixture(t, &cfg, nil)
-				next, _, e := New(Deps{Cfg: cfg, Store: s, Server: srv.URL, Model: "component", Window: 32768, MaxSteps: 1, Continuation: c, In: strings.NewReader(""), Out: io.Discard}, "RELOAD_ROLE")
+				next, _, e := New(Deps{Cfg: cfg, Store: s, Server: srv.URL, Model: "component", Window: 131072, MaxSteps: 1, Continuation: c, In: strings.NewReader(""), Out: io.Discard}, "RELOAD_ROLE")
 				if e != nil {
 					t.Fatal(e)
 				}

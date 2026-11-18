@@ -166,7 +166,7 @@ func TestBackForward(t *testing.T) {
 
 func TestSuggestionsAndTabAccept(t *testing.T) {
 	m := New(testCfg(), "test")
-	m.Input.SetValue("/p")
+	m.Input.SetValue("/plans")
 	if got := m.suggestions(); len(got) != 1 || got[0] != "/plans" {
 		t.Errorf("suggestions=%v", got)
 	}

@@ -192,7 +192,14 @@ func TestActualModelRequestReceivesFreshProjectContext(t *testing.T) {
 	}
 	c := session.Continuation{}
 	messages := <-captured
-	if len(messages) < 2 || messages[len(messages)-2].Content != "Build the requested surface" || !strings.HasPrefix(messages[len(messages)-1].Content, projectContextMarker) {
+	requestAt := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" && messages[i].Content == "Build the requested surface" {
+			requestAt = i
+			break
+		}
+	}
+	if requestAt < 0 || requestAt+1 >= len(messages) || !strings.HasPrefix(messages[requestAt+1].Content, projectContextMarker) {
 		t.Fatal("current facts were not appended after the unchanged actual user request")
 	}
 	for _, message := range messages {

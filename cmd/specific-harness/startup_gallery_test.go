@@ -44,7 +44,7 @@ func TestStartupSequenceGallery(t *testing.T) {
 			}
 			boot.finish("ok", "Prompt catalog validated")
 			boot.dependencies()
-			boot.line("info", "Model selection", "Choose an existing model in Setup")
+			boot.line("info", "Model selection", "Setup finds model servers running on this computer")
 			boot.line("ok", "Workspace", "Opening Caliper Harness")
 		}()
 		if err := f.Close(); err != nil {

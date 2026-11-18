@@ -3,7 +3,6 @@ package agent
 import (
 	"encoding/json"
 	"specific-harness/internal/llm"
-	"specific-harness/internal/session"
 	"strings"
 )
 
@@ -75,19 +74,21 @@ func (r *Runner) ensurePlanningPublication() bool {
 	question := r.currentPlanningQuestion()
 	body := r.workflowHeader + "\n" + question
 	receipt, retained, changed := r.planningReceiptPublished(question), false, false
-	entries := make([]session.Entry, 0, len(r.Continuation.Entries))
-	for _, e := range r.Continuation.Entries {
-		if e.Kind == "schema" && r.ownsPreparationPublication(e) {
+	// Retire superseded owned frames in place instead of deleting them:
+	// the content bytes stay exact, so the provider's cached prompt prefix
+	// survives; only the kind stops counting as a current publication.
+	// Deleting an early frame rewrote the whole suffix after it and forced
+	// a full re-prefill on every planning transition.
+	for i := range r.Continuation.Entries {
+		e := &r.Continuation.Entries[i]
+		if e.Kind == "schema" && r.ownsPreparationPublication(*e) {
 			if receipt || question == "" || e.Message.Content != body || retained {
+				e.Kind = "history"
 				changed = true
 				continue
 			}
 			retained = true // An unchanged current frame stays in its original place.
 		}
-		entries = append(entries, e)
-	}
-	if changed {
-		r.Continuation.Entries = entries
 	}
 	if question != "" && !r.planningPublished(question) {
 		// Existing schema retention protects this current publication. Its tag

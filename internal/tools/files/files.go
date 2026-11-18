@@ -275,7 +275,7 @@ func (w *Workspace) FindDirDefinition() tool.Definition {
 		if _, err := filepath.Match(pattern, ""); err != nil {
 			return tool.Result{}, err
 		}
-		return w.execute(ctx, "find_dir", a, nil)
+		return w.execute(ctx, "find_dir", a, nil, nil)
 	}})
 }
 
@@ -289,6 +289,9 @@ func (w *Workspace) Definitions() []tool.Definition {
 	pc := prompts.Select(w.Prompts)
 	// Authority belongs to this conversation's definitions, not sibling registries.
 	coverage := map[string]readCoverage{}
+	// disclosed holds the current-file hash named by the most recent
+	// hashless whole-file write refusal per path, in this conversation.
+	disclosed := map[string]string{}
 	path := tool.Param{Name: "path", Type: tool.TypeString, Required: true, Desc: pc.Text("tools.shared.parameters.workspace_file_path")}
 	defs := []tool.Definition{
 		{Name: "read", Desc: pc.Text("tools.read.description"), Purpose: pc.Text("tools.read.purpose"), Params: []tool.Param{path, {Name: "offset", Type: tool.TypeInt, Default: "1", Desc: pc.Text("tools.read.parameters.offset")}, {Name: "limit", Type: tool.TypeInt, Default: fmt.Sprint(w.Caps.MaxLines), Desc: pc.Format("tools.read.parameters.limit", w.Caps.MaxLines)}}},
@@ -300,7 +303,9 @@ func (w *Workspace) Definitions() []tool.Definition {
 	for i := range defs {
 		defs[i].Prompts = pc
 		name := defs[i].Name
-		defs[i].Execute = func(ctx context.Context, a tool.Args) (tool.Result, error) { return w.execute(ctx, name, a, coverage) }
+		defs[i].Execute = func(ctx context.Context, a tool.Args) (tool.Result, error) {
+			return w.execute(ctx, name, a, coverage, disclosed)
+		}
 		defs[i] = w.normalizePath(defs[i])
 	}
 	return defs
@@ -384,7 +389,7 @@ func (w *Workspace) filePath(p string, discovery bool) (string, string, error) {
 	}
 	return p, base, nil
 }
-func (w *Workspace) execute(ctx context.Context, name string, a tool.Args, coverage map[string]readCoverage) (tool.Result, error) {
+func (w *Workspace) execute(ctx context.Context, name string, a tool.Args, coverage map[string]readCoverage, disclosed map[string]string) (tool.Result, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if e := ctx.Err(); e != nil {
@@ -458,9 +463,22 @@ func (w *Workspace) execute(ctx context.Context, name string, a tool.Args, cover
 	create := name == "write" && expected == ""
 	if create {
 		if e == nil {
-			return tool.Result{}, fmt.Errorf("%s exists; current sha256=%s; %s", p, digest(b), prompts.Select(w.Prompts).Text("guidance.files.existing_create"))
+			// A retry after this refusal disclosed the hash: when the file
+			// is byte-identical to the disclosure, the disclosed hash stands
+			// in for expected_hash (still digest-verified below), so the
+			// caller need not transcribe 64 hex characters to proceed.
+			if disclosed != nil && disclosed[p] == digest(b) {
+				create = false
+				expected = digest(b)
+				delete(disclosed, p)
+			} else {
+				if disclosed != nil {
+					disclosed[p] = digest(b)
+				}
+				return tool.Result{}, fmt.Errorf("%s exists; current sha256=%s; %s", p, digest(b), prompts.Select(w.Prompts).Text("guidance.files.existing_create"))
+			}
 		}
-		if !os.IsNotExist(e) {
+		if create && !os.IsNotExist(e) {
 			return tool.Result{}, e
 		}
 	} else if e != nil {
@@ -597,6 +615,7 @@ func (w *Workspace) execute(ctx context.Context, name string, a tool.Args, cover
 			}
 		}
 		delete(coverage, p)
+		delete(disclosed, p)
 		res.Text, res.Truncated = receipt, truncated
 	}
 	return res, e

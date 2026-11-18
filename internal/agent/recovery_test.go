@@ -67,8 +67,8 @@ func TestPreparationRecoveryPublication(t *testing.T) {
 				if err != nil || !delivered || len(sink.texts) != 1 || sink.kinds[0] != "continuation" || r.Continuation.Measured {
 					t.Fatalf("publish delivered%t err%v events%+v", delivered, err, sink)
 				}
-				want := append([]session.Entry(nil), before.Entries[:1]...)
-				want = append(want, before.Entries[2:]...)
+				want := append([]session.Entry(nil), before.Entries...)
+				want[1].Kind = "history"
 				if !reflect.DeepEqual(want, r.Continuation.Entries[:len(want)]) {
 					t.Fatal("source/native groups/user/legacy/foreign guidance mutated")
 				}

@@ -44,3 +44,21 @@ func TestCancellationUISettlementNewQuitAndStaleDialog(t *testing.T) {
 		t.Fatal("unexpected quit command")
 	}
 }
+
+// Escape during a run stops generation even when a detail view is open
+// over it: the stop request must not be consumed by closing that view.
+func TestEscapeStopsRunBeforeDetailView(t *testing.T) {
+	m := New(testCfg(), "component")
+	ctx, cancel := context.WithCancel(context.Background())
+	m.Chat.Running, m.Chat.Seq, m.Chat.cancel = true, 3, cancel
+	m.Tabs[m.Active].at.view = ViewFiles
+	m.Files.Path = "some/file.go"
+	u, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = u.(Model)
+	if ctx.Err() == nil {
+		t.Fatal("escape did not cancel the running generation")
+	}
+	if m.Files.Path == "" {
+		t.Fatal("escape closed the detail view instead of stopping the run")
+	}
+}

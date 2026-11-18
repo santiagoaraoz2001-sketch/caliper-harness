@@ -72,7 +72,21 @@ func TestCapturedEditFeedbackAndCorrectedCheck(t *testing.T) {
 	if err = os.WriteFile(filepath.Join(dir, "test_converter.py"), []byte(checks), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.CommandContext(context.Background(), "python3", "-m", "unittest", "-v")
+	python := ""
+	for _, candidate := range []string{"python3", "python"} {
+		path, lookErr := exec.LookPath(candidate)
+		if lookErr != nil {
+			continue
+		}
+		if out, runErr := exec.Command(path, "--version").CombinedOutput(); runErr == nil && strings.Contains(string(out), "Python") {
+			python = path
+			break
+		}
+	}
+	if python == "" {
+		t.Skip("functional Python interpreter unavailable for actual checker")
+	}
+	cmd := exec.CommandContext(context.Background(), python, "-m", "unittest", "-v")
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if err != nil || !strings.Contains(string(output), "Ran 2 tests") || !strings.Contains(string(output), "OK") {

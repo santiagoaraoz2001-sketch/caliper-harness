@@ -168,7 +168,7 @@ func TestConsistencyNativeHeadersMatchCurrentClaimPhase(t *testing.T) {
 			cfg.Model.Runtime, cfg.Model.ToolProtocol = "openai", "structured"
 			cfg.Templates.Path = assignedTemplates()
 			bindDecisionFixture(t, &cfg, nil)
-			r, _, err := New(Deps{Tools: exposure, Cfg: cfg, Store: s, Server: server.URL, Model: "component", Window: 32768, MaxSteps: maxSteps, Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: "phase-wire", Continuation: session.Continuation{Workflow: scope}}, "exercise the declared mechanical episode")
+			r, _, err := New(Deps{Tools: exposure, Cfg: cfg, Store: s, Server: server.URL, Model: "component", Window: 131072, MaxSteps: maxSteps, Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: "phase-wire", Continuation: session.Continuation{Workflow: scope}}, "exercise the declared mechanical episode")
 			if err != nil {
 				t.Fatal(err)
 			}

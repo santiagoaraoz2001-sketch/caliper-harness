@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
@@ -30,6 +31,42 @@ type ResponsePrefix struct {
 }
 
 const RulithRawPrefix = "rulith_raw"
+
+// ErrIncompleteNativeResponse marks a generation that stopped while a native
+// frame (reasoning, tool call, function, parameter, or JSON envelope) was
+// still open. It is an unfinished generation to continue, never a completed
+// reply and never, by itself, a model failure.
+var ErrIncompleteNativeResponse = errors.New("incomplete native response")
+
+var nativeFrameMarkers = []string{"<think>", "</think>", "<tool_call>", "</tool_call>", "<function=", "</function>", "<parameter=", "</parameter>"}
+
+// NativeRawIncomplete reports whether raw native output ends inside an open
+// frame or in the middle of a frame marker. It is a framing scan only; the
+// owning registry still parses and admits the completed response.
+func NativeRawIncomplete(raw, initialState string) bool {
+	if raw == "" {
+		return false
+	}
+	if initialState == "reasoning" && !strings.Contains(raw, "</think>") {
+		return true
+	}
+	if strings.Count(raw, "<think>") > strings.Count(raw, "</think>") {
+		return true
+	}
+	for _, pair := range [][2]string{{"<tool_call>", "</tool_call>"}, {"<function=", "</function>"}, {"<parameter=", "</parameter>"}} {
+		if strings.LastIndex(raw, pair[0]) > strings.LastIndex(raw, pair[1]) {
+			return true
+		}
+	}
+	for _, marker := range nativeFrameMarkers {
+		for i := 1; i < len(marker); i++ {
+			if strings.HasSuffix(raw, marker[:i]) {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // ResponseBytes counts only the unfinished response, not the original prompt.
 func (p *ResponsePrefix) ResponseBytes() int {
@@ -68,7 +105,10 @@ func (p *ResponsePrefix) Clone() *ResponsePrefix {
 
 func (p *ResponsePrefix) Validate() error {
 	if p != nil && p.Strategy == RulithRawPrefix {
-		if p.Prompt == "" || p.Raw == "" || !utf8.ValidString(p.Prompt) || !utf8.ValidString(p.Raw) || p.GeneratedTokens <= 0 ||
+		// GeneratedTokens is accounting only for the byte strategy. Zero means
+		// an interrupted stream produced literal bytes before any terminal
+		// usage receipt; the exact prompt plus Raw bytes are still the prefix.
+		if p.Prompt == "" || p.Raw == "" || !utf8.ValidString(p.Prompt) || !utf8.ValidString(p.Raw) || p.GeneratedTokens < 0 ||
 			(p.InitialState != "normal" && p.InitialState != "reasoning") || len(p.Tokens) != 0 || len(p.RawChunks) != 0 {
 			return fmt.Errorf("invalid Rulith unfinished-response byte prefix")
 		}
@@ -98,12 +138,28 @@ func (p *ResponsePrefix) Validate() error {
 }
 
 type responseContinuationKey struct{}
+type continuationTransportKey struct{}
+
+// WithContinuationTransport marks a generation whose caller owns a
+// physical-prefix continuation loop (WithResponseContinuation), such as a
+// compaction summary. On a runtime with a native prefix transport the
+// generation is served through that same transport even without tools, so a
+// length terminal returns a resumable prefix instead of a terminal failure.
+// Callers without a continuation loop keep the ordinary parsed stream.
+func WithContinuationTransport(ctx context.Context) context.Context {
+	return context.WithValue(ctx, continuationTransportKey{}, true)
+}
+
+func continuationTransportRequested(ctx context.Context) bool {
+	requested, _ := ctx.Value(continuationTransportKey{}).(bool)
+	return requested
+}
 
 func extendsPrefix(previous, next *ResponsePrefix) bool {
 	if previous != nil && next != nil && previous.Strategy == RulithRawPrefix && next.Strategy == RulithRawPrefix {
 		return previous.Validate() == nil && next.Validate() == nil && previous.Prompt == next.Prompt &&
 			previous.PromptSHA256 == next.PromptSHA256 && previous.RequestSHA256 == next.RequestSHA256 &&
-			previous.InitialState == next.InitialState && next.GeneratedTokens > previous.GeneratedTokens &&
+			previous.InitialState == next.InitialState && next.GeneratedTokens >= previous.GeneratedTokens &&
 			len(next.Raw) > len(previous.Raw) && strings.HasPrefix(next.Raw, previous.Raw)
 	}
 	if previous != nil && next != nil && previous.Strategy != next.Strategy {

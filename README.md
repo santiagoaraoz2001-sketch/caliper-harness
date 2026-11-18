@@ -42,6 +42,15 @@ claimed result outrun an observed one.
 - **Plans the model can't fake.** Work is organized as Plan → Approach → Task
   (PAT) in a GraphQL state graph. A task only counts when its own declared
   check passes and an independent review agrees; prose claims settle nothing.
+- **A plan screen you can interrogate.** `/plan` opens the current plan:
+  a short approval summary first, then drill into the approach and each task.
+  Plans carry versioned elaborations — staging, trade-offs and risks in plain
+  terms — that you approve or send back before coding starts.
+- **Reusable methods, not just prompts.** A workflow library of published
+  methods can be browsed, authored and attached to a claimed task as a
+  *method lens*; the harness checks the library at every claim. A `wait` tool
+  lets the model sleep until long background work (for example CI) finishes
+  and wake on its result instead of polling.
 - **A second, smaller brain supervises.** An optional decision sidecar
   (typed-choice judge) watches progress at specific triggers — stuck loops,
   repeated failures, phase changes — and advises. Advisory means advisory:
@@ -148,13 +157,15 @@ For the managed Windows folder with private runtimes, run
 on Windows with the same build tools and `uv`. This mode is used by native release checks;
 the offline developer mode has a separate environment and acceptance scope.
 
-On first run with no coding model configured, Setup opens. Add your server
-and model, choose the Coding and Judge roles, optionally enter your project
+On first run with no coding model configured, Setup opens. Setup can detect
+local model servers already running on this computer (llama.cpp, Ollama,
+Rulith, MLX, vLLM and other OpenAI-compatible endpoints): detected servers
+are offered as "detected on this computer · select and save to connect".
+Choose the Coding and Judge roles, optionally enter your project
 check (for example `npm test`), then review and save. Connections are reusable
 across projects; checks stay local. `/manage` opens Models & Servers to add,
 edit, test, select, load or unload saved connections. `/status` shows runtime
-activity and measured usage. Caliper does not scan your computer for models
-or servers. `/setup` reopens setup; `/help` lists commands.
+activity and measured usage. `/setup` reopens setup; `/help` lists commands.
 For help wiring existing installations with your preferred LLM, use
 `/manage assisted` and press `c` to copy the setup prompt.
 In `/settings`, switch the decision model off to use human approval for PAT
@@ -269,7 +280,7 @@ including the disclosed basis label and links. This is not a measured token coun
 or universal tokenizer guarantee. Native tokenizer failures, cancellation, unknown
 runtime and missing counters remain explicit errors; they never trigger fallback.
 Ordinary graph facts and PAT retain their own limits. Exact counting and performance
-across backends remain separate gates. See [domain guidance](https://github.com/santiagoaraoz2001-sketch/caliper-harness/blob/v0.2.5/docs/domain-guidance.md).
+across backends remain separate gates. See [domain guidance](docs/domain-guidance.md).
 
 ## Configuration
 
@@ -374,7 +385,7 @@ framework-neutral `caliper-test-report-v1` adapter validates declared stages
 against the current execution ID. `caliper-test-report-v2` also declares each
 stage's prerequisites and expected observations, retaining actual observations
 beside host-recorded prerequisite presence. See the
-[report contract](https://github.com/santiagoaraoz2001-sketch/caliper-harness/blob/v0.2.5/docs/testing-report-contract.md) for configuration and producer
+[report contract](docs/testing-report-contract.md) for configuration and producer
 examples. These formats distinguish executed, failed and
 skipped tests. Missing required tests or stages, malformed/truncated reports and
 zero executed tests do not establish declared coverage. Without a report format,
@@ -432,7 +443,7 @@ task claims, edits, paired checks, independent review and handoff. Results depen
 on the model and task; D1 can miss repetitive reasoning, and passing checks plus
 reviewer agreement do not guarantee correctness.
 
-The published v0.1.6 packages passed native build, installation, runtime-import
+Published packages pass native build, installation, runtime-import
 and terminal UI checks on macOS arm64, Windows x64 and Linux x64/ARM64.
 Those checks do not establish Windows/Linux model inference. Each release's
 notes identify the exact source, native package checks and upgrade tests that

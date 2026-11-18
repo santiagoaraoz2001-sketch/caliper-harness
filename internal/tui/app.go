@@ -38,6 +38,7 @@ const (
 	ViewManage    ViewID = "manage"
 	ViewSetup     ViewID = "setup"
 	ViewTests     ViewID = "tests"
+	ViewLibrary   ViewID = "library"
 )
 
 // View describes a tab-placeable view: its promise plus the task
@@ -65,6 +66,7 @@ var Views = []View{
 	{ViewManage, "Models & Servers", "saved connections and runtime controls", "T6.5"},
 	{ViewSetup, "Setup", "configure this project", ""},
 	{ViewTests, "Tests", "design, configure and run project tests", ""},
+	{ViewLibrary, "Library", "reusable blocks, workflow versions and pinned runs", ""},
 }
 
 func viewByID(id ViewID) View {
@@ -159,6 +161,7 @@ type Model struct {
 	Settings            SettingsState
 	Setup               SetupState
 	Tests               TestsState
+	Lib                 LibState
 	CfgPath             string
 	lastTool            string
 	lastToolAt          time.Time
@@ -550,6 +553,9 @@ func (m *Model) submit(raw string) tea.Cmd {
 		if ViewID(c.View) == ViewPlans {
 			return m.refreshPlans(target)
 		}
+		if ViewID(c.View) == ViewLibrary {
+			return m.refreshLibrary()
+		}
 		if ViewID(c.View) == ViewStatus {
 			return tea.Batch(m.fetchRuntimeMetrics(), m.probeServe())
 		}
@@ -830,6 +836,16 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, cmd tea.Cmd) {
 		}
 		m.Chat.Dialog = &Dialog{Workflow: msg.workflow, Tests: msg.tests, Kind: msg.kind, Prompt: msg.prompt, Answer: msg.answer, Questions: msg.questions, AskDone: msg.askDone}
 		m.syncAskInput(m.askFreeText())
+		if msg.kind == "auth" && strings.Contains(msg.prompt, "\nPlan summary:\n") {
+			// A plan approval opens the plan screen under its own dialog.
+			// Feature tabs keep this conversation, so the same dialog is
+			// restored after the switch; user tab switches stay blocked.
+			dialog := m.Chat.Dialog
+			m.Chat.Dialog = nil
+			m.navigate(ViewPlans, "")
+			m.Chat.Dialog = dialog
+			return m, m.refreshPlans("")
+		}
 		return m, nil
 	case tokenMsg:
 		m.onToken(msg)
@@ -1008,6 +1024,8 @@ func (m Model) escapeHint() string {
 			return "esc declines"
 		}
 		return "esc skips all questions and discards answers"
+	case m.Chat.Running:
+		return "esc stops run"
 	case m.diffActive() && m.Diff.Viewer != nil, m.plansActive() && m.Plans.Detail != nil, m.sessionsActive() && m.Sessions.Detail != nil, m.filesActive() && m.Files.Path != "":
 		return "esc closes detail"
 	case m.testsActive() && m.Tests.Editing, m.settingsActive() && m.Settings.Editing != nil:
@@ -1024,8 +1042,6 @@ func (m Model) escapeHint() string {
 		return "esc input"
 	case m.Tests.Busy != "":
 		return "esc stops test command"
-	case m.Chat.Running:
-		return "esc stops run"
 	case len(m.Alerts) > 0 && !m.alertHidden:
 		return "esc dismisses alert"
 	case m.Tabs[m.Active].at.view != ViewChat:
@@ -1081,6 +1097,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.Chat.Dialog != nil {
 			m.declineDialog()
+			return m, nil
+		}
+		// A run in flight outranks view-local Escape owners: Escape stops
+		// generation at the current token instead of first closing a
+		// detail view the user may have open over the run.
+		if m.Chat.Running {
+			m.stopChat()
 			return m, nil
 		}
 		if m.setupActive() {

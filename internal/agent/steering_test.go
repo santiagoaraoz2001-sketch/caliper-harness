@@ -83,12 +83,21 @@ func TestUserCommentInterruptsOnlyGenerationAndRetainsContext(t *testing.T) {
 					t.Error("steering reused the abandoned literal prefix")
 				}
 				if n == 2 {
-					last := body.Messages[len(body.Messages)-1]
-					if last.Role != "user" || last.Content != "USER COMMENT: changed objective" {
-						t.Errorf("comment not a real user message: %+v", last)
+					commentAt := -1
+					for i := len(body.Messages) - 1; i >= 0; i-- {
+						if body.Messages[i].Role == "user" && body.Messages[i].Content == "USER COMMENT: changed objective" {
+							commentAt = i
+							break
+						}
+					}
+					if commentAt < 0 {
+						t.Errorf("comment not a real user message: %+v", body.Messages)
 					}
 					if !prefill {
-						prior := body.Messages[len(body.Messages)-2]
+						prior := llm.Message{}
+						if commentAt > 0 {
+							prior = body.Messages[commentAt-1]
+						}
 						if !strings.HasPrefix(prior.Content, "unfinished answer") || !strings.Contains(prior.Content, "abandoned") || !strings.Contains(prior.Content, "none executed") || prior.Reasoning != "exact prior thought" || len(prior.ToolCalls) != 0 {
 							t.Errorf("received partial context lost or executable: %+v", prior)
 						}
@@ -235,7 +244,14 @@ func TestUserCommentWaitsForRunningEffectAndRefusesUnstartedArrayTail(t *testing
 		t.Fatalf("an unstarted effect ran or was charged: effects=%v requests=%d", effects, len(model.seen))
 	}
 	last := model.seen[1]
-	if last[len(last)-1].Role != "user" || last[len(last)-1].Content != "USER COMMENT: change before next effect" {
+	commentAt := -1
+	for i := len(last) - 1; i >= 0; i-- {
+		if last[i].Role == "user" && last[i].Content == "USER COMMENT: change before next effect" {
+			commentAt = i
+			break
+		}
+	}
+	if commentAt < 0 {
 		t.Fatal("comment did not follow the correlated settled receipts")
 	}
 	for _, entry := range r.Continuation.Entries {
@@ -266,7 +282,17 @@ func TestUserCommentRetainsEarlierLengthPrefixDuringFreshPrefill(t *testing.T) {
 			close(entered)
 			<-req.Context().Done()
 		case 3:
-			prior, last := body.Messages[len(body.Messages)-2], body.Messages[len(body.Messages)-1]
+			commentAt := -1
+			for i := len(body.Messages) - 1; i >= 0; i-- {
+				if body.Messages[i].Role == "user" && body.Messages[i].Content == "USER COMMENT: redirect unfinished work" {
+					commentAt = i
+					break
+				}
+			}
+			prior, last := llm.Message{}, llm.Message{}
+			if commentAt > 0 {
+				prior, last = body.Messages[commentAt-1], body.Messages[commentAt]
+			}
 			if prior.Content != "original unfinished answer" || prior.Reasoning != "original unfinished thought" || last.Role != "user" || last.Content != "USER COMMENT: redirect unfinished work" || len(body.Prefix) != 0 {
 				t.Errorf("old prefix lost during empty fresh prefill: %+v %+v", prior, last)
 			}

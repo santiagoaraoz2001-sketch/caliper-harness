@@ -63,10 +63,12 @@ const (
 	pruneMinStubBytes       = 512
 )
 
-// prune replaces only old consumed tool-output bodies with stubs. Reasoning,
-// calls, visible text, user history and schemas remain exact. Consumed
-// failure/evidence bodies past the same age bound are stubbed in place
-// (kind and first lines retained) beyond the latest few of each kind.
+// prune replaces old consumed bodies with stubs: tool outputs, failure/
+// evidence bodies, assistant reasoning and tool-call arguments. Visible
+// text, user history, schemas and call correlation (IDs, names) remain
+// exact. Consumed failure/evidence bodies past the age bound are stubbed
+// in place (kind and first lines retained) beyond the latest few of each
+// kind. Full bodies always remain in raw session history.
 // Age counts all later message context,
 // including reasoning and later schema messages, using admission's calibration.
 // Leading tool definitions contribute to occupancy, not to an output's age.
@@ -88,7 +90,7 @@ func (r *Runner) prune(c *session.Continuation) (int, string) {
 			latestKept[i] = evidences <= pruneKeepLatestEvidence
 		}
 	}
-	size, messages, n, stubbed := 0, 0, 0, 0
+	size, messages, n, stubbed, bodies := 0, 0, 0, 0, 0
 	for i := len(c.Entries) - 1; i >= 0; i-- {
 		age := size + 20*messages // Continuation's disclosed fallback estimate.
 		if c.BasisChars > 0 && c.BasisTokens > 0 {
@@ -122,6 +124,38 @@ func (r *Runner) prune(c *session.Continuation) (int, string) {
 			stubbed++
 			continue
 		}
+		// Old consumed reasoning and tool-call argument bodies are stubbed
+		// in place even inside protected groups: the entries, their visible
+		// text and their call correlation stay, only bodies no later step
+		// can act on give way. Without this, protected groups accumulate
+		// reasoning/argument mass compaction can never retire.
+		if e.Message.Role == "assistant" && !e.Unread {
+			for _, body := range []*string{&e.Message.Reasoning, &e.Message.ReasoningContent, &e.Message.Thinking} {
+				old := len(*body)
+				if old <= pruneMinStubBytes || strings.HasPrefix(*body, "[pruned reasoning") {
+					continue
+				}
+				stub := fmt.Sprintf("[pruned reasoning (%d bytes; sha256 %x; age %d estimated context tokens); full text in raw session history]", old, sha256.Sum256([]byte(*body)), age)
+				if len(stub) >= old {
+					continue
+				}
+				*body = stub
+				bodies++
+			}
+			for j := range e.Message.ToolCalls {
+				call := &e.Message.ToolCalls[j]
+				old := len(call.Arguments)
+				if old <= pruneMinStubBytes || strings.Contains(call.Arguments, `"_pruned"`) {
+					continue
+				}
+				stub := fmt.Sprintf(`{"_pruned":"tool call arguments (%d bytes; sha256 %x; age %d estimated context tokens); full text in raw session history"}`, old, sha256.Sum256([]byte(call.Arguments)), age)
+				if len(stub) >= old {
+					continue
+				}
+				call.Arguments = stub
+				bodies++
+			}
+		}
 		if keep[i] {
 			continue
 		}
@@ -137,13 +171,16 @@ func (r *Runner) prune(c *session.Continuation) (int, string) {
 		e.Kind = "history" // settled stub; never re-prune or lose call association
 		n++
 	}
-	if n == 0 && stubbed == 0 {
+	if n == 0 && stubbed == 0 && bodies == 0 {
 		return c.Estimate(), ""
 	}
 	c.Invalidate()
 	report := fmt.Sprintf("pruned %d tool output body(ies) older than %d estimated context tokens; protected entries exempt; raw history retained", n, r.Prune.OutputsAgeTokens)
 	if stubbed > 0 {
 		report += fmt.Sprintf("; stubbed %d old failure/evidence body(ies) past the same age (latest %d failures/%d evidence kept verbatim)", stubbed, pruneKeepLatestFailures, pruneKeepLatestEvidence)
+	}
+	if bodies > 0 {
+		report += fmt.Sprintf("; stubbed %d old reasoning/tool-call argument body(ies) past the same age", bodies)
 	}
 	return c.Estimate(), report
 }

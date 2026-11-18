@@ -25,7 +25,11 @@ type gateModel struct {
 }
 
 func (m *gateModel) Chat(_ context.Context, msgs []llm.Message) (string, string, llm.Usage, error) {
-	if strings.HasPrefix(msgs[len(msgs)-1].Content, "Review ") {
+	isReview := false
+	for _, msg := range msgs {
+		isReview = isReview || strings.HasPrefix(msg.Content, "Review ")
+	}
+	if isReview {
 		return "UNVERIFIED: pause fixture observes scheduling only", "gate-review", llm.Usage{}, nil
 	}
 	if m.calls.Add(1) == 1 {

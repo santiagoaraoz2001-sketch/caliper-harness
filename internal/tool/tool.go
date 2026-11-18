@@ -67,13 +67,77 @@ type WorkflowScope struct {
 // CreatedNode is an owning creation fact, never selection or execution authority.
 type CreatedNode struct{ Kind, ID, State string }
 
+// MethodStep identifies one phase in a published reusable workflow.
+type MethodStep struct {
+	BlockID      string `json:"block_id"`
+	BlockVersion int    `json:"block_version"`
+	Title        string `json:"title"`
+}
+
+// MethodLens is protected session state for thinking with one reusable
+// workflow inside ordinary or PAT work. It is a method snapshot and cursor,
+// never work ownership, approval, settlement, or verification evidence.
+type MethodLens struct {
+	WorkflowID         string            `json:"workflow_id"`
+	WorkflowVersion    int               `json:"workflow_version"`
+	Title              string            `json:"title"`
+	Purpose            string            `json:"purpose"`
+	AppliesTo          []string          `json:"applies_to,omitempty"`
+	Inputs             map[string]string `json:"inputs,omitempty"`
+	Steps              []MethodStep      `json:"steps,omitempty"`
+	StepIndex          int               `json:"step_index"` // -1 means no current phase
+	BlockID            string            `json:"block_id,omitempty"`
+	BlockVersion       int               `json:"block_version,omitempty"`
+	PhaseTitle         string            `json:"phase_title,omitempty"`
+	PhasePurpose       string            `json:"phase_purpose,omitempty"`
+	PhaseInputs        []string          `json:"phase_inputs,omitempty"`
+	PhaseOutputs       []string          `json:"phase_outputs,omitempty"`
+	Instructions       string            `json:"instructions,omitempty"`
+	CompletionEvidence string            `json:"completion_evidence,omitempty"`
+	FailureHandling    string            `json:"failure_handling,omitempty"`
+	Adaptation         string            `json:"adaptation,omitempty"` // task-local overlay; never edits the reusable workflow
+	Observations       string            `json:"observations,omitempty"`
+	Risks              string            `json:"risks,omitempty"`
+	NextCheck          string            `json:"next_check,omitempty"`
+	ScopeKind          string            `json:"scope_kind,omitempty"`
+	ScopeID            string            `json:"scope_id,omitempty"`
+	TaskID             string            `json:"task_id,omitempty"`
+	Attempt            int               `json:"attempt,omitempty"`
+	Revision           int64             `json:"revision,omitempty"`
+}
+
+func (l *MethodLens) Clone() *MethodLens {
+	if l == nil {
+		return nil
+	}
+	value := *l
+	value.AppliesTo = append([]string(nil), l.AppliesTo...)
+	value.Steps = append([]MethodStep(nil), l.Steps...)
+	value.PhaseInputs = append([]string(nil), l.PhaseInputs...)
+	value.PhaseOutputs = append([]string(nil), l.PhaseOutputs...)
+	if l.Inputs != nil {
+		value.Inputs = make(map[string]string, len(l.Inputs))
+		for k, v := range l.Inputs {
+			value.Inputs[k] = v
+		}
+	}
+	return &value
+}
+
+// MethodLensUpdate is committed by the agent only after durable settlement.
+type MethodLensUpdate struct {
+	Mode string      `json:"mode"`
+	Lens *MethodLens `json:"lens,omitempty"`
+}
+
 type Result struct {
-	StateChanged bool           `json:",omitempty"` // Actual committed graph effects; never filesystem invalidation.
-	ReadyNode    *CreatedNode   `json:"-"`          // actual Ready receipt, not creation or execution authority
-	Created      *CreatedNode   `json:"-"`
-	Focus        *WorkflowScope `json:"-"` // actual successful focus, committed after durable settlement
-	Changed      bool           // actual file publication, including effects followed by errors
-	FileEffect   *FileEffect    `json:"-"` // never inferred from arguments or result prose
+	StateChanged bool              `json:",omitempty"` // Actual committed graph effects; never filesystem invalidation.
+	ReadyNode    *CreatedNode      `json:"-"`          // actual Ready receipt, not creation or execution authority
+	Created      *CreatedNode      `json:"-"`
+	Focus        *WorkflowScope    `json:"-"` // actual successful focus, committed after durable settlement
+	MethodLens   *MethodLensUpdate `json:"-"` // method cursor candidate, committed after durable settlement
+	Changed      bool              // actual file publication, including effects followed by errors
+	FileEffect   *FileEffect       `json:"-"` // never inferred from arguments or result prose
 	// Workflow carries an owning-state snapshot, including refused attempts.
 	// ExitCode is an actual settled Bash exit; nil means no complete exit receipt.
 	ExitCode  *int

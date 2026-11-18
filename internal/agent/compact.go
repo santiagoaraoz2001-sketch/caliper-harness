@@ -32,6 +32,12 @@ type Compaction struct {
 
 var compactionRecordFailure = errors.New("compaction recording failed")
 
+// errCompactionDeferred marks a summary that would not reduce retained
+// context while the uncompacted context still fits the window. Callers
+// continue uncompacted and retry after further growth; only a context
+// that reaches the window itself remains a terminal compaction failure.
+var errCompactionDeferred = errors.New("compaction deferred")
+
 // contextOccupancy is the larger of the calibrated estimate and the
 // server-measured prompt of the last processed request: the estimate
 // under-reads real occupancy (schemas, templating), so maintenance
@@ -213,15 +219,18 @@ func (r *Runner) Compact(ctx context.Context, c session.Continuation) (next sess
 			return c, "", false, err
 		}
 	}
+	keyPrompt, err := r.Prompts.Render("templates.compaction", map[string]any{"Words": wordsFor(budget, r.Compaction.WordsPerToken), "Range": ""})
+	if err != nil {
+		return c, "", false, err
+	}
 	keyRaw, err := json.Marshal(struct {
-		Context                         session.Continuation
 		Source, Prompt, Model, Judgment string
 		Config                          Compaction
 		Prune                           Prune
 		Workspace, Session              string
 		MaxTokens                       int
 		Manual                          bool
-	}{c, b.String(), rendered, r.ModelKey, r.Prompts.Text("decision.compaction.instructions"), r.Compaction, r.Prune, r.Workspace, r.SessionID, r.MaxTokens, r.ManualDecisions})
+	}{b.String(), keyPrompt, r.ModelKey, r.Prompts.Text("decision.compaction.instructions"), r.Compaction, r.Prune, r.Workspace, r.SessionID, r.MaxTokens, r.ManualDecisions})
 	if err != nil {
 		return c, "", false, err
 	}
@@ -255,6 +264,19 @@ func (r *Runner) Compact(ctx context.Context, c session.Continuation) (next sess
 		if client, ok := r.Model.(*llm.Client); ok {
 			summaryModel = client.WithoutThinking()
 		}
+		// Cancellation ends generation, not recording its already received bytes.
+		archiveSegment := func(segment llm.Reply, segUsage llm.Usage) error {
+			if r.Session == nil {
+				return nil
+			}
+			logCtx := context.WithoutCancel(ctx)
+			log := func(k, v string) error { return r.Session.Append(logCtx, r.SessionID, k, v) }
+			raw, _ := json.Marshal(segment)
+			if archiveErr := nativeArchiveHeader(map[string]any{"Compaction": true, "Bytes": len(raw), "Usage": segUsage}, "compaction", log); archiveErr != nil {
+				return archiveErr
+			}
+			return nativeArchiveFragments(raw, "compaction", log)
+		}
 		if model, ok := summaryModel.(ToolModel); ok {
 			// Reuse streaming inactivity/cancellation without advertising tools.
 			watcher := *r
@@ -270,34 +292,60 @@ func (r *Runner) Compact(ctx context.Context, c session.Continuation) (next sess
 			if setupErr != nil {
 				return c, "", false, setupErr
 			}
-			result, callErr := model.ChatTools(observedCtx, msgs, nil, nil)
-			rawReply = result
-			reply, u, err = result.Message.Content, result.Usage, callErr
-			if err == nil && len(result.Message.ToolCalls) > 0 {
+			// A length terminal or a stop inside an open frame is a physical
+			// output boundary of the same summary generation, never a failed
+			// summary: continue from the exact prefix with nothing inserted,
+			// exactly as the main loop continues worker generations. Only a
+			// cancelled context (user stop) ends the call early.
+			// The loop below owns continuation, so the summary generation
+			// must arrive through the runtime's prefix transport even though
+			// it advertises no tools; the ordinary parsed stream cannot
+			// return a resumable prefix on this runtime.
+			callCtx := llm.WithContinuationTransport(observedCtx)
+			reportedAll := true
+			lastBytes := -1
+			for {
+				result, callErr := model.ChatTools(callCtx, msgs, nil, nil)
+				rawReply = result
+				reply, err = result.Message.Content, callErr
+				if result.Usage.Reported {
+					u.In += result.Usage.In
+					u.Out += result.Usage.Out
+				} else {
+					reportedAll = false
+				}
+				if archiveErr := archiveSegment(result, result.Usage); archiveErr != nil {
+					return c, "", false, errors.Join(err, compactionRecordFailure, archiveErr)
+				}
+				if callErr == nil || ctx.Err() != nil {
+					break
+				}
+				resumable := result.Prefix != nil && (result.OutputLimit ||
+					errors.Is(callErr, llm.ErrIncompleteNativeResponse) ||
+					llm.NativeRawIncomplete(result.RawNative, result.NativeInitialState))
+				if !resumable || result.Prefix.ResponseBytes() <= lastBytes {
+					break
+				}
+				lastBytes = result.Prefix.ResponseBytes()
+				callCtx = llm.WithResponseContinuation(callCtx, result)
+			}
+			u.Reported = reportedAll
+			if err == nil && len(rawReply.Message.ToolCalls) > 0 {
 				err = fmt.Errorf("compaction returned unrequested tool calls — context intact")
 			}
 		} else {
 			reply, rawReply.Served, u, err = summaryModel.Chat(ctx, msgs)
 			rawReply.Message = llm.Message{Role: "assistant", Content: reply}
 			rawReply.Usage = u
+			if archiveErr := archiveSegment(rawReply, u); archiveErr != nil {
+				return c, "", false, errors.Join(err, compactionRecordFailure, archiveErr)
+			}
 		}
 		if u.Reported {
 			r.UsedIn += u.In
 			r.UsedOut += u.Out
 		} else {
 			r.UsageUnknown = true
-		}
-		if r.Session != nil {
-			// Cancellation ends generation, not recording its already received bytes.
-			logCtx := context.WithoutCancel(ctx)
-			log := func(k, v string) error { return r.Session.Append(logCtx, r.SessionID, k, v) }
-			raw, _ := json.Marshal(rawReply)
-			if archiveErr := nativeArchiveHeader(map[string]any{"Compaction": true, "Bytes": len(raw), "Usage": u}, "compaction", log); archiveErr != nil {
-				return c, "", false, errors.Join(err, compactionRecordFailure, archiveErr)
-			}
-			if archiveErr := nativeArchiveFragments(raw, "compaction", log); archiveErr != nil {
-				return c, "", false, errors.Join(err, compactionRecordFailure, archiveErr)
-			}
 		}
 		if err != nil {
 			return c, "", false, fmt.Errorf("compaction summary call failed: %w", err)
@@ -338,7 +386,15 @@ func (r *Runner) Compact(ctx context.Context, c session.Continuation) (next sess
 		return c, "", false, fmt.Errorf("compaction summary plus retained context reaches estimated %d tokens (window %d) — context intact", estimate, r.MaxTokens)
 	}
 	if estimate >= c.Estimate() {
-		return c, "", false, fmt.Errorf("compaction summary does not reduce estimated retained context (%d tokens) — context intact", estimate)
+		// Non-reduction while the context still fits is maintenance
+		// information, not a dead end: retained mass can be dominated by
+		// protected groups the summary may not retire yet. Defer with the
+		// candidate marked rejected so the identical context is not
+		// re-summarized; the caller retries after further growth.
+		if r.compactionCandidate != nil {
+			r.compactionCandidate.Rejected = true
+		}
+		return c, "", false, fmt.Errorf("%w: compaction summary does not reduce estimated retained context (%d tokens) — context intact and still fits the window", errCompactionDeferred, estimate)
 	}
 	accepted, err := r.reviewCompaction(ctx, c, b.String(), reply)
 	if err == nil && accepted {

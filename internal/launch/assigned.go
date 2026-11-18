@@ -77,6 +77,47 @@ func (a *Assigned) Start(ctx context.Context, id string) (*session.Assignment, s
 	a.identity = &session.Assignment{Store: a.Deps.Store.Identity(), Workspace: a.Root, PlanID: p.ID, ApproachID: parent.ID, TaskID: t.ID, Attempt: t.Attempts}
 	return a.identity, t.CheckCommand, nil
 }
+
+// Reclaim re-admits this session's recorded Running attempt after its
+// executor ended without settlement. Coherence and contract approval are
+// not repeated: both were settled by the original claim, whose frozen
+// brief and attempt the store revalidates unchanged. If that attempt has
+// since been explicitly requeued, it is no longer Running: take the
+// ordinary fresh-claim route, which revalidates readiness and admits the
+// next attempt instead of deadlocking on the stale restored assignment.
+func (a *Assigned) Reclaim(ctx context.Context, id string, attempt int) (*session.Assignment, string, error) {
+	if a.task != nil && !a.settled {
+		return nil, "", fmt.Errorf("finish the current assigned task before another claim")
+	}
+	current, err := plan.GetTask(a.Deps.Store, id)
+	if err != nil {
+		return nil, "", err
+	}
+	if current.State == plan.TaskQueued && current.Attempts == attempt {
+		return a.Start(ctx, id)
+	}
+	parent, err := plan.TaskApproach(a.Deps.Store, id)
+	if err != nil {
+		return nil, "", err
+	}
+	p, err := plan.ApproachPlan(a.Deps.Store, parent.ID)
+	if err != nil {
+		return nil, "", err
+	}
+	snapshot, err := plan.ReadinessSnapshot(a.Deps.Store, parent.ID)
+	if err != nil {
+		return nil, "", err
+	}
+	t, err := plan.ReclaimTaskContext(plan.WithExecutionReport(plan.WithProject(ctx, a.Root), a.Deps.CheckReport), a.Deps.Store, id, snapshot, a.Command, attempt)
+	if err != nil {
+		return nil, "", err
+	}
+	a.task = t
+	a.contract = &plan.ExecutionContract{Task: t, Report: a.Deps.CheckReport.Clone(), PlanID: p.ID, ApproachID: parent.ID, ProjectRoot: a.Root, Goal: p.Goal, Strategy: parent.Title}
+	a.settled = false
+	a.identity = &session.Assignment{Store: a.Deps.Store.Identity(), Workspace: a.Root, PlanID: p.ID, ApproachID: parent.ID, TaskID: t.ID, Attempt: t.Attempts}
+	return a.identity, t.CheckCommand, nil
+}
 func (a *Assigned) Admit(ctx context.Context) error {
 	if a.task == nil || a.settled {
 		return fmt.Errorf("execution needs task_start with a real prepared same-project queued task")

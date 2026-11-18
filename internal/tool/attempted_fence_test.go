@@ -114,7 +114,11 @@ func TestAttemptedFenceRunnerNoEffectsAndRecovery(t *testing.T) {
 				if err != nil || readErr != nil || string(got) != "accepted" {
 					t.Fatalf("recovery actual Bash: %q %v %v", got, err, readErr)
 				}
-				if !strings.Contains(model.seen[1][len(model.seen[1])-1].Content, "no calls ran") {
+				repairSeen := false
+				for _, msg := range model.seen[1] {
+					repairSeen = repairSeen || strings.Contains(msg.Content, "no calls ran")
+				}
+				if !repairSeen {
 					t.Fatal("second request lacked repair")
 				}
 			}

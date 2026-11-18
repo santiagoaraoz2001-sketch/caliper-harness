@@ -96,7 +96,7 @@ func TestModelHelpNextWire(t *testing.T) {
 			}
 			sink := &codingSink{dir: filepath.Join(dir, "sessions")}
 			// Isolate help delivery from unknown-usage compaction pressure; dedicated context controls test that boundary.
-			r, _, e := New(Deps{Cfg: cfg, Store: s, Server: srv.URL, Model: "model-help-fixture", Session: sink, SessionID: "help", MaxSteps: 3, Window: 65536, In: strings.NewReader(""), Out: io.Discard}, "Inspect the source and documentation")
+			r, _, e := New(Deps{Cfg: cfg, Store: s, Server: srv.URL, Model: "model-help-fixture", Session: sink, SessionID: "help", MaxSteps: 3, Window: 262144, In: strings.NewReader(""), Out: io.Discard}, "Inspect the source and documentation")
 			if e != nil {
 				t.Fatal(e)
 			}

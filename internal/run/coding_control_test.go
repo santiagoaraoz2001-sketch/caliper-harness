@@ -149,7 +149,7 @@ func TestConfiguredCheckAuthAndDurableReceipt(t *testing.T) {
 				t.Fatal(storeErr)
 			}
 			defer owned.Close()
-			r, _, e := assignedCodingNew(t, Deps{Store: owned, Cfg: cfg, Server: cfg.Model.Server, Model: "fixture", MaxSteps: 3, Window: 32768, Session: sink, SessionID: "coding", AskYesNo: func(_ context.Context, p string) bool {
+			r, _, e := assignedCodingNew(t, Deps{Store: owned, Cfg: cfg, Server: cfg.Model.Server, Model: "fixture", MaxSteps: 3, Window: 65536, Session: sink, SessionID: "coding", AskYesNo: func(_ context.Context, p string) bool {
 				_, body, complete := strings.Cut(p, "Complete validated action (JSON):\n")
 				var action struct {
 					Tool string         `json:"tool"`

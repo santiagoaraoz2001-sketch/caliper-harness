@@ -34,6 +34,8 @@ func Commands() []Command {
 		{Name: "chat", Desc: "talk to the agent", Usage: "/chat", View: "chat"},
 		{Name: "diff", Desc: "live file diffs", Usage: "/diff", View: "diff"},
 		{Name: "plans", Desc: "plan/approach/task trees", Usage: "/plans", View: "plans"},
+		{Name: "plan", Desc: "current plan: summary, drill-down, e elaborates", Usage: "/plan", View: "plans"},
+		{Name: "library", Desc: "reusable workflow library: blocks, versions, runs", Usage: "/library", View: "library"},
 		{Name: "sessions", Desc: "browse past runs", Usage: "/sessions [id]", View: "sessions"},
 		{Name: "decisions", Desc: "decision model activity", Usage: "/decisions", View: "decisions"},
 		{Name: "workflow", Desc: "explicitly focus one owning workflow node", Usage: "/workflow [root|qualified-ref|UUID]"},
@@ -163,7 +165,7 @@ func (r *Registry) Help() string {
 		title string
 		names []string
 	}{
-		{"VIEWS", []string{"chat", "diff", "plans", "sessions", "decisions", "workflows", "files", "tests", "settings", "status", "manage"}},
+		{"VIEWS", []string{"chat", "diff", "plans", "plan", "library", "sessions", "decisions", "workflows", "files", "tests", "settings", "status", "manage"}},
 		{"MODELS", []string{"models"}},
 		{"RUN", []string{"new", "stop", "retry", "btw", "tools", "workflow"}},
 		{"AUTH", []string{"auth"}},

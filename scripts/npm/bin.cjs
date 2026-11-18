@@ -18,4 +18,4 @@ const app = require('./install.cjs');
   for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { if (signal === 'SIGTERM') child.kill(signal); });
   child.on('error', error => { console.error(`Cannot start Caliper: ${error.message}`); process.exitCode = 1; });
   child.on('exit', (code, signal) => { process.exitCode = code ?? (signal === 'SIGINT' ? 130 : 1); });
-})().catch(error => { console.error(`Caliper: ${error.message}`); process.exitCode = 1; });
+})().catch(error => { console.error(`Caliper: ${error.message}\nRun npm install -g caliper-harness@latest to repair the installation, then run caliper again.`); process.exitCode = 1; });

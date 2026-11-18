@@ -213,6 +213,28 @@ func (p *Prompter) stdinAsk(ctx context.Context, qs []Question) ([]Answer, error
 // parseOptions splits newline-separated options, trims, drops empties,
 // appends NoneOfAbove. The tool refuses excess choices before asking.
 func parseOptions(s string) []string {
+	opts, _ := parseOptionsStrict(s)
+	return opts
+}
+
+func parseOptionsStrict(s string) ([]string, error) {
+	if trimmed := strings.TrimSpace(s); strings.HasPrefix(trimmed, "[") {
+		var decoded []string
+		dec := json.NewDecoder(strings.NewReader(trimmed))
+		if err := dec.Decode(&decoded); err != nil {
+			return nil, err
+		}
+		if dec.Decode(&struct{}{}) != io.EOF {
+			return nil, fmt.Errorf("trailing data after JSON array")
+		}
+		s = strings.Join(decoded, "\n")
+	} else if trimmed != "" && bytes.ContainsAny([]byte(trimmed), "[]") && strings.HasPrefix(trimmed, "{") {
+		return nil, fmt.Errorf("JSON objects are not an options list")
+	}
+	return parseOptionLines(s), nil
+}
+
+func parseOptionLines(s string) []string {
 	var out []string
 	for _, o := range strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n") {
 		if o = strings.TrimSpace(o); o != "" && !strings.EqualFold(o, NoneOfAbove) {
@@ -243,7 +265,11 @@ func questions(args tool.Args) ([]Question, error) {
 			}
 			continue
 		}
-		qs = append(qs, Question{Text: question, Options: parseOptions(options)})
+		opts, err := parseOptionsStrict(options)
+		if err != nil {
+			return nil, fmt.Errorf("question%s options must be one per line or a JSON array of strings; no question asked: %w", n, err)
+		}
+		qs = append(qs, Question{Text: question, Options: opts})
 	}
 	return qs, nil
 }

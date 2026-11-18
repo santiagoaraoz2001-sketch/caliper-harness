@@ -1,5 +1,5 @@
 // Package agent is the headless ReAct loop: model thinks, emits tool
-// blocks, the harness executes, results feed back — until the model
+// blocks, the harness executes, results feed back Ã¢â‚¬â€ until the model
 // answers without a tool block or the step cap stops the loop plainly.
 package agent
 
@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sort"
 	"specific-harness/internal/prompts"
 	"strings"
@@ -88,6 +89,8 @@ type Runner struct {
 	ProjectContext         func(context.Context, *session.Continuation, string) error // live task ID, never restored identity; completed-response boundary only
 	PlanningCompletion     func(*session.WorkflowScope) (*outcome.Report, error)
 	pendingFocus           *session.WorkflowScope
+	pendingMethodLens      *session.MethodLens
+	pendingMethodLensSet   bool
 	readinessStop          *outcome.ReadinessNotApprovedError // current invocation only; never restored from prose
 	workflowHeader         string
 	Exec                   Exec
@@ -111,7 +114,7 @@ type Runner struct {
 	OnToken func(string)
 	// SessionID + Session persist the run event by event. A nil Session
 	// means no persistence. A persistence failure does not stop the run,
-	// but it does fail the returned error — a lost record stays loud.
+	// but it does fail the returned error Ã¢â‚¬â€ a lost record stays loud.
 	SessionID string
 	Session   SessionLog
 	// MaxTokens caps the run at the window: the loop stops once the
@@ -219,6 +222,7 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 		defer cancel()
 	}
 	r.pendingFocus = nil
+	r.pendingMethodLens, r.pendingMethodLensSet = nil, false
 	r.readinessStop = nil
 	r.turnEffects = false
 	r.assignedClaim = false
@@ -289,6 +293,13 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 	}
 	r.progressWatch = watch
 	log, contextEvent, measurePrompt := ledger.Record, ledger.Context, ledger.Measure
+	lastMeasuredPrompt := 0
+	measurePrompt = func(u llm.Usage) {
+		if u.Reported {
+			lastMeasuredPrompt = u.In
+		}
+		ledger.Measure(u)
+	}
 	boundExec := exec
 	exec = func(ctx context.Context, def tool.Definition, args tool.Args) (tool.Result, error) {
 		if def.Bound {
@@ -761,7 +772,8 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 		return ledger.Err
 	}
 	deferredBoundaryAdvice := ""
-	deferCompaction := false // A declined length-boundary summary must still yield a worker turn.
+	deferCompaction := false  // A declined length-boundary summary must still yield a worker turn.
+	deferredCompactionAt := 0 // Occupancy at the last non-reducing summary; retry only after growth beyond it.
 	var pruning pruneBatch
 	compactModel := func(candidate session.Continuation) (session.Continuation, string, bool, error) {
 		requestCtx, cancel := context.WithCancelCause(ctx)
@@ -780,6 +792,11 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 		return next, summary, ran, err
 	}
 	publishCompact := ledger.Compact
+	// One logical unfinished native generation may span physical replies.
+	// Prefix-capable transports already return the combined raw; otherwise
+	// these bytes stitch a literal suffix to the retained partial before the
+	// registry parses or executes anything.
+	pendingNativeRaw, pendingNativeState := "", ""
 steps:
 	for step := 1; r.withinStepBudget(step - 1); step++ {
 		usedSteps = step
@@ -884,8 +901,15 @@ steps:
 				contextEvent(r.Continuation)
 			}
 		}
-		if !deferCompaction && shouldCompact(r.contextOccupancy(basis), r.MaxTokens, true, r.Compaction) {
+		occupancy := r.contextOccupancy(basis)
+		compactedThisCycle := false
+		if !deferCompaction && occupancy > deferredCompactionAt && shouldCompact(occupancy, r.MaxTokens, true, r.Compaction) {
 			nt, sum, ran, err := compactModel(r.Continuation)
+			if errors.Is(err, errCompactionDeferred) {
+				deferredCompactionAt = occupancy
+				log("note", fmt.Sprintf("compaction deferred: %v; continuing uncompacted", err))
+				err = nil
+			}
 			if err != nil {
 				if errors.Is(err, userCommentInterrupt) && ctx.Err() == nil {
 					step--
@@ -899,6 +923,7 @@ steps:
 				return finish(outcome.Stopped, msg, msg, ledger.Err)
 			}
 			if ran {
+				compactedThisCycle = true
 				if err := publishCompact(nt, sum); err != nil {
 					return finish(outcome.Failed, "compacted continuation recording failed: "+err.Error(), "", err)
 				}
@@ -923,12 +948,25 @@ steps:
 			return finish(outcome.Failed, err.Error(), "", err)
 		}
 		basis = max(basis, r.Continuation.Estimate())
+		if !compactedThisCycle {
+			basis = max(basis, lastMeasuredPrompt)
+		}
 		if overBudget(basis, r.MaxTokens, true) {
-			msg := fmt.Sprintf("stopped: content estimate %d tokens reached budget %d (backend token occupancy unmeasured) — the task needs a bigger window or breaking down", basis, r.MaxTokens)
+			msg := fmt.Sprintf("stopped: content estimate %d tokens reached budget %d (backend token occupancy unmeasured) Ã¢â‚¬â€ the task needs a bigger window or breaking down", basis, r.MaxTokens)
 			fmt.Fprintln(out, msg)
 			return finish(outcome.Stopped, msg, msg, ledger.Err)
 		}
 		transcript := ledger.Messages()
+		// Per-request dynamic state rides only on this snapshot's tail so
+		// the retained system message and history stay byte-stable and the
+		// provider can reuse its cached prefix across requests. It is a
+		// trailing system message, never a user turn and never merged
+		// into a tool result: user/tool bytes and turn structure stay
+		// exactly as retained, so nothing downstream can mistake host
+		// state for a fresh user instruction or corrupt a tool envelope.
+		if tail := r.dynamicPromptTail(); tail != "" {
+			transcript = append(transcript, llm.Message{Role: "system", Content: tail})
+		}
 		requestChars := contentSize(transcript) + r.Continuation.SchemaBytes
 		consumption := r.Continuation.Consumption()
 		var native llm.Reply
@@ -960,6 +998,7 @@ steps:
 				cause := context.Cause(requestCtx)
 				cancelGeneration(nil)
 				if errors.Is(cause, userCommentInterrupt) && ctx.Err() == nil {
+					pendingNativeRaw, pendingNativeState = "", ""
 					r.recordUsage(native.Usage)
 					if err := r.keepSteered(native, func(kind, text string) error { log(kind, text); return ledger.Err }); err != nil {
 						return finish(outcome.Failed, err.Error(), "", err)
@@ -991,6 +1030,11 @@ steps:
 				nextInput := basis + native.Prefix.GeneratedTokenCount()
 				if native.Usage.Reported {
 					nextInput = native.Usage.In + native.Usage.Out
+				} else if r.Continuation.BasisChars > 0 && r.Continuation.BasisTokens > 0 {
+					// An interrupted stream may have literal byte progress without
+					// a terminal usage receipt. Estimate only the added prefix
+					// with the continuation's existing chars-per-token calibration.
+					nextInput = basis + int(math.Ceil(float64(native.Prefix.ResponseBytes())*float64(r.Continuation.BasisTokens)/float64(r.Continuation.BasisChars)))
 				}
 				if shouldCompact(nextInput, r.MaxTokens, true, r.Compaction) {
 					// A genuine length terminal proves this prompt was processed. The
@@ -1008,6 +1052,14 @@ steps:
 						step--
 						continue steps
 					}
+					if errors.Is(compactErr, errCompactionDeferred) {
+						// Same maintenance outcome as an unapproved summary:
+						// the retained draft still fits, so hand over to a
+						// fresh response through the !ran path below.
+						deferredCompactionAt = nextInput
+						log("note", fmt.Sprintf("compaction deferred: %v; continuing uncompacted", compactErr))
+						compactErr = nil
+					}
 					if compactErr != nil {
 						status := outcome.Stopped
 						if errors.Is(compactErr, compactionRecordFailure) {
@@ -1024,6 +1076,7 @@ steps:
 							return finish(outcome.Stopped, "unfinished response reached context cleanup threshold but no model-written compaction could be published; raw draft retained", "", nil)
 						}
 						log("note", "unfinished response retained as unverified history without compaction; starting a fresh response")
+						pendingNativeRaw, pendingNativeState = "", ""
 						deferCompaction = true
 						step-- // Response handover grants no new execution step.
 						continue steps
@@ -1032,6 +1085,7 @@ steps:
 						return finish(outcome.Failed, publishErr.Error(), "", publishErr)
 					}
 					log("note", "unfinished response compacted as unverified history; starting a fresh response from the factual summary")
+					pendingNativeRaw, pendingNativeState = "", ""
 					step-- // Compaction/response handover grants no new execution step.
 					continue steps
 				}
@@ -1050,19 +1104,76 @@ steps:
 		} else {
 			reply, _, u, err = r.chat(ctx, transcript)
 		}
+		logicalNativeRaw, logicalNativeState := native.RawNative, native.NativeInitialState
+		if pendingNativeRaw != "" && native.RawNative != "" {
+			if strings.HasPrefix(native.RawNative, pendingNativeRaw) {
+				logicalNativeState = pendingNativeState
+			} else {
+				trimmed := strings.TrimSpace(native.RawNative)
+				if !strings.HasPrefix(trimmed, "<tool_call>") && !strings.HasPrefix(trimmed, "<think>") {
+					logicalNativeRaw = pendingNativeRaw + native.RawNative
+					logicalNativeState = pendingNativeState
+				}
+			}
+		}
 		if err == nil && native.RawNative != "" {
-			// Native raw transport owns generation continuity; the registry owns
-			// parsing and admission. No unfinished frame reaches this boundary.
+			// Native raw transport owns physical generation continuity; the
+			// registry owns parsing and admission. If an unfinished logical
+			// generation still reaches this boundary in separate physical
+			// replies, parse its stitched raw once here. A complete restated
+			// call may replace the abandoned partial, but a literal suffix is
+			// never parsed or executed by itself.
+			physicalNativeRaw := native.RawNative
 			var parsed llm.Message
-			parsed, err = r.Registry.ParseNativeResponse(native.RawNative, native.NativeInitialState, r.SessionID+fmt.Sprintf("-step-%d", step))
+			parsed, err = r.Registry.ParseNativeResponse(logicalNativeRaw, logicalNativeState, r.SessionID+fmt.Sprintf("-step-%d", step))
+			if err != nil && pendingNativeRaw != "" && logicalNativeRaw != physicalNativeRaw {
+				if standalone, standaloneErr := r.Registry.ParseNativeResponse(physicalNativeRaw, native.NativeInitialState, r.SessionID+fmt.Sprintf("-step-%d", step)); standaloneErr == nil && len(standalone.ToolCalls) > 0 {
+					parsed, err = standalone, nil
+					logicalNativeRaw, logicalNativeState = physicalNativeRaw, native.NativeInitialState
+				}
+			}
 			if err == nil {
 				native.Message = parsed
+				if logicalNativeRaw != physicalNativeRaw {
+					native.RawNative = logicalNativeRaw
+					native.NativeInitialState = logicalNativeState
+					native.RawContentStreamed = parsed.Content
+				}
+				pendingNativeRaw, pendingNativeState = "", ""
 			}
 			reply = native.Message.Content
 			native.ThinkingOnly = err == nil && native.FinishReason == "stop" && strings.TrimSpace(reply) == "" && len(native.Message.ToolCalls) == 0 && (native.Message.Reasoning != "" || native.Message.ReasoningContent != "" || native.Message.Thinking != "")
 			if err == nil && reply != "" && r.OnToken != nil {
 				r.OnToken(strings.TrimPrefix(reply, native.RawContentStreamed))
 			}
+		}
+		if err == nil {
+			pendingNativeRaw, pendingNativeState = "", ""
+		}
+		if err != nil && ctx.Err() == nil && !native.OutputLimit && logicalNativeRaw != "" &&
+			(errors.Is(err, llm.ErrIncompleteNativeResponse) || llm.NativeRawIncomplete(logicalNativeRaw, logicalNativeState)) {
+			// The generation stopped inside an open frame without a user stop
+			// and without completing the task. Archive and retain the exact
+			// partial in context, then generate again on the same task with
+			// no intervening instruction.
+			previousPendingNativeRaw := pendingNativeRaw
+			pendingNativeRaw, pendingNativeState = logicalNativeRaw, logicalNativeState
+			r.recordUsage(native.Usage)
+			if _, keepErr := r.keepPartial(native, err, func(kind, text string) error { log(kind, text); return ledger.Err }); keepErr != nil {
+				return finish(outcome.Failed, keepErr.Error(), "", keepErr)
+			}
+			retainReply := native
+			if previousPendingNativeRaw != "" && strings.HasPrefix(retainReply.RawNative, previousPendingNativeRaw) {
+				retainReply.RawNative = strings.TrimPrefix(retainReply.RawNative, previousPendingNativeRaw)
+			}
+			if keepErr := r.retainUnfinished(retainReply, func(kind, text string) error { log(kind, text); return ledger.Err }); keepErr != nil {
+				return finish(outcome.Failed, keepErr.Error(), "", keepErr)
+			}
+			log("note", "generation stopped inside an unclosed native frame; partial retained in context and generation continues")
+			if ledger.Err != nil {
+				return finish(outcome.Failed, ledger.Err.Error(), "", ledger.Err)
+			}
+			continue
 		}
 		var framing *llm.ToolFramingError
 		if errors.As(err, &framing) && ctx.Err() == nil && !native.OutputLimit {
@@ -1074,6 +1185,7 @@ steps:
 				return finish(outcome.Failed, recoveryErr.Error(), "", recoveryErr)
 			}
 			if selected {
+				pendingNativeRaw, pendingNativeState = "", ""
 				native, err = fixed, nil
 			} else {
 				// Keep the worker's actual reasoning, but no active calls from a
@@ -1081,6 +1193,7 @@ steps:
 				retained := native.Message.Clone()
 				retained.ToolCalls = nil
 				r.Continuation.Entries = append(r.Continuation.Entries, session.Entry{Kind: "reply", Message: retained})
+				pendingNativeRaw, pendingNativeState = "", ""
 				feedback := r.Prompts.Format("repair.framing.unrepaired", framing.Reason, framing.Draft)
 				log("tool-framing-feedback", feedback)
 				add("failure", "user", feedback, false)
@@ -1356,7 +1469,7 @@ steps:
 			return finish(outcome.Failed, err.Error(), obs, err)
 		}
 	}
-	msg := fmt.Sprintf("stopped after %d steps without a final answer — the task may need breaking down", r.MaxSteps)
+	msg := fmt.Sprintf("stopped after %d steps without a final answer Ã¢â‚¬â€ the task may need breaking down", r.MaxSteps)
 	fmt.Fprintln(out, msg)
 	return finish(outcome.Stopped, msg, msg, ledger.Err)
 }
@@ -1562,28 +1675,40 @@ func prepareInvocation(ctx context.Context, def tool.Definition, args tool.Args)
 	return original, validated, repair
 }
 func (r *Runner) settleFocus(log func(string, string) error) error {
-	if r.pendingFocus == nil {
+	if r.pendingFocus == nil && !r.pendingMethodLensSet {
 		return nil
 	}
-	defer func() { r.pendingFocus = nil }()
+	defer func() { r.pendingFocus = nil; r.pendingMethodLens, r.pendingMethodLensSet = nil, false }()
 	if r.Session == nil {
-		return fmt.Errorf("workflow focus requires a durable continuation receipt")
+		return fmt.Errorf("workflow focus or method lens requires a durable continuation receipt")
 	}
 	candidate := r.Continuation.Clone()
-	value := *r.pendingFocus
-	candidate.Workflow = &value
+	if r.pendingFocus != nil {
+		value := *r.pendingFocus
+		candidate.Workflow = &value
+	}
+	if r.pendingMethodLensSet {
+		candidate.MethodLens = r.pendingMethodLens.Clone()
+		r.bindMethodLens(&candidate)
+		if err := candidate.Snapshot().Validate(); err != nil {
+			return err
+		}
+	}
 	// A focus change keeps the model and conversation, so the measured
-	// chars-per-token calibration stays valid; a model change still clears
-	// it on restore. Clearing it here made pruning count bytes as tokens.
-	candidate.Invalidate()
+	// chars-per-token calibration and the latest server-measured prompt
+	// both stay valid; a model change still clears them on restore.
+	// Clearing the calibration here made pruning count bytes as tokens,
+	// and reporting a zeroed reading hid real occupancy from context
+	// maintenance. Only the revision advances: the scope changed, the
+	// measured basis did not.
+	candidate.Revision++
 	raw, err := candidate.Snapshot().Encode()
 	if err == nil {
 		err = log("continuation", raw)
 	}
 	if err == nil {
 		r.Continuation = candidate
-		raw, _ := json.Marshal(session.Continuation{ModelKey: candidate.ModelKey})
-		err = log("context", string(raw))
+		err = log("context", contextReadingJSON(candidate))
 	}
 	return err
 }
@@ -1663,6 +1788,14 @@ func (r *Runner) invokeValidated(ctx context.Context, def tool.Definition, args 
 			value = session.WorkflowScope{Store: a.Store, Kind: "task", ID: a.TaskID}
 		}
 		r.pendingFocus = &value
+	}
+	if res.MethodLens != nil {
+		if refusal := r.queueMethodLens(res.MethodLens); refusal != "" {
+			if note != "" {
+				note += " "
+			}
+			note += refusal
+		}
 	}
 	if res.Truncated {
 		return annotateInvocationResult("tool result (truncated):\n"+res.Text, note), callSignature(def.Name, args), true

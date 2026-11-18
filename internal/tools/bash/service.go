@@ -87,8 +87,12 @@ func (s *ServiceOwner) execute(ctx context.Context, action, command, dir string)
 	if s.closed {
 		return tool.Result{}, fmt.Errorf("service session is closed")
 	}
+	// Structured callers emit every advertised slot, so a stray cmd on
+	// stop/status is ignored (never executed) instead of refusing the
+	// action; the result discloses that it was not executed.
+	ignored := ""
 	if action != "start" && command != "" {
-		return tool.Result{}, fmt.Errorf("service %s does not execute cmd; omit cmd", action)
+		ignored = "\nSupplied cmd ignored: service " + action + " does not execute commands; the cmd was not executed."
 	}
 	switch action {
 	case "stop":
@@ -99,9 +103,9 @@ func (s *ServiceOwner) execute(ctx context.Context, action, command, dir string)
 			s.proc = nil
 		}
 		s.clearScript()
-		return tool.Result{Text: "Owned session service stopped."}, nil
+		return tool.Result{Text: "Owned session service stopped." + ignored}, nil
 	case "status":
-		return tool.Result{Text: s.status() + s.diagnostic()}, nil
+		return tool.Result{Text: s.status() + s.diagnostic() + ignored}, nil
 	case "start":
 		if strings.TrimSpace(command) == "" {
 			return tool.Result{}, fmt.Errorf("service=start requires a foreground cmd")

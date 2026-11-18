@@ -32,6 +32,9 @@ func reasoningAliasFixture(field string, age int) session.Continuation {
 	}}
 }
 
+// Reasoning bodies stay exact at or below the age bound and stub beyond it
+// (approved contract change); visible text, short arguments, correlation
+// and recent history never change.
 func TestPruneReasoningAliasesPreservedAtEveryAge(t *testing.T) {
 	for _, field := range []string{"reasoning", "reasoning_content", "thinking", "all"} {
 		for _, age := range []int{49999, 50000, 50001} {
@@ -45,11 +48,16 @@ func TestPruneReasoningAliasesPreservedAtEveryAge(t *testing.T) {
 					"reasoning_content": {before.ReasoningContent, got.ReasoningContent},
 					"thinking":          {before.Thinking, got.Thinking},
 				} {
-					if pair[0] != pair[1] {
-						t.Fatalf("%s was pruned at age %d: report=%q", name, age, report)
+					if age > 50000 && pair[0] != "" {
+						if !strings.HasPrefix(pair[1], "[pruned reasoning") {
+							t.Fatalf("%s was not stubbed beyond the age bound at age %d: report=%q", name, age, report)
+						}
+					} else if pair[0] != pair[1] {
+						t.Fatalf("%s changed at age %d: report=%q", name, age, report)
 					}
 				}
-				if !reflect.DeepEqual(got, before) || !reflect.DeepEqual(c.Entries[0], original.Entries[0]) || !reflect.DeepEqual(c.Entries[2:], original.Entries[2:]) {
+				if got.Content != before.Content || !reflect.DeepEqual(got.ToolCalls, before.ToolCalls) ||
+					!reflect.DeepEqual(c.Entries[0], original.Entries[0]) || !reflect.DeepEqual(c.Entries[2:], original.Entries[2:]) {
 					t.Fatal("pruning changed visible text, calls, result correlation or recent history")
 				}
 				if err := c.Snapshot().Validate(); err != nil {
@@ -76,8 +84,22 @@ func TestPruneReasoningAliasesRespectProtectedAndCurrentThought(t *testing.T) {
 				c.Entries[2].Kind = protection
 			}
 			before := c.Clone()
-			if _, report := agePolicyRunner(t).prune(&c); report != "" || !reflect.DeepEqual(c, before) {
-				t.Fatalf("protected/current thought changed: %q", report)
+			_, report := agePolicyRunner(t).prune(&c)
+			switch protection {
+			case "unread-reply", "current":
+				// Unread and current thought are never stubbed.
+				if report != "" || !reflect.DeepEqual(c, before) {
+					t.Fatalf("protected/current thought changed: %q", report)
+				}
+			default:
+				// Group protection keeps the entries; only the consumed
+				// reasoning bodies inside the group stub in place.
+				got := c.Entries[1].Message
+				if !strings.HasPrefix(got.Reasoning, "[pruned reasoning") ||
+					!reflect.DeepEqual(c.Entries[2], before.Entries[2]) ||
+					got.Content != before.Entries[1].Message.Content {
+					t.Fatalf("protected group entries changed beyond reasoning bodies: %q", report)
+				}
 			}
 		})
 	}
@@ -94,8 +116,7 @@ func TestPruneReasoningAliasesPreservedAtExistingBatchBoundary(t *testing.T) {
 		t.Fatal("reasoning aliases rewrote cached context between boundaries")
 	}
 	c.SchemaKey = "next existing tool phase"
-	before = c.Clone()
-	if _, report := batch.apply(r, &c); report != "" || !reflect.DeepEqual(c, before) {
-		t.Fatalf("existing phase boundary changed reasoning: %q", report)
+	if _, report := batch.apply(r, &c); report == "" || !strings.HasPrefix(c.Entries[1].Message.Reasoning, "[pruned reasoning") {
+		t.Fatalf("existing phase boundary did not stub aged reasoning: %q", report)
 	}
 }

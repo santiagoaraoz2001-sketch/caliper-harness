@@ -42,7 +42,7 @@ type Reply struct {
 	NativeInitialState string
 	RawContentStreamed string          // exact leading normal prose already delivered to onDelta
 	Prefix             *ResponsePrefix // declared native prefix; never reconstructed from parsed message fields
-	OutputLimit        bool            // untainted length terminal; transport/cancellation failures never set it
+	OutputLimit        bool            // resumable unfinished terminal (length, or a stop inside an unclosed frame); transport/cancellation failures never set it
 	Message            Message
 	Served             string
 	Usage              Usage
@@ -155,11 +155,15 @@ func (c *Client) ChatTools(ctx context.Context, msgs []Message, tools []ToolDefi
 		}
 	}
 	reply.Message.Role = "assistant"
-	// Judge/compaction callers use this method for streaming without tools and
-	// consume ordinary parsed messages. Only structured tool generation uses raw
-	// framing. A retained raw prefix still validates identity if tools disappear;
-	// it must never fall through into a fresh chat request.
-	if c.runtime == RuntimeRulith && (len(tools) > 0 || rawContinuation) {
+	// Judge callers use this method for streaming without tools and consume
+	// ordinary parsed messages. Structured tool generation uses raw framing,
+	// and so does a no-tool generation whose caller owns a prefix
+	// continuation loop (WithContinuationTransport): both are the same
+	// unfinished-generation mechanism, and a length terminal must return a
+	// resumable prefix on either. A retained raw prefix still validates
+	// identity if tools disappear; it must never fall through into a fresh
+	// chat request.
+	if c.runtime == RuntimeRulith && (len(tools) > 0 || rawContinuation || continuationTransportRequested(ctx)) {
 		reply, err = c.chatRulithRaw(context.WithValue(ctx, idleKey{}, guard), msgs, tools, onDelta)
 	} else {
 		_, _, _, err = c.chatStream(context.WithValue(ctx, idleKey{}, guard), msgs, onDelta, tools, &reply)

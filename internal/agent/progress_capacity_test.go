@@ -104,6 +104,29 @@ func TestProgressContextCapacityReductionPreservesCoreAndOwnerRecords(t *testing
 	}
 }
 
+func TestProgressPreflightReducesBeforeJudgeInference(t *testing.T) {
+	r, w := largeProgressPacket(t)
+	preflights, judged := 0, 0
+	r.JudgePreflight = func(req decision.Request) error {
+		preflights++
+		if len(req.Context) > 30000 {
+			return &decision.ContextCapacityError{Message: "encoded request too large", EncodedRequest: true}
+		}
+		return nil
+	}
+	r.Judge = func(_ context.Context, q decision.Request) (decision.Verdict, error) {
+		judged++
+		if len(q.Context) > 30000 || !strings.Contains(q.Context, "CapacityOmissions") {
+			t.Fatalf("judge received unreduced packet: %d bytes", len(q.Context))
+		}
+		return decision.Verdict{Option: q.Options[1], Confidence: .4}, nil
+	}
+	advice, err := r.confirmLoop(t.Context(), w, "cadence review", func(string, string) error { return nil }, "")
+	if err != nil || advice != "" || judged != 1 || preflights < 2 {
+		t.Fatalf("preflight reduction failed: advice=%q err=%v preflights=%d judged=%d", advice, err, preflights, judged)
+	}
+}
+
 func TestDistinctQuestionsWithIdenticalAnswersAreProgress(t *testing.T) {
 	r := &Runner{Assigned: &AssignedOps{Facts: func(context.Context) (any, error) { return BookkeepingFacts{}, nil }}}
 	r.enforcement.repair = "PAT update pending"

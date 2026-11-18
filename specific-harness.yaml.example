@@ -41,7 +41,7 @@ recall:
 auth:
   mode: authorize-all       # yolo, authorize-risky, authorize-all
   judged_tools: [bash, fetch]
-  free_tools: [grep, find, ask, judge, recall, find_file, find_dir, help]  # anything else is judged (fail closed)
+  free_tools: [grep, find, ask, judge, recall, find_file, find_dir, help, wait]  # anything else is judged (fail closed)
   max_arg_chars: 80         # arg chars shown in prompts; 0 = unlimited
 
 params:

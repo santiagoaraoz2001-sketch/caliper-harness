@@ -73,7 +73,11 @@ func TestDiscoveryNavigationReceivesAdviceWithoutRequiringSourceRead(t *testing.
 	if results != 6 {
 		t.Fatalf("actual settled receipts%d; want5 navigation plus first source", results)
 	}
-	if got := m.seen[1]; len(got) == 0 || !strings.Contains(got[len(got)-1].Content, r.Prompts.Text("continuation.discovery.reconsider")) {
+	directionSeen := false
+	for _, message := range m.seen[1] {
+		directionSeen = directionSeen || strings.Contains(message.Content, r.Prompts.Text("continuation.discovery.reconsider"))
+	}
+	if got := m.seen[1]; len(got) == 0 || !directionSeen {
 		t.Fatal("navigation direction did not reach next actual request")
 	}
 }

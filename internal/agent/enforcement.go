@@ -23,6 +23,7 @@ type AssignedOps struct {
 	Observe           func(tool.Definition, tool.Args, tool.Result, error)
 	Reset             func()
 	Start             func(context.Context, string) (*session.Assignment, string, error)
+	Reclaim           func(context.Context, string, int) (*session.Assignment, string, error) // optional: re-admit this session's recorded Running attempt
 	Admit             func(context.Context) error
 	ProjectCoding     func(context.Context) error // ordinary project work; never a Task claim
 	Facts             func(context.Context) (any, error)
@@ -192,7 +193,21 @@ func (r *Runner) TaskStartDefinition() tool.Definition {
 		if r.Assigned == nil || r.Session == nil {
 			return tool.Result{}, fmt.Errorf("task_start needs owning store/project and durable session")
 		}
-		value, command, err := r.Assigned.Start(ctx, args["task"].(string))
+		taskID := args["task"].(string)
+		// A restored assignment for this exact task and workspace proves this
+		// session owns a Running attempt whose executor ended unsettled;
+		// re-admit that attempt instead of demanding a Queued task.
+		reclaim := r.Assigned.Reclaim != nil && !r.assignedClaim && r.settlement == nil &&
+			r.Continuation.Assignment != nil && r.Continuation.Assignment.TaskID == taskID &&
+			r.Continuation.Assignment.Workspace == r.Workspace && r.Continuation.Assignment.Attempt > 0
+		var value *session.Assignment
+		var command string
+		var err error
+		if reclaim {
+			value, command, err = r.Assigned.Reclaim(ctx, taskID, r.Continuation.Assignment.Attempt)
+		} else {
+			value, command, err = r.Assigned.Start(ctx, taskID)
+		}
 		if err != nil {
 			return tool.Result{}, err
 		}
@@ -200,6 +215,10 @@ func (r *Runner) TaskStartDefinition() tool.Definition {
 		r.assignedClaim = true
 		r.settlement = nil
 		r.Continuation.Assignment = value
+		if lens := r.Continuation.MethodLens; lens != nil && methodLensScopeMatchesAssignment(lens, value) {
+			lens.TaskID, lens.Attempt = value.TaskID, value.Attempt
+			lens.Revision++
+		}
 		r.Continuation.Coding = &session.CodingState{TaskID: value.TaskID, Attempt: value.Attempt, Workspace: value.Workspace, Command: command, ConfigCommand: r.Assigned.ConfiguredCommand, Source: "assigned"}
 		if r.Assigned.AcceptanceCommand != nil {
 			r.Continuation.Coding.AcceptanceCommand = r.Assigned.AcceptanceCommand()
@@ -227,7 +246,16 @@ func (r *Runner) TaskStartDefinition() tool.Definition {
 		if firstClaim {
 			r.claimPreparationEnd = len(r.Continuation.Entries) - 1
 		}
-		text := fmt.Sprintf("claimed task %s attempt%d; direct main execution admitted, check %q", value.TaskID, value.Attempt, command)
+		verb := "claimed"
+		if reclaim {
+			verb = "resumed"
+		}
+		text := fmt.Sprintf("%s task %s attempt%d; direct main execution admitted, check %q", verb, value.TaskID, value.Attempt, command)
+		if r.Continuation.MethodLens == nil && r.Registry != nil {
+			if _, ok := r.Registry.Lookup("library_workflow"); ok {
+				text += " " + r.Prompts.Text("tools.task_start.method_check")
+			}
+		}
 		// refreshWorkflow installs the frozen brief at system role before the
 		// next request. Keep this receipt about the actual claim, not a second brief.
 		return tool.Result{Text: text, Focus: &tool.WorkflowScope{Store: value.Store, Kind: "task", ID: value.TaskID}}, nil

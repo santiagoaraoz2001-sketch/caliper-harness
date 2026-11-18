@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -98,18 +99,32 @@ func loadPlans(storePath string, bufferPoolBytes uint64) ([]LoadedPlan, error) {
 	if err != nil {
 		return nil, err
 	}
+	elaborations, err := plan.ListAllElaborations(context.Background(), s)
+	if err != nil {
+		return nil, err
+	}
+	byTarget := map[string][]plan.Elaboration{}
+	for _, item := range elaborations {
+		key := item.TargetKind + "\x00" + item.TargetID
+		byTarget[key] = append(byTarget[key], item)
+	}
 	out := make([]LoadedPlan, 0, len(plans))
 	for _, p := range plans {
 		lp := LoadedPlan{P: p}
+		p.Elaborations = byTarget[rowPlan+"\x00"+p.ID]
 		appr, err := plan.PlanApproaches(s, p.ID)
 		if err != nil {
 			return nil, err
 		}
 		for _, a := range appr {
 			la := LoadedApproach{A: a}
+			a.Elaborations = byTarget[rowApproach+"\x00"+a.ID]
 			tasks, err := plan.ApproachTasks(s, a.ID)
 			if err != nil {
 				return nil, err
+			}
+			for _, task := range tasks {
+				task.Elaborations = byTarget[rowTask+"\x00"+task.ID]
 			}
 			la.Tasks = tasks
 			lp.Approaches = append(lp.Approaches, la)
@@ -457,6 +472,110 @@ func approachLabel(title string) string {
 	return plan.DisplayText(title)
 }
 
+func (d *PlanDetail) elaborations() []plan.Elaboration {
+	if d == nil {
+		return nil
+	}
+	switch d.Kind {
+	case rowPlan:
+		if d.LP != nil && d.LP.P != nil {
+			return d.LP.P.Elaborations
+		}
+	case rowApproach:
+		if d.LA != nil && d.LA.A != nil {
+			return d.LA.A.Elaborations
+		}
+	case rowTask:
+		if d.T != nil {
+			return d.T.Elaborations
+		}
+	}
+	return nil
+}
+
+func elaborationFieldLines(item plan.Elaboration) []string {
+	out := []string{"purpose:"}
+	out = append(out, strings.Split(item.Purpose, "\n")...)
+	out = append(out, "inputs:")
+	out = append(out, strings.Split(item.Inputs, "\n")...)
+	out = append(out, "completion evidence:")
+	out = append(out, strings.Split(item.Evidence, "\n")...)
+	out = append(out, "risks:")
+	out = append(out, strings.Split(item.Risks, "\n")...)
+	return out
+}
+
+func elaborationLines(items []plan.Elaboration) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	latest := items[len(items)-1]
+	out := []string{"", fmt.Sprintf("elaboration v%d · %s · %s", latest.Version, latest.Status, latest.ID)}
+	if latest.DecisionBy != "" {
+		out = append(out, fmt.Sprintf("decision: %s by %s at %s", latest.Status, latest.DecisionBy, latest.DecidedAt.Format(time.RFC3339)))
+	}
+	if latest.Status == plan.ElaborationDraft || latest.Status == plan.ElaborationPending {
+		out = append(out, "decision keys: a approve · x request changes")
+	}
+	out = append(out, elaborationFieldLines(latest)...)
+	var approved *plan.Elaboration
+	for i := len(items) - 1; i >= 0; i-- {
+		if items[i].Status == plan.ElaborationApproved {
+			copy := items[i]
+			approved = &copy
+			break
+		}
+	}
+	if approved != nil && approved.ID != latest.ID {
+		out = append(out, "", fmt.Sprintf("approved elaboration v%d remains recorded · %s", approved.Version, approved.ID))
+		out = append(out, elaborationFieldLines(*approved)...)
+	}
+	if len(items) > 1 {
+		out = append(out, "", "prior elaboration versions:")
+		for _, item := range items[:len(items)-1] {
+			out = append(out, fmt.Sprintf("v%d · %s · %s", item.Version, item.Status, item.ID))
+		}
+	}
+	return out
+}
+
+func (m *Model) decidePlanElaboration(approved bool) tea.Cmd {
+	d := m.Plans.Detail
+	items := d.elaborations()
+	if d == nil || len(items) == 0 {
+		m.alert("info", "no saved elaboration to decide — press e to ask the model to create one")
+		return nil
+	}
+	latest := items[len(items)-1]
+	if latest.Status != plan.ElaborationDraft && latest.Status != plan.ElaborationPending {
+		m.alert("info", fmt.Sprintf("elaboration v%d is already %s", latest.Version, latest.Status))
+		return nil
+	}
+	s, err := store.OpenWithBufferPool(m.StorePath, uint64(m.Cfg.Store.BufferPoolBytes))
+	if err != nil {
+		m.alert("err", err.Error())
+		return nil
+	}
+	defer s.Close()
+	current := latest
+	if current.Status == plan.ElaborationDraft {
+		submitted, err := plan.SubmitElaboration(context.Background(), s, current.ID)
+		if err != nil {
+			m.alert("err", err.Error())
+			return nil
+		}
+		current = *submitted
+	}
+	decided, err := plan.DecideElaboration(context.Background(), s, current.ID, approved, "tui-user")
+	if err != nil {
+		m.alert("err", err.Error())
+		return nil
+	}
+	items[len(items)-1] = *decided
+	m.alert("info", fmt.Sprintf("elaboration v%d %s", decided.Version, decided.Status))
+	return m.refreshPlans(d.Ref)
+}
+
 // detailLogical is the dive content as numbered logical lines: title,
 // state, then kind-specific body. Wrapping happens in display so
 // line numbers stay stable.
@@ -492,6 +611,7 @@ func detailLogical(d *PlanDetail) []string {
 			}
 			out = append(out, fmt.Sprintf("%s %s · %s · %d/%d", la.Ref, approachLabel(la.A.Title), la.A.State, ad, at))
 		}
+		out = append(out, elaborationLines(lp.P.Elaborations)...)
 		return out
 	case rowApproach:
 		la := d.LA
@@ -509,10 +629,12 @@ func detailLogical(d *PlanDetail) []string {
 		for ti, t := range la.Tasks {
 			out = append(out, fmt.Sprintf("%s %s · %s", taskRef(la.Ref, ti), t.Title, t.State))
 		}
+		out = append(out, elaborationLines(la.A.Elaborations)...)
 		return out
 	default:
 		t := d.T
 		out := []string{d.Ref + " " + t.Title, "state: " + t.State + " · execution=" + string(t.Execution) + " verification=" + string(t.Verification) + " qualified=" + fmt.Sprint(t.Qualified()), ""}
+
 		fields := []struct{ name, val string }{
 			{"prompt", t.Prompt},
 			{"goal", t.Current},
@@ -529,6 +651,7 @@ func detailLogical(d *PlanDetail) []string {
 			{"review", t.Review},
 			{"attempt log", t.AttemptLog},
 		}
+		base := len(out)
 		for _, f := range fields {
 			if strings.TrimSpace(f.val) == "" {
 				continue
@@ -536,8 +659,12 @@ func detailLogical(d *PlanDetail) []string {
 			out = append(out, f.name+":")
 			out = append(out, strings.Split(f.val, "\n")...)
 		}
-		if len(out) == 3 {
+		if len(out) == base {
 			out = append(out, "(undrafted — no block fields yet)")
+		}
+		if lines := elaborationLines(t.Elaborations); len(lines) > 0 {
+			out = append(out, lines...)
+			out = append(out, "")
 		}
 		return out
 	}
@@ -620,6 +747,29 @@ func (m Model) plansKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		if (s == "r" || s == "R") && strings.TrimSpace(m.Input.Value()) == "" {
 			return m, m.refreshPlans(""), true
 		}
+		if (s == "e" || s == "E") && strings.TrimSpace(m.Input.Value()) == "" {
+			if r := m.plansCur(); r != nil {
+				if m.Plans.Detail == nil || m.Plans.Detail.ID != r.ID {
+					m.plansDetail(r)
+				}
+				previous := ""
+				if items := m.Plans.Detail.elaborations(); len(items) > 0 {
+					previous = items[len(items)-1].ID
+				}
+				m.navigate(ViewChat, "")
+				m.Input.SetValue(fmt.Sprintf("Elaborate %s (%s) [%s %s]: first use elaborate(action=\"get\", kind=\"%s\", id=\"%s\"). Then use elaborate(action=\"set\", kind=\"%s\", id=\"%s\", expected_previous_id=\"%s\") to save its purpose, inputs, completion evidence, and risks; submit that exact version for my sign-off. Explain it using the current graph and PAT state. Do not change the plan unless I ask.", r.Ref, r.Label, r.Kind, r.ID, r.Kind, r.ID, r.Kind, r.ID, previous))
+				m.Input.SetCursor(len(m.Input.Value()))
+				m.PickerHide = true
+				m.PickerIdx = 0
+			}
+			return m, nil, true
+		}
+		if (s == "a" || s == "A") && open && strings.TrimSpace(m.Input.Value()) == "" {
+			return m, m.decidePlanElaboration(true), true
+		}
+		if (s == "x" || s == "X") && open && strings.TrimSpace(m.Input.Value()) == "" {
+			return m, m.decidePlanElaboration(false), true
+		}
 		if (s == "f" || s == "F") && strings.TrimSpace(m.Input.Value()) == "" {
 			if r := m.plansCur(); r != nil {
 				if m.Plans.Detail == nil || m.Plans.Detail.ID != r.ID {
@@ -693,9 +843,9 @@ func (m *Model) planRowText(r PlanRow, sel bool, width int, last bool) string {
 
 // renderPlans draws header plus the tree in exactly h rows.
 func (m Model) plansHintRows(w int) []string {
-	text := "↑↓ move · →← expand · enter dive · f comment · r refresh"
+	text := "↑↓ move · →← expand · enter dive · e elaborate · f comment · r refresh"
 	if m.Plans.Detail != nil {
-		text = "↑↓/pgup/pgdn scroll · f comment [lines]"
+		text = "↑↓/pgup/pgdn scroll · e elaborate · f comment [lines]"
 	}
 	text = m.ownedHint(text + " · " + m.escapeHint())
 	var out []string

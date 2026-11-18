@@ -215,7 +215,16 @@ func TestClaimedTaskScopeNativeCoding(t *testing.T) {
 						if strings.Contains(base, "Invoke advertised launch") || strings.Contains(base, "PLANNING ORCHESTRATOR:") || strings.Contains(base, "Only launch or explicit workflow_resume") {
 							t.Errorf("claimed wire retained preparation/delegation: %s", base)
 						}
-						if !variant.ordinary && !strings.Contains(base, "Selected workflow: task") {
+						// The workflow identity header is per-request state: it
+						// rides on the trailing system tail so the retained
+						// system prefix stays byte-stable for provider caching.
+						header := false
+						for _, m := range body.Messages {
+							if m.Role == "system" && strings.Contains(m.Content, "Selected workflow: task") {
+								header = true
+							}
+						}
+						if !variant.ordinary && !header {
 							t.Error("selected identity header lost")
 						}
 					} else if settled && !restoring {
@@ -379,7 +388,7 @@ func TestClaimedTaskScopeNativeCoding(t *testing.T) {
 			if variant.ordinary {
 				tools, continuation = "workflow", session.Continuation{Workflow: scope}
 			}
-			r, _, e := New(Deps{Tools: tools, Cfg: cfg, Store: s, Server: srv.URL, Model: "fixture", Window: 32768, MaxSteps: 8, Session: sink, SessionID: "claimed", Continuation: continuation}, "observe and check")
+			r, _, e := New(Deps{Tools: tools, Cfg: cfg, Store: s, Server: srv.URL, Model: "fixture", Window: 131072, MaxSteps: 8, Session: sink, SessionID: "claimed", Continuation: continuation}, "observe and check")
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -470,7 +479,7 @@ func TestClaimedTaskScopeNativeCoding(t *testing.T) {
 					t.Fatal("original preparation reply lost from raw native archive")
 				}
 			}
-			restored, _, e := session.Restore(events, 32768)
+			restored, _, e := session.Restore(events, 131072)
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -484,7 +493,7 @@ func TestClaimedTaskScopeNativeCoding(t *testing.T) {
 					t.Fatal("durable restore lost retained preparation narrative/reasoning")
 				}
 			}
-			reopened, _, e := New(Deps{Tools: tools, Cfg: cfg, Store: s, Server: srv.URL, Model: "fixture", Window: 32768, MaxSteps: 1, Session: sink, SessionID: "reopened", Continuation: restored}, "read provenance")
+			reopened, _, e := New(Deps{Tools: tools, Cfg: cfg, Store: s, Server: srv.URL, Model: "fixture", Window: 131072, MaxSteps: 1, Session: sink, SessionID: "reopened", Continuation: restored}, "read provenance")
 			if e != nil {
 				t.Fatal(e)
 			}

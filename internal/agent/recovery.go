@@ -88,7 +88,18 @@ func (r *Runner) publishPreparationGuidance(ctx context.Context, advice string, 
 	candidate.Entries = nil
 	for i := 0; i < len(entries); {
 		end := r.Continuation.GroupEnd(i)
-		if !r.ownsPreparationGuidance(entries[i]) {
+		if r.ownsPreparationGuidance(entries[i]) {
+			// Retire in place with bytes exact instead of deleting the
+			// group: deletion rewrites every later prompt byte and loses
+			// the provider's cached prefix for the whole suffix.
+			group := append([]session.Entry(nil), entries[i:end]...)
+			for j := range group {
+				if group[j].Kind == "guidance" {
+					group[j].Kind = "history"
+				}
+			}
+			candidate.Entries = append(candidate.Entries, group...)
+		} else {
 			candidate.Entries = append(candidate.Entries, entries[i:end]...)
 		}
 		i = end

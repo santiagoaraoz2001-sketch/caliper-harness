@@ -87,6 +87,30 @@ func TestRejectedCompactionCandidateIsNotRejudged(t *testing.T) {
 	}
 }
 
+func TestRejectedCompactionCandidateIgnoresContinuationMetadata(t *testing.T) {
+	c := passedCompactionFixture()
+	m := &scriptModel{replies: []string{"The converter check remains unverified."}}
+	r := truthRunner(t, m, 32768)
+	calls := 0
+	r.Judge = func(_ context.Context, q decision.Request) (decision.Verdict, error) {
+		calls++
+		return decision.Verdict{Option: q.Options[1], Confidence: .9}, nil
+	}
+	if _, _, ran, err := r.Compact(t.Context(), c); err != nil || ran {
+		t.Fatalf("first rejection changed behavior: ran=%t err=%v", ran, err)
+	}
+	changed := c.Clone()
+	changed.Revision++
+	changed.Prompt += 100
+	changed.Measured = !changed.Measured
+	if _, _, ran, err := r.Compact(t.Context(), changed); err != nil || ran {
+		t.Fatalf("metadata-only retry changed behavior: ran=%t err=%v", ran, err)
+	}
+	if calls != 1 || len(m.seen) != 1 {
+		t.Fatalf("metadata-only change repeated rejected work: judge=%d model=%d", calls, len(m.seen))
+	}
+}
+
 func TestAskAnswerIsEssentialCompactionAndProgressEvidence(t *testing.T) {
 	c := passedCompactionFixture()
 	call := session.Entry{Kind: "reply", Message: llm.Message{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "question", Name: "ask", Arguments: `{"question":"Which aesthetic?"}`}}}}

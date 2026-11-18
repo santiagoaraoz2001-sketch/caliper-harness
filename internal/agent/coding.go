@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -17,7 +19,7 @@ import (
 	"specific-harness/internal/tools/process"
 )
 
-var CodingTools = []string{"read", "read_outside", "find_outside", "edit", "write", "bash", "grep", "find_file", "find_dir", "help", "ask", "check"}
+var CodingTools = []string{"read", "read_outside", "find_outside", "edit", "write", "bash", "grep", "find_file", "find_dir", "help", "ask", "check", "wait", "elaborate", "build_block", "build_workflow", "library_workflow"}
 
 // FullToolNames is a display of registered public names, not another admission policy.
 func ToolNames(view string) []string {
@@ -230,6 +232,12 @@ func (r *Runner) CheckDefinition(bash tool.Definition, acceptanceCommand ...stri
 		if strings.TrimSpace(cmd) == "" || strings.TrimSpace(r.CheckCommand) != "" && cmd != r.CheckCommand {
 			return tool.Result{}, fmt.Errorf("check cmd must match the configured command exactly, or provide a nonblank proposal when unset")
 		}
+		if missing := missingNodeTestInputs(c.Workspace, acceptance); len(missing) > 0 {
+			return tool.Result{}, fmt.Errorf("acceptance input missing: %s (named by the frozen acceptance command but not present in the workspace); the command was not executed", strings.Join(missing, ", "))
+		}
+		if missing := missingNodeTestInputs(c.Workspace, cmd); len(missing) > 0 {
+			return tool.Result{}, fmt.Errorf("check input missing: %s (named by the configured check command but not present in the workspace); the command was not executed", strings.Join(missing, ", "))
+		}
 		c.Command, c.Source = cmd, "proposed"
 		if r.CheckCommand != "" {
 			c.Source = "configured"
@@ -350,6 +358,52 @@ func (r *Runner) CheckDefinition(bash tool.Definition, acceptanceCommand ...stri
 		}
 		return res, err
 	}}
+}
+
+// missingNodeTestInputs reports literal file arguments of a `node --test`
+// invocation that do not exist under cwd. Node silently skips missing file
+// arguments and can exit 0 having run fewer tests than the command names,
+// so a frozen acceptance command must not be trusted on exit status alone.
+// Only path-shaped tokens (a separator or a script extension) are checked;
+// flags, flag values, shell operators and globs are left to node/shell.
+func missingNodeTestInputs(cwd, command string) []string {
+	fields := strings.FieldsFunc(command, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == '"' || r == '\''
+	})
+	nodeTest := false
+	for i, f := range fields {
+		if (f == "node" || strings.HasSuffix(f, "/node") || strings.HasSuffix(f, `\node`) || strings.HasSuffix(f, "node.exe")) &&
+			i+1 < len(fields) && fields[i+1] == "--test" {
+			nodeTest = true
+			fields = fields[i+2:]
+			break
+		}
+	}
+	if !nodeTest {
+		return nil
+	}
+	var missing []string
+	for _, tok := range fields {
+		if tok == "&&" || tok == "||" || tok == ";" || tok == "|" {
+			break // a later compound segment is a different command
+		}
+		if strings.HasPrefix(tok, "-") || strings.ContainsAny(tok, "*?") {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(tok))
+		pathShaped := strings.ContainsAny(tok, `/\`) || ext == ".js" || ext == ".mjs" || ext == ".cjs" || ext == ".ts" || ext == ".mts" || ext == ".cts"
+		if !pathShaped {
+			continue
+		}
+		p := tok
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(cwd, filepath.FromSlash(tok))
+		}
+		if _, err := os.Stat(p); err != nil {
+			missing = append(missing, tok)
+		}
+	}
+	return missing
 }
 
 func checkStatus(res tool.Result, err error) (string, string) {

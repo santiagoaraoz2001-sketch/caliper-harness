@@ -103,6 +103,9 @@ func TestDecisionRecipeFlagsMatchActualPythonCLI(t *testing.T) {
 	}
 	help, err := exec.Command(python, script, "--help").CombinedOutput()
 	if err != nil {
+		if strings.Contains(string(help), "No module named 'yaml'") {
+			t.Skip("verified Python lacks PyYAML — actual CLI flag contract unexercised")
+		}
 		t.Fatalf("actual parser help: %s %v", help, err)
 	}
 	path := "/downloaded"

@@ -137,7 +137,13 @@ func TestTransportFetchPartialIsNonproductiveObservation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normal next answer failed: %v", err)
 	}
-	if len(model.seen) != 2 || !strings.Contains(model.seen[1][len(model.seen[1])-1].Content, "partial tool result (failed; not complete):\nreceived fragment") {
+	received := false
+	if len(model.seen) == 2 {
+		for _, message := range model.seen[1] {
+			received = received || strings.Contains(message.Content, "partial tool result (failed; not complete):\nreceived fragment")
+		}
+	}
+	if len(model.seen) != 2 || !received {
 		t.Errorf("model did not receive labeled failure: %+v", model.seen)
 	}
 	joined := ""

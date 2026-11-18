@@ -53,7 +53,7 @@ func TestCapturedBackendTransport(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if fmt.Sprintf("%x", sha256.Sum256([]byte(reply))) != f.ReplySHA256 || served != f.ServedModel || u != (Usage{In: f.In, Out: f.Out, Reported: true}) {
+			if fmt.Sprintf("%x", sha256.Sum256([]byte(reply))) != f.ReplySHA256 || served != f.ServedModel || u.In != f.In || u.Out != f.Out || !u.Reported {
 				t.Fatalf("captured response changed: served=%q usage=%+v", served, u)
 			}
 			if f.Stream && (observed.String() != reply || callbacks != f.Callbacks) {

@@ -242,7 +242,7 @@ func TestPreparationRecoveryCurrentNextWire(t *testing.T) {
 				initial.Add("intent", "user", "repair source without changing the brief", false)
 				initial.AddGuidance("Legacy guidance: preserve unresolved knowledge requirement", nil)
 				sink := &codingSink{dir: filepath.Join(dir, "sessions")}
-				r, _, err := New(Deps{Tools: "workflow", Cfg: cfg, Store: s, Server: server.URL, Model: "component", Session: sink, SessionID: "recovery", Continuation: initial, Window: 32768, MaxSteps: 7}, "repair source")
+				r, _, err := New(Deps{Tools: "workflow", Cfg: cfg, Store: s, Server: server.URL, Model: "component", Session: sink, SessionID: "recovery", Continuation: initial, Window: 131072, MaxSteps: 7}, "repair source")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -404,8 +404,13 @@ func TestPreparationRecoveryPartialEffectsNextWire(t *testing.T) {
 			if len(latest.Errors) == 0 || len(latest.Effects) != 2 || latest.Effects[0].Status != "applied" || latest.Effects[0].ID != planID || latest.Effects[1].Status == "applied" {
 				t.Errorf("partial effects were lost or rolled back: %+v", latest)
 			}
-			last := body.Messages[len(body.Messages)-1].Content
-			if !strings.HasPrefix(last, pc.Text("continuation.preparation.current_frame")) || !strings.Contains(last, planID) {
+			last := ""
+			for _, message := range body.Messages {
+				if strings.HasPrefix(message.Content, pc.Text("continuation.preparation.current_frame")) {
+					last = message.Content
+				}
+			}
+			if last == "" || !strings.Contains(last, planID) {
 				t.Errorf("partial-effect recovery absent: %q", last)
 			}
 			if strings.Contains(last, "partial or unknown effects require owning readback") {
@@ -433,7 +438,7 @@ func TestPreparationRecoveryPartialEffectsNextWire(t *testing.T) {
 	defer server.Close()
 	cfg.Model.Server = server.URL
 	sink := &codingSink{dir: filepath.Join(dir, "sessions")}
-	r, _, err := New(Deps{Tools: "workflow", Cfg: cfg, Store: s, Server: server.URL, Model: "component", Session: sink, SessionID: "partial", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, "root")}, Window: 32768, MaxSteps: 3}, "inspect partial effects")
+	r, _, err := New(Deps{Tools: "workflow", Cfg: cfg, Store: s, Server: server.URL, Model: "component", Session: sink, SessionID: "partial", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, "root")}, Window: 131072, MaxSteps: 3}, "inspect partial effects")
 	if err != nil {
 		t.Fatal(err)
 	}

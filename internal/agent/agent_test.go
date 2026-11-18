@@ -261,7 +261,13 @@ func TestRepairLoopRecovers(t *testing.T) {
 		t.Errorf("calls=%v", calls)
 	}
 	// The repair question must have reached the model.
-	if len(model.seen) < 2 || !strings.Contains(model.seen[1][len(model.seen[1])-1].Content, `unsupported argument "wrong"`) {
+	repairSeen := false
+	if len(model.seen) >= 2 {
+		for _, message := range model.seen[1] {
+			repairSeen = repairSeen || strings.Contains(message.Content, `unsupported argument "wrong"`)
+		}
+	}
+	if len(model.seen) < 2 || !repairSeen {
 		t.Error("repair question never shown to model")
 	}
 }
@@ -298,7 +304,12 @@ func TestEmptyBlockShowsSchema(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("schema request must not execute; calls=%v", calls)
 	}
-	last := model.seen[1][len(model.seen[1])-1].Content
+	last := ""
+	for _, message := range model.seen[1] {
+		if strings.Contains(message.Content, "Schema for echo") {
+			last = message.Content
+		}
+	}
 	if !strings.Contains(last, "Schema for echo") || !strings.Contains(last, "text") {
 		t.Errorf("schema not shown: %q", last)
 	}

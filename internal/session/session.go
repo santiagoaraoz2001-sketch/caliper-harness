@@ -213,6 +213,10 @@ type Entry struct {
 // WorkflowScope stores identity only; owning state is re-fetched before use.
 type WorkflowScope = tool.WorkflowScope
 
+// MethodLens is protected method state; it never selects, claims, settles,
+// or qualifies PAT work.
+type MethodLens = tool.MethodLens
+
 // Continuation is the bounded conversation, independent of the full raw log.
 // Prompt is the latest measured request, not current occupancy or cumulative cost.
 type Continuation struct {
@@ -220,6 +224,7 @@ type Continuation struct {
 	ToolView     string         `json:"tool_view,omitempty"`
 	PendingNotes []UserNote     `json:"pending_notes,omitempty"`
 	Workflow     *WorkflowScope `json:"workflow,omitempty"`
+	MethodLens   *MethodLens    `json:"method_lens,omitempty"`
 	Assignment   *Assignment    `json:"assignment,omitempty"`
 	Coding       *CodingState   `json:"coding,omitempty"`
 	SchemaBytes  int            `json:"schema_bytes,omitempty"`
@@ -245,6 +250,7 @@ func (c Continuation) Clone() Continuation {
 		value := *c.Workflow
 		c.Workflow = &value
 	}
+	c.MethodLens = c.MethodLens.Clone()
 	if c.Coding != nil {
 		value := *c.Coding
 		value.Report = value.Report.Clone()
@@ -285,6 +291,9 @@ func (c Continuation) Clone() Continuation {
 func (c Continuation) Messages() []llm.Message {
 	out := make([]llm.Message, 0, len(c.Entries))
 	for _, e := range c.Entries {
+		if e.Kind == "history" && e.PreparationScope != "" && e.Message.Role == "user" && len(e.Message.ToolCalls) == 0 && e.Message.ToolCallID == "" && e.Message.Name == "" {
+			continue
+		}
 		out = append(out, e.Message.Clone())
 	}
 	return out
@@ -293,15 +302,17 @@ func (c *Continuation) Add(kind, role, text string, unread bool) {
 	c.Entries = append(c.Entries, Entry{Message: llm.Message{Role: role, Content: text}, Kind: kind, Unread: unread})
 }
 
-// AddGuidance keeps reissued standalone host advice at the settled tail;
-// its exact provenance and all raw enforcement events remain.
+// AddGuidance dedupes reissued standalone host advice. An identical entry
+// stays in its original place: moving it to the tail would rewrite every
+// later byte of the prompt and invalidate the provider's cached prefix for
+// the whole transcript after it. Recency-sensitive state belongs in the
+// request tail, never in a reorder of retained history. Its exact
+// provenance and all raw enforcement events remain.
 func (c *Continuation) AddGuidance(text string, round *TaskRound) {
 	for i := 0; i < len(c.Entries); i = c.GroupEnd(i) {
 		e := c.Entries[i]
 		m := e.Message
 		if e.Kind == "guidance" && m.Role == "user" && len(m.ToolCalls) == 0 && m.ToolCallID == "" && m.Name == "" && m.Content == text && (e.Round == nil && round == nil || e.Round != nil && round != nil && *e.Round == *round) {
-			copy(c.Entries[i:], c.Entries[i+1:])
-			c.Entries[len(c.Entries)-1] = e
 			return
 		}
 	}
@@ -356,6 +367,26 @@ func (c Continuation) Validate() error {
 	}
 	if w := c.Workflow; w != nil && (w.Store == "" || !(w.Kind == "root" && w.ID == "" || w.ID != "" && (w.Kind == "plan" || w.Kind == "approach" || w.Kind == "task"))) {
 		return fmt.Errorf("invalid workflow scope identity")
+	}
+	if l := c.MethodLens; l != nil {
+		if l.WorkflowID == "" || l.WorkflowVersion < 1 || len(l.Steps) == 0 || l.StepIndex < -1 || l.StepIndex >= len(l.Steps) || l.Attempt < 0 || l.Revision < 0 {
+			return fmt.Errorf("invalid method lens identity")
+		}
+		switch l.ScopeKind {
+		case "session", "root":
+		case "plan", "approach", "task":
+			if l.ScopeID == "" {
+				return fmt.Errorf("invalid method lens scope")
+			}
+		default:
+			return fmt.Errorf("invalid method lens scope")
+		}
+		if l.StepIndex >= 0 {
+			step := l.Steps[l.StepIndex]
+			if step.BlockID == "" || step.BlockVersion < 1 || l.BlockID != step.BlockID || l.BlockVersion != step.BlockVersion {
+				return fmt.Errorf("invalid method lens phase")
+			}
+		}
 	}
 
 	if a := c.Assignment; a != nil && (a.Store == "" || a.Workspace == "" || a.PlanID == "" || a.ApproachID == "" || a.TaskID == "" || a.Attempt <= 0) {

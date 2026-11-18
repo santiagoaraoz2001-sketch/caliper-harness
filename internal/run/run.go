@@ -241,27 +241,39 @@ func New(d Deps, prompt string) (*agent.Runner, []string, error) {
 		}
 		return r.Session.Append(ctx, r.SessionID, "task_comment", string(raw))
 	}
+	afterClaim := func(command string) error {
+		r.CheckCommand = command
+		bash, _ := reg.Lookup("bash")
+		check := r.CheckDefinition(bash, assigned.AcceptanceCommand())
+		previous, _ := reg.Lookup("check")
+		var e error
+		if previous.Schema() != check.Schema() {
+			updated := tool.NewRegistry(pc)
+			for _, name := range reg.Names() {
+				def, _ := reg.Lookup(name)
+				if name == "check" {
+					def = check
+				}
+				updated.Register(def)
+			}
+			reg = updated
+			r.Registry, _, e = r.WorkflowView(r.Continuation.Workflow)
+		}
+		r.RetainHostCheck(check)
+		return e
+	}
 	r.Assigned = &agent.AssignedOps{Store: d.Store.Identity(), ConfiguredCommand: d.Cfg.Coding.CheckCommand, Reset: assigned.Reset, AcceptanceCommand: assigned.AcceptanceCommand, ClaimedBrief: assigned.ClaimedBrief, Admit: assigned.Admit, Settle: assigned.Settle,
 		Start: func(ctx context.Context, id string) (*session.Assignment, string, error) {
 			value, command, e := assigned.Start(ctx, id)
 			if e == nil {
-				r.CheckCommand = command
-				bash, _ := reg.Lookup("bash")
-				check := r.CheckDefinition(bash, assigned.AcceptanceCommand())
-				previous, _ := reg.Lookup("check")
-				if previous.Schema() != check.Schema() {
-					updated := tool.NewRegistry(pc)
-					for _, name := range reg.Names() {
-						def, _ := reg.Lookup(name)
-						if name == "check" {
-							def = check
-						}
-						updated.Register(def)
-					}
-					reg = updated
-					r.Registry, _, e = r.WorkflowView(r.Continuation.Workflow)
-				}
-				r.RetainHostCheck(check)
+				e = afterClaim(command)
+			}
+			return value, command, e
+		},
+		Reclaim: func(ctx context.Context, id string, attempt int) (*session.Assignment, string, error) {
+			value, command, e := assigned.Reclaim(ctx, id, attempt)
+			if e == nil {
+				e = afterClaim(command)
 			}
 			return value, command, e
 		},
@@ -315,7 +327,7 @@ func New(d Deps, prompt string) (*agent.Runner, []string, error) {
 				}
 				view.Register(def)
 			}
-			names := []string{"read", "read_outside", "find_outside", "find_file", "find_dir", "help", "grep", "ask"}
+			names := []string{"read", "read_outside", "find_outside", "find_file", "find_dir", "help", "grep", "ask", "wait", "elaborate", "build_block", "build_workflow", "library_workflow"}
 			a := r.Continuation.Assignment
 			claimed := a != nil && r.ClaimedTaskScope(&session.WorkflowScope{Store: a.Store, Kind: "task", ID: a.TaskID})
 			if r.ClaimedTaskScope(scope) || !claimed && planningProjectCoding(context.Background(), ld, scope) == nil {
@@ -635,6 +647,7 @@ func registerOwning(reg *tool.Registry, cfg config.Config, ld launch.Deps, judge
 		return err
 	}
 	reg.Register(guided)
+	reg.Register(elaborationDefinition(ld, r.SessionID, cfg.PromptCatalog))
 	return nil
 }
 

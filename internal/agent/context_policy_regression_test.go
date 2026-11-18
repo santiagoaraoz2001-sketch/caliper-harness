@@ -112,7 +112,6 @@ func TestOutputPruningRunPublishesStubPreservesRawOriginal(t *testing.T) {
 	c.Entries[2].Message.Reasoning = strings.Repeat("reasoning original ", 200)
 	c.Entries[2].Message.ReasoningContent = strings.Repeat("reasoning_content original ", 200)
 	c.Entries[2].Message.Thinking = strings.Repeat("thinking original ", 200)
-	original := c.Entries[2].Message
 	c.ModelKey = "fixture"
 	source, err := c.Snapshot().Encode()
 	if err != nil {
@@ -132,10 +131,10 @@ func TestOutputPruningRunPublishesStubPreservesRawOriginal(t *testing.T) {
 		stub, reasoning := false, false
 		for _, msg := range body.Messages {
 			stub = stub || msg.ToolCallID == "old-read" && strings.HasPrefix(msg.Content, "[pruned tool output")
-			reasoning = reasoning || msg.Reasoning == original.Reasoning && msg.ReasoningContent == original.ReasoningContent && msg.Thinking == original.Thinking
+			reasoning = reasoning || strings.HasPrefix(msg.Reasoning, "[pruned reasoning") && strings.HasPrefix(msg.ReasoningContent, "[pruned reasoning") && strings.HasPrefix(msg.Thinking, "[pruned reasoning")
 		}
 		if !stub || !reasoning {
-			t.Error("next actual HTTP request lost output stub or original reasoning")
+			t.Error("next actual HTTP request lost output stub or pruned reasoning stub")
 		}
 		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":5}}\n\ndata: [DONE]\n\n")
 	}))
@@ -166,7 +165,7 @@ func TestOutputPruningRunPublishesStubPreservesRawOriginal(t *testing.T) {
 			stubFound = strings.HasPrefix(entry.Message.Content, "[pruned tool output")
 		}
 		for _, call := range entry.Message.ToolCalls {
-			callFound = callFound || call.ID == "old-read" && call.Arguments == `{"path":"main.go"}` && entry.Message.Reasoning == original.Reasoning && entry.Message.ReasoningContent == original.ReasoningContent && entry.Message.Thinking == original.Thinking
+			callFound = callFound || call.ID == "old-read" && call.Arguments == `{"path":"main.go"}` && strings.HasPrefix(entry.Message.Reasoning, "[pruned reasoning") && strings.HasPrefix(entry.Message.ReasoningContent, "[pruned reasoning") && strings.HasPrefix(entry.Message.Thinking, "[pruned reasoning")
 		}
 	}
 	if !stubFound || !callFound {

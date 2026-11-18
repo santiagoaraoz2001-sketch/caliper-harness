@@ -110,6 +110,140 @@ func TestRulithContinuesLiteralBytesWithoutChatOrSyntheticMessages(t *testing.T)
 	}
 }
 
+// A clean stop terminal that arrives while the native frame is still open is
+// an unfinished generation, not a completed reply: it must hand back the
+// exact resumable prefix so the next physical request continues from the
+// last byte with nothing inserted.
+func TestRulithStopInsideFrameContinuesSeamlessly(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		rendered string
+		parts    []string
+	}{
+		{"reasoning", "<|im_start|>assistant\n<think>\n", []string{"Approach is ready. I need to claim", " the task.</think>\nready"}},
+		{"split marker in content", "rendered", []string{"Visible answer, then a call <", "tool_call>\n<function=record>\n<parameter=text>\nok</parameter>\n</function>\n</tool_call>"}},
+		{"tool frame", "rendered", []string{"<tool_call>\n<function=record>\n<parameter=text>\ncafé ", "</parameter>\n</function>\n</tool_call>"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var requests []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]json.RawMessage
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+					return
+				}
+				switch r.URL.Path {
+				case "/apply-template":
+					json.NewEncoder(w).Encode(map[string]string{"prompt": tc.rendered})
+				case "/completion":
+					var p string
+					json.Unmarshal(body["prompt"], &p)
+					i := len(requests)
+					requests = append(requests, p)
+					if p != tc.rendered+strings.Join(tc.parts[:i], "") {
+						t.Errorf("request %d changed prefix: %q", i, p)
+					}
+					w.Header().Set("Content-Type", "text/event-stream")
+					nativeEvent(w, map[string]any{"content": tc.parts[i], "model": "served-qwen"})
+					terminal := nativeTerminal(p, "eos", 9)
+					terminal["model"] = "served-qwen"
+					nativeEvent(w, terminal)
+				default:
+					t.Errorf("unexpected endpoint %s", r.URL.Path)
+					w.WriteHeader(404)
+				}
+			}))
+			defer srv.Close()
+			c := New(srv.URL+"/v1", "selected-qwen").WithRuntime(RuntimeRulith)
+			first, err := c.ChatTools(context.Background(), []Message{{Role: "user", Content: "go"}}, rulithTestTools(), nil)
+			if err == nil || !first.OutputLimit || first.Prefix == nil || first.Prefix.Validate() != nil {
+				t.Fatalf("stop inside frame did not return a resumable prefix: %+v %v", first, err)
+			}
+			if first.RawNative != tc.parts[0] {
+				t.Fatalf("partial raw changed: %q", first.RawNative)
+			}
+			last, err := c.ChatTools(WithResponseContinuation(context.Background(), first), []Message{{Role: "user", Content: "go"}}, rulithTestTools(), nil)
+			if err != nil || last.OutputLimit || last.Prefix != nil {
+				t.Fatalf("seamless completion failed: %+v %v", last, err)
+			}
+			if last.RawNative != strings.Join(tc.parts, "") {
+				t.Fatalf("continued raw mismatch: %q", last.RawNative)
+			}
+			if len(requests) != 2 {
+				t.Fatalf("generation requests = %d", len(requests))
+			}
+		})
+	}
+}
+
+// A stream that ends before a terminal receipt while a native frame is
+// still open is the same unfinished generation, whether the server refused
+// the stream, the record stream broke, or EOF arrived without a terminal.
+// The exact rendered prompt plus received bytes remain the physical prefix.
+func TestRulithInterruptedOpenFrameContinuesSeamlessly(t *testing.T) {
+	for _, mode := range []string{"server-error", "missing-terminal", "malformed-record"} {
+		t.Run(mode, func(t *testing.T) {
+			parts := []string{"<tool_call>\n<function=record>\n<parameter=text>\ncafé ", "</parameter>\n</function>\n</tool_call>"}
+			var requests []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]json.RawMessage
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+					return
+				}
+				switch r.URL.Path {
+				case "/apply-template":
+					json.NewEncoder(w).Encode(map[string]string{"prompt": "rendered"})
+				case "/completion":
+					var p string
+					json.Unmarshal(body["prompt"], &p)
+					i := len(requests)
+					requests = append(requests, p)
+					if p != "rendered"+strings.Join(parts[:i], "") {
+						t.Errorf("request %d changed prefix: %q", i, p)
+					}
+					w.Header().Set("Content-Type", "text/event-stream")
+					nativeEvent(w, map[string]any{"content": parts[i], "model": "served-qwen"})
+					if i == 0 {
+						switch mode {
+						case "server-error":
+							nativeEvent(w, map[string]any{"error": map[string]string{"message": "The model produced output that does not match the expected Content-only format"}})
+						case "missing-terminal":
+							return
+						case "malformed-record":
+							fmt.Fprintln(w, "data: {broken}")
+							return
+						}
+						return
+					}
+					terminal := nativeTerminal(p, "eos", 9)
+					terminal["model"] = "served-qwen"
+					nativeEvent(w, terminal)
+				default:
+					t.Errorf("unexpected endpoint %s", r.URL.Path)
+					w.WriteHeader(404)
+				}
+			}))
+			defer srv.Close()
+			c := New(srv.URL+"/v1", "selected-qwen").WithRuntime(RuntimeRulith)
+			first, err := c.ChatTools(context.Background(), []Message{{Role: "user", Content: "go"}}, rulithTestTools(), nil)
+			if err == nil || !first.OutputLimit || first.Prefix == nil || first.Prefix.Validate() != nil {
+				t.Fatalf("interrupted open frame did not return a resumable prefix: %+v %v", first, err)
+			}
+			if first.RawNative != parts[0] || first.Usage.Reported {
+				t.Fatalf("interrupted partial/usage changed: %+v", first)
+			}
+			last, err := c.ChatTools(WithResponseContinuation(context.Background(), first), []Message{{Role: "user", Content: "go"}}, rulithTestTools(), nil)
+			if err != nil || last.OutputLimit || last.Prefix != nil {
+				t.Fatalf("interrupted seamless completion failed: %+v %v", last, err)
+			}
+			if last.RawNative != strings.Join(parts, "") || len(requests) != 2 {
+				t.Fatalf("continued raw/requests mismatch: %q %v", last.RawNative, requests)
+			}
+		})
+	}
+}
+
 func TestRulithContinuationRejectsChangedOriginalRequest(t *testing.T) {
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; t.Error("unexpected HTTP request") }))
@@ -507,6 +641,66 @@ func TestRulithNonToolCallersRetainParsedChatStream(t *testing.T) {
 				t.Fatalf("ordinary streaming observation lost: %+v", observed)
 			}
 		})
+	}
+}
+
+// A maintenance generation without tools (a compaction summary) that owns a
+// continuation loop must use the same raw byte-prefix transport as tool
+// generations: a length terminal mid-document is an unfinished generation to
+// continue from the exact prefix, never a stopped run.
+func TestRulithNoToolContinuationTransportContinuesLength(t *testing.T) {
+	rendered := "<|im_start|>assistant\n"
+	parts := []string{"Summary so far: the lane gen", "erator is deterministic.\nDone."}
+	var requests []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			return
+		}
+		switch r.URL.Path {
+		case "/apply-template":
+			if body["tools"] != nil {
+				t.Errorf("no-tool summary advertised tools: %s", body["tools"])
+			}
+			json.NewEncoder(w).Encode(map[string]string{"prompt": rendered})
+		case "/completion":
+			var p string
+			json.Unmarshal(body["prompt"], &p)
+			i := len(requests)
+			requests = append(requests, p)
+			if p != rendered+strings.Join(parts[:i], "") {
+				t.Errorf("request %d changed prefix: %q", i, p)
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			nativeEvent(w, map[string]any{"content": parts[i], "model": "qwen"})
+			stop := "limit"
+			if i == 1 {
+				stop = "eos"
+			}
+			nativeEvent(w, nativeTerminal(p, stop, 11))
+		default:
+			t.Errorf("continuation-owned summary fell through to %s", r.URL.Path)
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+	client := New(srv.URL+"/v1", "qwen").WithRuntime(RuntimeRulith)
+	msgs := []Message{{Role: "user", Content: "summarize"}}
+	ctx := WithContinuationTransport(context.Background())
+	first, err := client.ChatTools(ctx, msgs, nil, nil)
+	if err == nil || !first.OutputLimit || first.Prefix == nil || first.Prefix.Validate() != nil || first.RawNative != parts[0] {
+		t.Fatalf("length-truncated summary did not return a resumable prefix: %+v %v", first, err)
+	}
+	last, err := client.ChatTools(WithResponseContinuation(ctx, first), msgs, nil, nil)
+	if err != nil || last.OutputLimit || last.Prefix != nil || last.FinishReason != "stop" {
+		t.Fatalf("summary continuation failed: %+v %v", last, err)
+	}
+	if last.RawNative != strings.Join(parts, "") || last.Message.Content != strings.Join(parts, "") {
+		t.Fatalf("continued summary mismatch: raw=%q content=%q", last.RawNative, last.Message.Content)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("generation requests = %d", len(requests))
 	}
 }
 

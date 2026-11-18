@@ -19,7 +19,13 @@ func TestReviewerRepairsVerdictWithoutRestartingWork(t *testing.T) {
 			if reviews == 1 {
 				return "Everything is complete and verified.", nil
 			}
-			if !strings.Contains(messages[len(messages)-1].Content, "PASS") {
+			feedback := ""
+			for _, message := range messages {
+				if strings.Contains(message.Content, "Begin with exactly one first-line form") {
+					feedback = message.Content
+				}
+			}
+			if !strings.Contains(feedback, "PASS") {
 				t.Error("missing verdict feedback")
 			}
 			return "PASS: actual paired checks support this task", nil

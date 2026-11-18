@@ -74,6 +74,31 @@ func Ready(ctx context.Context, d Deps, approachID string) (*plan.Approach, erro
 		return checkCoherence(ctx, d, approachID, p, tasks)
 	})
 }
+
+// briefStructureOK reports the deterministic readiness structure the
+// coherence sentences ask about: a stated goal, at least one task, and
+// every task titled, bounded (target or prompt), and carrying its own
+// acceptance assertions.
+func briefStructureOK(p *plan.Plan, tasks []*plan.Task) bool {
+	if p == nil || strings.TrimSpace(p.Goal) == "" {
+		return false
+	}
+	eligible := 0
+	for _, t := range tasks {
+		if t != nil && t.State == plan.TaskCancelled {
+			continue
+		}
+		eligible++
+		if t == nil || strings.TrimSpace(t.Title) == "" || strings.TrimSpace(t.Acceptance) == "" {
+			return false
+		}
+		if strings.TrimSpace(t.Target) == "" && strings.TrimSpace(t.Prompt) == "" {
+			return false
+		}
+	}
+	return eligible > 0
+}
+
 func checkCoherence(ctx context.Context, d Deps, approachID string, p *plan.Plan, tasks []*plan.Task) error {
 	a, err := plan.GetApproach(d.Store, approachID)
 	if err != nil {
@@ -170,6 +195,15 @@ func checkCoherence(ctx context.Context, d Deps, approachID string, p *plan.Plan
 		return fmt.Errorf("launch refused: the decision model judged approach %q incoherent or insufficiently bounded for goal %q (confidence %.2f) — revise the owning briefs so the tasks collectively cover the declared scope, each task is bounded, and each task has current acceptance assertions; then request readiness again", approachID, p.Goal, v.Confidence)
 	}
 	askUser := v.Confidence < d.Threshold
+	// Deterministic structure first: when every task is bounded with its
+	// own acceptance text, an unsure-band probability score is advisory
+	// only and does not escalate to the owner. Confident refusals and
+	// structurally incomplete briefs keep the existing paths.
+	if askUser && briefStructureOK(p, tasks) {
+		decision.LogJudgment(d.Log, decision.SourceCoherence, req, v, "admitted-structural", d.JudgmentContextChars)
+		markAdmitted()
+		return nil
+	}
 	repeatedRevision := false
 	if v.Option == req.Options[1] && !askUser {
 		refusals, err := plan.RecordReadinessRefusal(d.Store, approachID)

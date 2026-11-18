@@ -79,7 +79,7 @@ func TestCompletionEvidencePublicRun(t *testing.T) {
 			if scenario == "evidence failure" {
 				log = &completionFailSink{sink}
 			}
-			runner, _, e := assignedCodingNew(t, Deps{Store: owned, Cfg: cfg, Server: srv.URL, Model: "fixture", MaxSteps: len(calls) + 2, Window: 32768, Session: log, SessionID: "completion"}, "fix Fetch")
+			runner, _, e := assignedCodingNew(t, Deps{Store: owned, Cfg: cfg, Server: srv.URL, Model: "fixture", MaxSteps: len(calls) + 2, Window: 131072, Session: log, SessionID: "completion"}, "fix Fetch")
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -134,7 +134,7 @@ func TestCompletionEvidencePublicRun(t *testing.T) {
 			if !found {
 				t.Fatal("human evidence not recorded")
 			}
-			restored, _, e := session.Restore(events, 32768)
+			restored, _, e := session.Restore(events, 131072)
 			if e != nil {
 				t.Fatal(e)
 			}

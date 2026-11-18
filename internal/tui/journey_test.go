@@ -139,16 +139,17 @@ func TestJourneyPreservesDraftDialogAndRunOwnership(t *testing.T) {
 	m = viewportKey(m, tea.KeyDown)
 	m = viewportKey(m, tea.KeyEnter)
 	m = viewportKey(m, tea.KeyEsc)
-	if cancelled || !m.Chat.Running {
-		t.Fatal("journey Escape cancelled active chat")
-	}
-	m = viewportKey(m, tea.KeyEsc)
-	if cancelled {
-		t.Fatal("dock Escape stopped run")
-	}
-	m = viewportKey(m, tea.KeyEsc)
 	if !cancelled {
-		t.Fatal("original chat Escape no longer stops")
+		t.Fatal("first Escape did not stop active generation before journey navigation")
+	}
+	m.Chat.Running = false
+	m = viewportKey(m, tea.KeyEsc)
+	if m.Tabs[m.Active].at.view != ViewChat || !m.Tabs[m.Active].dock.Focused {
+		t.Fatal("post-stop Escape did not return from journey to dock")
+	}
+	m = viewportKey(m, tea.KeyEsc)
+	if m.Tabs[m.Active].dock.Focused || !m.Input.Focused() {
+		t.Fatal("post-stop dock Escape did not restore input")
 	}
 	m = journeyFixture(80, 24)
 	m.Chat.Dialog = &Dialog{Kind: "ask", Questions: []ask.Question{{Text: "Pick one", Options: []string{"one", "two"}}}, AskDone: make(chan []ask.Answer, 1)}

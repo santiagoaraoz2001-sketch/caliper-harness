@@ -89,7 +89,11 @@ func TestPrematureFinalRunnerRefusalAndRecovery(t *testing.T) {
 			if err != nil || readErr != nil || string(got) != "accepted" || len(model.seen) != 3 {
 				t.Fatalf("recovery: got=%q err=%v readErr=%v requests=%d", got, err, readErr, len(model.seen))
 			}
-			if !strings.Contains(model.seen[1][len(model.seen[1])-1].Content, "no calls ran") {
+			repairSeen := false
+			for _, msg := range model.seen[1] {
+				repairSeen = repairSeen || strings.Contains(msg.Content, "no calls ran")
+			}
+			if !repairSeen {
 				t.Fatal("model did not receive repair")
 			}
 			if _, err := os.Stat(forbidden); !os.IsNotExist(err) {

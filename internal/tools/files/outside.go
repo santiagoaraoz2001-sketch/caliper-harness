@@ -36,7 +36,7 @@ func (w *Workspace) OutsideDefinitions(cfg config.SearchConfig) []tool.Definitio
 		if err != nil {
 			return tool.Result{}, err
 		}
-		return external.execute(ctx, "read", args, nil)
+		return external.execute(ctx, "read", args, nil, nil)
 	}}
 	read.Params = append(read.Params, w.navigationParams()...)
 	read = w.normalizeOutsidePath(read)

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -33,6 +34,35 @@ func TestSerialCaptured733ActualBashAndCheck(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "check_marker.py"), []byte("from pathlib import Path\nassert Path('marker.txt').read_bytes() == 'R20_MANUAL_ρ_full_suffix\\n'.encode()\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	python := ""
+	for _, candidate := range []string{"python3", "python"} {
+		path, lookErr := exec.LookPath(candidate)
+		if lookErr != nil {
+			continue
+		}
+		if out, runErr := exec.Command(path, "--version").CombinedOutput(); runErr == nil && strings.Contains(string(out), "Python") {
+			python = path
+			break
+		}
+	}
+	if python == "" {
+		t.Skip("functional Python interpreter unavailable for captured checker")
+	}
+	if !strings.EqualFold(filepath.Base(python), "python3.exe") {
+		shim := filepath.Join(dir, "python-shim")
+		if err := os.Mkdir(shim, 0700); err != nil {
+			t.Fatal(err)
+		}
+		raw, err := os.ReadFile(python)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(shim, "python3.exe"), raw, 0700); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", shim+string(os.PathListSeparator)+os.Getenv("PATH"))
+	}
+
 	n := 0
 	var next []map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -81,10 +111,16 @@ func TestSerialCaptured733ActualBashAndCheck(t *testing.T) {
 	if len(approvals) != 2 || !strings.Contains(approvals[0], "run bash?") || !strings.Contains(approvals[1], "run check?") {
 		t.Fatalf("separate approvals=%q", approvals)
 	}
-	if len(next) < 3 {
+	group := -1
+	for i, message := range next {
+		if calls, ok := message["tool_calls"].([]any); ok && len(calls) == 2 {
+			group = i
+		}
+	}
+	if group < 0 || group+2 >= len(next) {
 		t.Fatalf("next request missing group %+v", next)
 	}
-	a, b1, b2 := next[len(next)-3], next[len(next)-2], next[len(next)-1]
+	a, b1, b2 := next[group], next[group+1], next[group+2]
 	calls, ok := a["tool_calls"].([]any)
 	if !ok || len(calls) != 2 || b1["tool_call_id"] != calls[0].(map[string]any)["id"] || b2["tool_call_id"] != calls[1].(map[string]any)["id"] || !strings.Contains(fmt.Sprint(b2["content"]), "declared check passed") {
 		t.Fatalf("next wire group %+v", next)
@@ -435,8 +471,17 @@ func TestSerialPreflightLoopAttemptAccounting(t *testing.T) {
 				if len(next) < 6 {
 					t.Fatal("missing next group", next)
 				}
-				for i, msg := range next[len(next)-5:] {
-					if msg.Role != "tool" || msg.ToolCallID != calls[i].ID || !strings.Contains(msg.Content, "cmd") {
+				toolMessages := make([]llm.Message, 0, len(next))
+				for _, msg := range next {
+					if msg.Role == "tool" {
+						toolMessages = append(toolMessages, msg)
+					}
+				}
+				if len(toolMessages) < 5 {
+					t.Fatal("missing next tool group", next)
+				}
+				for i, msg := range toolMessages[len(toolMessages)-5:] {
+					if msg.ToolCallID != calls[i].ID || !strings.Contains(msg.Content, "cmd") {
 						t.Fatalf("feedback missing %+v", msg)
 					}
 				}

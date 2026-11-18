@@ -113,18 +113,29 @@ func TestContinuationCompactionNextTurnAndMeasurement(t *testing.T) {
 			t.Fatal("model summary became system authority")
 		}
 	}
-	// Resume changes only the owning initial budget, not role/guide/Behavior bytes.
+	// Resume must not change the host system prefix at all: per-request
+	// dynamic state (including the run budget) rides on the request tail.
 	expected := append([]llm.Message(nil), systems...)
 	priorBudget := fmt.Sprintf(`"StepLimit":%d,"RemainingSteps":%d`, r.MaxSteps, r.MaxSteps)
 	currentBudget := fmt.Sprintf(`"StepLimit":%d,"RemainingSteps":%d`, r2.MaxSteps, r2.MaxSteps)
-	if !strings.Contains(expected[0].Content, priorBudget) {
-		t.Fatal("prior host budget missing")
+	if strings.Contains(expected[0].Content, priorBudget) || strings.Contains(expected[0].Content, currentBudget) {
+		t.Fatal("host budget leaked into the retained system prefix")
 	}
-	expected[0].Content = strings.Replace(expected[0].Content, priorBudget, currentBudget, 1)
-	if !reflect.DeepEqual(expected, resumedSystems) {
+	_ = expected
+	// Both requests carry exactly one trailing dynamic-tail system
+	// message; every retained system message before it is unchanged.
+	if len(resumedSystems) != len(systems) || len(systems) == 0 ||
+		!strings.Contains(systems[len(systems)-1].Content, priorBudget) ||
+		!reflect.DeepEqual(systems[:len(systems)-1], resumedSystems[:len(resumedSystems)-1]) {
 		t.Fatal("resume did not rebuild exactly one unchanged host system prefix")
 	}
+	if last := second.seen[0][len(second.seen[0])-1]; last.Role != "system" || !strings.Contains(last.Content, currentBudget) {
+		t.Fatalf("dynamic tail is not the trailing system message: %+v", last)
+	}
 	wire := joinContext(second.seen[0])
+	if strings.Count(wire, currentBudget) != 1 {
+		t.Fatalf("current host budget missing from request tail: %s", wire)
+	}
 	for _, anchor := range []string{"ORIGINAL_INTENT", "NOTE_ANCHOR", "BOUNDED_SUMMARY", "NEXT_TASK", "BEHAVIOR_ONCE", "RECALL_ONCE", "Model-reported response"} {
 		if strings.Count(wire, anchor) != 1 {
 			t.Errorf("anchor%q count%d wire%s", anchor, strings.Count(wire, anchor), wire)

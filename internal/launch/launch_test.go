@@ -33,7 +33,7 @@ type echoModel struct {
 }
 
 func (m *echoModel) Chat(_ context.Context, msgs []llm.Message) (string, string, llm.Usage, error) {
-	if strings.HasPrefix(msgs[len(msgs)-1].Content, "Review ") {
+	if strings.HasPrefix(fixtureRoleRequest(msgs), "Review ") {
 		return "UNVERIFIED: this fixture observes worker scheduling only", "echo-review", llm.Usage{}, nil
 	}
 	cur := m.cur.Add(1)
@@ -82,7 +82,7 @@ type flakyModel struct {
 }
 
 func (m *flakyModel) Chat(_ context.Context, msgs []llm.Message) (string, string, llm.Usage, error) {
-	if strings.HasPrefix(msgs[len(msgs)-1].Content, "Review ") {
+	if strings.HasPrefix(fixtureRoleRequest(msgs), "Review ") {
 		return "UNVERIFIED: retry fixture has no semantic reviewer", "flaky-review", llm.Usage{}, nil
 	}
 	if m.left.Add(-1) >= 0 {

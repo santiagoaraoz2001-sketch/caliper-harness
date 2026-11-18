@@ -36,6 +36,7 @@ type setupChoice struct {
 	key, label, state string
 	model             config.ModelConfig
 	judge             *config.DecisionConfig
+	detected          bool
 }
 
 // Keep the retained Setup editor aligned with writes made through Manage.
@@ -69,6 +70,11 @@ func setupJudgeKey(d config.DecisionConfig) string {
 		return "native:" + d.Server + ":" + d.Model
 	}
 	return setupModelKey(config.ModelConfig{Name: d.Model, Server: d.Server, Runtime: d.Runtime})
+}
+// setupJudgeUntouched reports whether the user has not changed the
+// staged judge from the baseline captured when Setup opened.
+func (m Model) setupJudgeUntouched() bool {
+	return m.Setup.JudgePick == m.Setup.JudgeBasePick && reflect.DeepEqual(m.Setup.Judge, m.Setup.JudgeBase)
 }
 func (m *Model) syncSetupRoles() {
 	if m.Setup.Pick == m.Setup.ModelBaseKey && setupModelKey(m.Setup.Model) == m.Setup.ModelBaseKey {
@@ -138,7 +144,13 @@ func (m Model) setupChoices() []setupChoice {
 		if r.Asset != nil {
 			state = "saved checkpoint · load in Manage"
 		}
-		out = append(out, setupChoice{key: key, label: candidate.Name, state: state, model: candidate})
+		if r.Detected {
+			state = "detected on this computer · select and save to connect"
+			if r.Health.Up {
+				state = "detected on this computer · online now · select and save to connect"
+			}
+		}
+		out = append(out, setupChoice{key: key, label: candidate.Name, state: state, model: candidate, detected: r.Detected})
 	}
 	return out
 }
@@ -303,7 +315,7 @@ func (m Model) setupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			return m, nil, true
 		}
 		if i < 0 {
-			m.Setup.Err = "No saved model · a Add server / model"
+			m.Setup.Err = "No model found yet · r Detect local servers · a Add server / model"
 			return m, nil, true
 		}
 		if m.Setup.Stage == 0 {
@@ -372,7 +384,7 @@ func (m *Model) renderSetup(w, h int) string {
 	if h > 6 {
 		body = append(body, Title.Render(titles[s.Stage]))
 	}
-	hint := "↑↓ select · enter continue · a add server/model · r Test saved endpoints · esc back"
+	hint := "↑↓ select · enter continue · a add server/model · r Detect local servers · esc back"
 	switch s.Stage {
 	case 0, 1:
 		if s.Stage == 1 && h > 6 {
@@ -395,7 +407,7 @@ func (m *Model) renderSetup(w, h int) string {
 			}
 		}
 		if len(rows) == 0 {
-			body = append(body, Guidance.Render("No saved models · a Add server / model · r Test saved endpoints"))
+			body = append(body, Guidance.Render("No model found yet · r Detect local servers · a Add server / model"))
 		} else {
 			body = append(body, listWindow(rows, selected, max(1, h-8))...)
 			if selected >= 0 {
@@ -443,6 +455,7 @@ func (m Model) currentSetupChoices() []setupChoice {
 	if d.Runtime == "laya" || d.Runtime == "system_one" {
 		out = append([]setupChoice{{key: "native:" + d.Server + ":" + d.Model, label: d.Model, state: "native decision service · connection untested", judge: &d}}, out...)
 	}
+	out = append(out, m.detectedJudgeChoices()...)
 	for _, r := range m.Serve.Rows {
 		if r.Sidecar && r.Asset != nil && r.Asset.Complete {
 			d := m.Setup.Judge
@@ -452,6 +465,37 @@ func (m Model) currentSetupChoices() []setupChoice {
 			d = d.WithRuntime(r.Asset.Runtime)
 			out = append(out, setupChoice{key: "native:" + d.Path, label: d.Model, state: r.Asset.Reason, judge: &d})
 		}
+	}
+	return out
+}
+
+// detectedJudgeChoices lists native decision services found by Setup's
+// local scan. Selecting one stages it; Save is what connects it.
+func (m Model) detectedJudgeChoices() []setupChoice {
+	var out []setupChoice
+	for _, r := range m.Serve.Rows {
+		if !r.Sidecar || !r.Detected || !r.IsModel || r.Ep.Model == "" {
+			continue
+		}
+		d := m.Setup.Judge
+		d.Server = r.Ep.URL
+		d.Model = r.Ep.Model
+		d.Path = ""
+		d.Revision = ""
+		runtime := r.Health.Runtime
+		if r.Health.Decision != nil && r.Health.Decision.Active != nil {
+			if r.Health.Decision.Active.Runtime != "" {
+				runtime = r.Health.Decision.Active.Runtime
+			}
+			if r.Health.Decision.Active.Revision != nil {
+				d.Revision = *r.Health.Decision.Active.Revision
+			}
+		}
+		if runtime == "" {
+			runtime = d.Runtime
+		}
+		d = d.WithRuntime(runtime)
+		out = append(out, setupChoice{key: "native:" + d.Server + ":" + d.Model, label: d.Model, state: "detected decision service · online now · select and save to connect", judge: &d, detected: true})
 	}
 	return out
 }

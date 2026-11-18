@@ -43,11 +43,25 @@ func (l *turnLedger) Add(kind, role, text string, unread bool) {
 	}
 }
 
-// Context records occupancy, not another copy of the conversation.
+// Context records occupancy, not another copy of the conversation. The
+// reading carries the continuation's own counters and content estimate so
+// post-compaction events show retained size instead of the stale measured
+// prompt alone.
+func contextReadingJSON(reading session.Continuation) string {
+	raw, _ := json.Marshal(struct {
+		Prompt      int    `json:"prompt"`
+		Measured    bool   `json:"measured"`
+		ModelKey    string `json:"model_key"`
+		Compactions int    `json:"compactions"`
+		Revision    int    `json:"revision"`
+		Estimate    int    `json:"estimate"`
+	}{reading.Prompt, reading.Measured, reading.ModelKey,
+		reading.Compactions, reading.Revision, reading.Estimate()})
+	return string(raw)
+}
+
 func (l *turnLedger) Context(reading session.Continuation) {
-	raw, _ := json.Marshal(session.Continuation{Prompt: reading.Prompt,
-		Measured: reading.Measured, ModelKey: reading.ModelKey})
-	l.Record("context", string(raw))
+	l.Record("context", contextReadingJSON(reading))
 }
 
 func (l *turnLedger) Measure(usage llm.Usage) {

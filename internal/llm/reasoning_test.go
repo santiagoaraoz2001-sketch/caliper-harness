@@ -185,7 +185,7 @@ func TestAuxObserverHeldStreamPartial(t *testing.T) {
 				if cancelObserver {
 					wantErr = context.Canceled
 				}
-				if !errors.Is(err, wantErr) || reply.ThinkingOnly || reply.FinishReason != "" || reply.Served != "served" || reply.Usage != (Usage{7, 11, true}) || reply.Message.Content != "visible" || visible.String() != "visible" || len(reply.Message.ToolCalls) != 1 || reply.Message.ToolCalls[0].ID != "unfinished" {
+				if !errors.Is(err, wantErr) || reply.ThinkingOnly || reply.FinishReason != "" || reply.Served != "served" || reply.Usage != (Usage{In: 7, Out: 11, Reported: true}) || reply.Message.Content != "visible" || visible.String() != "visible" || len(reply.Message.ToolCalls) != 1 || reply.Message.ToolCalls[0].ID != "unfinished" {
 					t.Fatalf("partial response/cause changed: %+v %v; visible=%q", reply, err, visible.String())
 				}
 				want := []AuxDelta{{"reasoning", first}, {"reasoning_content", last}}

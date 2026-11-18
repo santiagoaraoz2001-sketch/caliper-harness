@@ -170,7 +170,7 @@ func printCLIHelp(out io.Writer, command string) {
 			spec := commandSpecs[name]
 			fmt.Fprintf(out, "  %-10s %s %s\n", name, spec.summary, spec.positional)
 		}
-		fmt.Fprintln(out, "\nRun caliper-harness with no arguments to open the terminal interface.\nFirst use: Setup stages an existing model and your exact project check, then asks you to save.\nUse /setup to return, /settings for personal or project preferences, /status for runtime metrics, and /manage for models and servers.\nExisting commands remain available:\n  caliper-harness tui --config caliper-harness.yaml\n  caliper-harness run --config caliper-harness.yaml --prompt 'Inspect this project and run its check'\nCoding is the default agent view; --tools full exposes existing planning/memory tools.\n`tool` inspects standalone primitive schemas, not the agent tool view.")
+		fmt.Fprintln(out, "\nRun caliper-harness with no arguments to open the terminal interface.\nFirst use: Setup finds model servers already running on this computer, stages your selection and your exact project check, then asks you to save.\nUse /setup to return, /settings for personal or project preferences, /status for runtime metrics, and /manage for models and servers.\nExisting commands remain available:\n  caliper-harness tui --config caliper-harness.yaml\n  caliper-harness run --config caliper-harness.yaml --prompt 'Inspect this project and run its check'\nCoding is the default agent view; --tools full exposes existing planning/memory tools.\n`tool` inspects standalone primitive schemas, not the agent tool view.")
 		return
 	}
 	spec := commandSpecs[command]

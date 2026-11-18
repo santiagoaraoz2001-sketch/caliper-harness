@@ -67,9 +67,10 @@ def transmit(terminal, observation, record, identity, text, tracked=True, input_
     if input_mode == 'submit' and text.strip() == '/compact' and len(observation.pending_compactions) >= 50:
         raise ValueError('50 unconfirmed compaction submissions; inspect existing receipts before submitting more')
     submitted_at = time.time()
+    delivery_state = 'submitted_unconfirmed' if tracked and observation.input_kind(text, input_mode) != 'ui_action' else 'sent_unverified'
     terminal.write(input_wire(text, input_mode))
     record({'id': identity, 'state': 'sent', 'time': time.time(), 'text': text,
-            'input_mode': input_mode, 'control_protocol_version': CONTROL_PROTOCOL_VERSION})
+            'input_mode': input_mode, 'delivery_state': delivery_state, 'control_protocol_version': CONTROL_PROTOCOL_VERSION})
     if tracked:
         observation.sent(identity, text, input_mode, submitted_at)
 
@@ -112,6 +113,23 @@ class CurrentScreen:
 
     def text(self):
         return '\n'.join(self.screen.display)
+
+
+def dialog_state(snapshot):
+    """Surface an open TUI modal dialog (approval/auth or ask) in status.
+
+    Approval dialogs block the run on a human decision but never appear in
+    last_ask (that is only the model ask tool), so watchers historically had
+    to scrape screen lines for the 'dialog open' footer. The TUI renders
+    that footer whenever a dialog is open; report the visible dialog text
+    verbatim so a relay can act on it immediately.
+    """
+    lines = (snapshot or {}).get('lines') or []
+    if not any('dialog open' in line for line in lines):
+        return None
+    kind = 'auth' if any('Auth ·' in line for line in lines) else 'dialog'
+    text = '\n'.join(line.rstrip() for line in lines if line.strip())
+    return {'kind': kind, 'awaiting_result': True, 'text': text[:8000]}
 
 
 class Tail:
@@ -174,6 +192,7 @@ class Observation:
         self.compaction = None
         self.finished_compactions = deque(maxlen=50)
         self.pending_compactions = deque()
+        self.ambiguous = {}
 
     def input_kind(self, text, input_mode='submit'):
         if input_mode == 'keys':
@@ -187,6 +206,15 @@ class Observation:
         if not text.strip() or text.startswith('/') or any(ord(c) < 32 and c not in '\r\n\t' for c in text):
             return 'ui_action'
         return 'prompt'
+
+    def can_send(self, text, input_mode='submit'):
+        """Do not turn an automated prompt into an unsent composer draft."""
+        if input_mode == 'keys':
+            return True
+        if self.input_kind(text, input_mode) in ('answer', 'steering', 'ui_action'):
+            return True
+        return (not self.active and not self.pending_compactions
+                and not (self.compaction and self.compaction['state'] == 'running'))
 
     def sent(self, identity, text, input_mode='submit', submitted_at=None):
         input_kind = self.input_kind(text, input_mode)
@@ -253,15 +281,17 @@ class Observation:
                        and (p['kind'] != 'retry' or valid_submission)
                        and (not submission or submission['trigger'] == ('retry' if p['kind'] == 'retry' else 'submit'))]
             # Freshness and equal content cannot disambiguate two submissions
-            # of the same kind. Do not manufacture a causal input receipt.
+            # of the same kind. Do not manufacture a causal input receipt; still adopt the exact session below.
             followup = matches[0] if len(matches) == 1 else None
-            if (initial and (not self.require_submission or valid_submission)) or followup:
-                self.candidates[session] = {'event': event, 'input': followup, 'raw': raw}
+            ambiguous = matches if len(matches) > 1 else []
+            if (initial and (not self.require_submission or valid_submission)) or followup or ambiguous:
+                self.candidates[session] = {'event': event, 'input': followup, 'ambiguous': ambiguous, 'raw': raw}
                 if len(self.candidates) > 50:
                     del self.candidates[next(iter(self.candidates))]
         candidate = self.candidates.get(session)
-        if candidate and (self.workspace is None or (kind == 'workspace' and
-                os.path.normcase(os.path.abspath(text)) == self.workspace)):
+        workspace_match = kind == 'workspace' and self.workspace is not None and (
+                os.path.normcase(os.path.abspath(text)) == self.workspace)
+        if candidate and (workspace_match or (self.workspace is None and not candidate.get('ambiguous'))):
                 self.main = session
                 if session not in self.main_sessions:
                     self.main_sessions.append(session)
@@ -270,6 +300,8 @@ class Observation:
                 self.last_ask = None
                 self.last_raw_prompt = candidate['raw']
                 self.adopted_input = candidate['input']
+                for identity in candidate.get('ambiguous', []):
+                    self.ambiguous[identity] = session
                 self.candidates.pop(session, None)
                 if kind == 'workspace':
                     # Prompt precedes host association; publish only after it.
@@ -409,15 +441,16 @@ class Observation:
                 'last_ask': self.last_ask, 'last_final': self.last_final,
                 'host_outcome': self.host_outcome,
                 'recent_ui_actions': list(self.ui_actions),
-                'pending_delivery': [{'id': k, 'text': v['text'][:300], 'sent_at': v['time']} for k, v in self.pending.items()]}
+                'pending_delivery': [{'id': k, 'text': v['text'][:300], 'sent_at': v['time'], 'state': 'submitted_unconfirmed'} for k, v in self.pending.items()],
+                'ambiguous_delivery': [{'id': k, 'session': v} for k, v in self.ambiguous.items() if k in self.pending]}
 
-    def can_quit(self):
+    def can_quit(self, abandon_pending=False):
         # A follow-up can be in the UI queue before its new session appears.
         pending_start = any(not p['ask_id'] and p['text'].strip() and not p['text'].startswith('/') for p in self.pending.values())
-        return (bool(self.host_outcome) and not self.active and not pending_start
+        return (bool(self.host_outcome) and not self.active and (abandon_pending or not pending_start)
                 and not self.pending_compactions
                 and not (self.compaction and self.compaction['state'] == 'running')
-                and not self.pending)
+                and (abandon_pending or not self.pending))
 
 
 def effective_config(source, output):
@@ -474,14 +507,24 @@ def archive_identity(path):
 
 
 def interrupted_owner(config, session_id, workspace, executable, manifest_path):
-    """Admit the recorded metadata-sharing crash, never a generic force resume."""
+    """Admit a recorded dead controller, never a generic force resume.
+
+    Two recorded shapes qualify: the metadata-sharing crash (controller
+    wrote its exit flag and the sharing traceback), and an externally
+    stopped controller whose recorded owner processes are both verifiably
+    dead. Either way the session must be unfinished and every recorded
+    identity must agree. A changed executable is recorded, not refused:
+    plain resume already admits a fixed binary, and recovery is the path
+    used precisely after a fix.
+    """
     manifest = json.loads(manifest_path.read_text(encoding='utf-8-sig'))
-    source = config.parent
-    if (Path(manifest['trace_directory']).resolve(strict=True) != source
-            or Path(manifest['workspace']).resolve(strict=True) != workspace
-            or Path(manifest['candidate']).resolve(strict=True) != executable
-            or manifest.get('main_session') != session_id):
-        raise ValueError('interrupted recovery manifest does not match config, workspace, executable and session')
+    trace = manifest.get('trace_directory') or manifest.get('controller')
+    if not trace:
+        raise ValueError('interrupted recovery manifest records no controller directory')
+    source = Path(trace).resolve(strict=True)
+    if (Path(manifest['workspace']).resolve(strict=True) != workspace
+            or manifest.get('main_session', session_id) != session_id):
+        raise ValueError('interrupted recovery manifest does not match workspace and session')
     owner = json.loads((source / 'controller-owner.json').read_text(encoding='utf-8-sig'))
     status = json.loads((source / 'status.json').read_text(encoding='utf-8-sig'))
     controller, tui = manifest.get('controller_pid'), manifest.get('tui_pid')
@@ -489,24 +532,28 @@ def interrupted_owner(config, session_id, workspace, executable, manifest_path):
             or status.get('controller_pid', controller) != controller
             or status.get('tui_pid', tui) != tui):
         raise ValueError('interrupted recovery process identities disagree')
-    if (status.get('controller_exited') is not True or status.get('active') is not True
+    if (status.get('active') is not True
             or status.get('host_outcome') is not None or status.get('main_session') != session_id):
-        raise ValueError('interrupted recovery requires recorded controller exit and unfinished matching session')
-    # Read only the bounded final traceback, never a growing model/provider log.
-    error_log = source / 'controller-console.log'
-    with error_log.open('rb') as stream:
-        stream.seek(max(0, error_log.stat().st_size - 16384))
-        error_tail = stream.read(16384).decode('utf-8', errors='replace')
-    if not (all(text in error_tail for text in ('Traceback', 'write_json', 'PermissionError:', 'status.json.tmp', 'status.json'))
-            and re.search(r'\[WinError (5|32|33)\]', error_tail)):
-        raise ValueError('interrupted recovery requires the recorded status JSON sharing-error traceback')
+        raise ValueError('interrupted recovery requires an unfinished matching session')
     if process_alive(controller) or process_alive(tui):
         raise ValueError('interrupted recovery requires both prior owner processes gone')
-    return {'reason': 'controller_metadata_sharing_failure', 'manifest': str(manifest_path),
-            'controller_pid': controller, 'tui_pid': tui, 'error_log': str(error_log),
+    if status.get('controller_exited') is True:
+        # Read only the bounded final traceback, never a growing model/provider log.
+        error_log = source / 'controller-console.log'
+        with error_log.open('rb') as stream:
+            stream.seek(max(0, error_log.stat().st_size - 16384))
+            error_tail = stream.read(16384).decode('utf-8', errors='replace')
+        if not (all(text in error_tail for text in ('Traceback', 'write_json', 'PermissionError:', 'status.json.tmp', 'status.json'))
+                and re.search(r'\[WinError (5|32|33)\]', error_tail)):
+            raise ValueError('interrupted recovery requires the recorded status JSON sharing-error traceback')
+        reason, error_log = 'controller_metadata_sharing_failure', str(error_log)
+    else:
+        reason, error_log = 'controller_processes_gone', None
+    return {'reason': reason, 'manifest': str(manifest_path),
+            'controller_pid': controller, 'tui_pid': tui, 'error_log': error_log,
+            'prior_candidate': manifest.get('candidate'), 'executable': str(executable),
             'status_updated_at': status.get('updated_at'), 'outcome_preserved': None,
             'continuation_requires_user_input': True}
-
 
 def resume_source(config, session_id, workspace, recovery_manifest=None, executable=None):
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', session_id):
@@ -726,6 +773,8 @@ def main():
                             # Validate before the pending cap so malformed raw-key
                             # controls are rejected, not silently stalled.
                             input_wire(text, input_mode)
+                            if not observation.can_send(text, input_mode):
+                                break
                             if len(observation.pending) >= 50 and observation.input_kind(text, input_mode) != 'ui_action':
                                 break
                             send(identity, text, input_mode=input_mode)
@@ -736,15 +785,16 @@ def main():
                             path.replace(sentdir / (path.name + '.rejected'))
                         # Let the UI process each action before another input.
                         break
-                if phase == 'running' and (output / 'quit.json').exists() and observation.can_quit() and not quitting:
+                if phase == 'running' and (output / 'quit.json').exists() and observation.can_quit(abandon_pending=True) and not quitting:
                     send('controller-quit', '/quit', False)
                     quitting = True
                 now = time.time()
                 if now - last_status >= 1:
                     status = observation.status()
+                    snap = frame.snapshot()
                     status.update({'controller_pid': os.getpid(), 'tui_pid': terminal.process.pid,
                                    'phase': phase, 'alive': terminal.alive(), 'elapsed_seconds': now-started,
-                                   'screen': frame.snapshot(),
+                                   'screen': snap, 'dialog': dialog_state(snap),
                                    'screen_tail': output_tail[-8000:], 'screen_tail_kind': 'stripped_output_tail_not_screen',
                                    'ui_outcomes_verified': False, 'updated_at': now})
                     write_json(output / 'status.json', status)
@@ -752,7 +802,8 @@ def main():
         finally:
             # No success is inferred from controller exit or the model's prose.
             status = observation.status()
-            status.update({'screen': frame.snapshot(), 'screen_tail': output_tail[-8000:],
+            snap = frame.snapshot()
+            status.update({'screen': snap, 'dialog': dialog_state(snap), 'screen_tail': output_tail[-8000:],
                            'screen_tail_kind': 'stripped_output_tail_not_screen', 'controller_exited': True, 'tui_alive_before_close': terminal.alive(), 'updated_at': time.time()})
             try:
                 write_json(output / 'status.json', status)

@@ -77,7 +77,7 @@ func TestModelGraphQLPublicFlowAndApproval(t *testing.T) {
 			sink := &codingSink{dir: filepath.Join(dir, "sessions")}
 			approvals := 0
 			bindDecisionFixture(t, &cfg, nil)
-			r, _, e := assignedCodingNew(t, Deps{Store: s, Cfg: cfg, Server: cfg.Model.Server, Tools: "full", Session: sink, SessionID: "graph-real", Model: "fixture", MaxSteps: 6, Window: 32768, AskYesNo: func(_ context.Context, p string) bool {
+			r, _, e := assignedCodingNew(t, Deps{Store: s, Cfg: cfg, Server: cfg.Model.Server, Tools: "full", Session: sink, SessionID: "graph-real", Model: "fixture", MaxSteps: 6, Window: 131072, AskYesNo: func(_ context.Context, p string) bool {
 				approvals++
 				if strings.Contains(p, `"tool":"graphql"`) && (!strings.Contains(p, "_project_root") || !strings.Contains(p, "_store") || !strings.Contains(p, "graph-real")) {
 					t.Errorf("missing host-bound action %s", p)
@@ -162,7 +162,7 @@ func TestModelGraphQLPublicFlowAndApproval(t *testing.T) {
 		}
 		defer s.Close()
 		bindDecisionFixture(t, &cfg, nil)
-		r, _, e := New(Deps{Store: s, Cfg: cfg, Server: cfg.Model.Server, Tools: "full", Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: "denied", Model: "fixture", MaxSteps: 4, Window: 32768, AskYesNo: func(context.Context, string) bool { return false }}, "decline")
+		r, _, e := New(Deps{Store: s, Cfg: cfg, Server: cfg.Model.Server, Tools: "full", Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: "denied", Model: "fixture", MaxSteps: 4, Window: 131072, AskYesNo: func(context.Context, string) bool { return false }}, "decline")
 		if e != nil {
 			t.Fatal(e)
 		}

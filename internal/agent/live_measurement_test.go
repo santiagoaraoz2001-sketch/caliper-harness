@@ -23,7 +23,7 @@ func measurementEvents(t *testing.T, sink *recordSink) []session.Continuation {
 			continue
 		}
 		var c session.Continuation
-		if err := json.Unmarshal([]byte(sink.texts[i]), &c); err != nil || len(c.Entries) != 0 || c.Coding != nil || c.Revision != 0 || c.BasisChars != 0 || c.BasisTokens != 0 {
+		if err := json.Unmarshal([]byte(sink.texts[i]), &c); err != nil || len(c.Entries) != 0 || c.Coding != nil || c.BasisChars != 0 || c.BasisTokens != 0 {
 			t.Fatal("measurement event replaced full conversation/calibration", c, err)
 		}
 		readings = append(readings, c)

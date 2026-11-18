@@ -88,7 +88,7 @@ func TestTaskRoundProtectionCloneAndRestore(t *testing.T) {
 
 // Repeated final-repair advice must address the next model turn, without
 // rewriting earlier native receipts, comments or the durable raw event log.
-func TestRepeatedGuidanceMovesToSettledTail(t *testing.T) {
+func TestRepeatedGuidanceStaysInPlace(t *testing.T) {
 	const advice = "PREPARE: completion requested without a live task claim. Author or explicitly select the actual same-project PAT, obtain owning readiness and task_start; then execute it. Source diagnosis not yet observed must remain unknown."
 	a := &Assignment{Store: "/store", Workspace: "/workspace", PlanID: "plan", ApproachID: "approach", TaskID: "task", Attempt: 1}
 	for _, bound := range []bool{false, true} {
@@ -109,17 +109,17 @@ func TestRepeatedGuidanceMovesToSettledTail(t *testing.T) {
 			before := c.Clone()
 			c.AddGuidance(advice, round)
 			want := before.Clone()
-			want.Entries = append(want.Entries[:1], want.Entries[2:]...)
-			want.Entries = append(want.Entries, guidance)
-			if !reflect.DeepEqual(c, want) || c.Messages()[len(c.Entries)-1].Role != "user" {
-				t.Fatal("reissued repair is not the single exact tail entry, or retained facts changed")
+			// Reissued advice stays in place: no move, no duplicate.
+			_ = guidance
+			if !reflect.DeepEqual(c, want) {
+				t.Fatal("reissued repair moved or duplicated, or retained facts changed")
 			}
-			if !c.Protected(3)[len(c.Entries)-1] || !c.Entries[3].Unread {
+			if !reflect.DeepEqual(c.Entries[1], guidance) || !c.Entries[4].Unread {
 				t.Fatal("guidance/output protection changed")
 			}
 			c.AddGuidance(advice, round)
 			if !reflect.DeepEqual(c, want) {
-				t.Fatal("already-tail repair was duplicated or changed")
+				t.Fatal("reissued repair was duplicated or changed")
 			}
 			raw, err := c.Encode()
 			if err != nil {
@@ -127,7 +127,7 @@ func TestRepeatedGuidanceMovesToSettledTail(t *testing.T) {
 			}
 			restored, _, err := Restore([]Event{{Kind: "continuation", Text: raw}}, 32768)
 			if err != nil || !reflect.DeepEqual(restored.Entries, c.Entries) {
-				t.Fatal("tail placement or native/comment provenance lost on restore", err)
+				t.Fatal("guidance placement or native/comment provenance lost on restore", err)
 			}
 		})
 	}

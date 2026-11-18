@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestRegistryHas34Commands(t *testing.T) {
-	if got := len(Commands()); got != 34 {
-		t.Fatalf("registry holds %d commands, want 34", got)
+func TestRegistryHas36Commands(t *testing.T) {
+	if got := len(Commands()); got != 36 {
+		t.Fatalf("registry holds %d commands, want 36", got)
 	}
 	seen := map[string]bool{}
 	for _, c := range Commands() {
@@ -43,12 +43,12 @@ func TestParse(t *testing.T) {
 
 func TestComplete(t *testing.T) {
 	r := New()
-	if got := r.Complete("/", Context{}); len(got) != 34 {
-		t.Errorf("/ completes to %d, want 34", len(got))
+	if got := r.Complete("/", Context{}); len(got) != 36 {
+		t.Errorf("/ completes to %d, want 36", len(got))
 	}
 	got := r.Complete("/p", Context{})
-	if len(got) != 1 || got[0] != "/plans" {
-		t.Errorf("/p completes to %v, want [/plans]", got)
+	if len(got) != 2 || got[0] != "/plans" || got[1] != "/plan" {
+		t.Errorf("/p completes to %v, want [/plans /plan]", got)
 	}
 	if got := r.Complete("/zzz", Context{}); len(got) != 0 {
 		t.Errorf("/zzz completes to %v, want nothing", got)

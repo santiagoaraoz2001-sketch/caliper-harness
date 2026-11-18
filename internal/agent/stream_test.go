@@ -58,7 +58,7 @@ func TestHistoryInjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	msgs := model.seen[0]
-	if len(msgs) != 4 || msgs[0].Role != "system" || msgs[1].Content != "old q" || msgs[2].Content != "old a" || msgs[3].Content != "new q" {
+	if len(msgs) != 5 || msgs[0].Role != "system" || msgs[1].Content != "old q" || msgs[2].Content != "old a" || msgs[3].Content != "new q" || msgs[4].Role != "system" {
 		t.Errorf("msgs=%+v", msgs)
 	}
 }

@@ -53,12 +53,13 @@ type stateStore interface {
 
 // Plan is one planning-graph plan node.
 type Plan struct {
-	ProjectRoot string
-	ID          string
-	Title       string
-	Goal        string
-	State       string
-	CreatedAt   time.Time
+	ProjectRoot  string
+	ID           string
+	Title        string
+	Goal         string
+	State        string
+	CreatedAt    time.Time
+	Elaborations []Elaboration
 }
 
 // Approach is an orchestration node with explicit authored Plan scope.
@@ -74,6 +75,7 @@ type Approach struct {
 	// ReadinessRefusals counts consecutive confident coherence refusals.
 	// Admission resets it; it is admission metadata, not brief content.
 	ReadinessRefusals int
+	Elaborations      []Elaboration
 }
 
 // Task is one subagent prompt node. The six block fields hold its lab
@@ -103,6 +105,7 @@ type Task struct {
 	AttemptLog         string
 	Review             string
 	Attempts           int
+	Elaborations       []Elaboration
 }
 
 var (
@@ -1176,14 +1179,26 @@ func BindProject(ctx context.Context, s *store.Store, id, root string) (*Plan, e
 
 // ClaimTaskContext admits one direct executor against the judged owning snapshot.
 func ClaimTaskContext(ctx context.Context, s *store.Store, id, snapshot, command string) (*Task, error) {
-	return claimTaskContext(ctx, s, id, snapshot, command, false)
+	return claimTaskContext(ctx, s, id, snapshot, command, false, 0)
 }
 
 // ClaimTaskContractContext binds approval to this task rather than sibling lifecycle state.
 func ClaimTaskContractContext(ctx context.Context, s *store.Store, id, snapshot, command string) (*Task, error) {
-	return claimTaskContext(ctx, s, id, snapshot, command, true)
+	return claimTaskContext(ctx, s, id, snapshot, command, true, 0)
 }
-func claimTaskContext(ctx context.Context, s *store.Store, id, snapshot, command string, contract bool) (*Task, error) {
+
+// ReclaimTaskContext re-admits the recorded owner of a Running task whose
+// executor ended without settlement (crash, kill, or pause). The caller must
+// prove the exact attempt from its durable assignment; the attempt, frozen
+// brief, and check contract are unchanged, so this is continuation of the
+// same attempt, never a new claim or a takeover.
+func ReclaimTaskContext(ctx context.Context, s *store.Store, id, snapshot, command string, attempt int) (*Task, error) {
+	if attempt < 1 {
+		return nil, fmt.Errorf("task reclaim needs the recorded attempt")
+	}
+	return claimTaskContext(ctx, s, id, snapshot, command, false, attempt)
+}
+func claimTaskContext(ctx context.Context, s *store.Store, id, snapshot, command string, contract bool, reclaimAttempt int) (*Task, error) {
 	var out *Task
 	err := s.UpdateContext(ctx, func(tx *store.Tx) error {
 		if err := CheckProject(tx, "task", id, ProjectRoot(ctx)); err != nil {
@@ -1211,7 +1226,11 @@ func claimTaskContext(ctx context.Context, s *store.Store, id, snapshot, command
 		if snapshot == "" || current != snapshot {
 			return fmt.Errorf("readiness changed before task claim; check again")
 		}
-		if p.State != PlanActive || a.NeedsReady || (a.State != ApproachReady && a.State != ApproachRunning) || t.State != TaskQueued {
+		if reclaimAttempt > 0 {
+			if p.State != PlanActive || a.NeedsReady || a.State != ApproachRunning || t.State != TaskRunning || t.Attempts != reclaimAttempt {
+				return fmt.Errorf("task reclaim needs Active plan, Running unchanged approach and the same Running attempt")
+			}
+		} else if p.State != PlanActive || a.NeedsReady || (a.State != ApproachReady && a.State != ApproachRunning) || t.State != TaskQueued {
 			return fmt.Errorf("task_start needs Active plan, Ready/Running unchanged approach and Queued task")
 		}
 		if strings.TrimSpace(t.CheckCommand) == "" || command != "" && command != t.CheckCommand {
@@ -1219,6 +1238,10 @@ func claimTaskContext(ctx context.Context, s *store.Store, id, snapshot, command
 		}
 		if err := ValidateApproachReady(tx, a.ID); err != nil {
 			return err
+		}
+		if reclaimAttempt > 0 {
+			out = t
+			return freezeExecutionReport(tx, out, executionReportContext(ctx))
 		}
 		if a.State == ApproachReady {
 			if _, err = transitionApproach(tx, a.ID, ApproachRunning); err != nil {

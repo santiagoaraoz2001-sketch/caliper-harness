@@ -40,9 +40,12 @@ type Message struct {
 // Reported is false when the server omits usage — zero counts with
 // Reported false mean unknown, never free.
 type Usage struct {
-	In       int
-	Out      int
-	Reported bool
+	In          int
+	Out         int
+	Cached      int
+	Reported    bool
+	PromptMS    float64
+	PredictedMS float64
 }
 
 // Client uses the selected runtime contract; URLs do not select a dialect.
@@ -145,13 +148,36 @@ type chatResponse struct {
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage *usageWire      `json:"usage"`
-	Error json.RawMessage `json:"error"`
+	Usage   *usageWire      `json:"usage"`
+	Timings *timingsWire    `json:"timings"`
+	Error   json.RawMessage `json:"error"`
 }
 
 type usageWire struct {
-	Prompt     int `json:"prompt_tokens"`
+	Prompt  int `json:"prompt_tokens"`
+	Details *struct {
+		Cached int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
 	Completion int `json:"completion_tokens"`
+}
+
+type timingsWire struct {
+	PromptMS    float64 `json:"prompt_ms"`
+	PredictedMS float64 `json:"predicted_ms"`
+}
+
+func usageFromWire(w *usageWire, timings *timingsWire) Usage {
+	if w == nil {
+		return Usage{}
+	}
+	usage := Usage{In: w.Prompt, Out: w.Completion, Reported: true}
+	if w.Details != nil {
+		usage.Cached = w.Details.Cached
+	}
+	if timings != nil {
+		usage.PromptMS, usage.PredictedMS = timings.PromptMS, timings.PredictedMS
+	}
+	return usage
 }
 
 type apiError struct {
@@ -171,8 +197,9 @@ type streamChunk struct {
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage *usageWire      `json:"usage"`
-	Error json.RawMessage `json:"error"`
+	Usage   *usageWire      `json:"usage"`
+	Timings *timingsWire    `json:"timings"`
+	Error   json.RawMessage `json:"error"`
 }
 
 // request builds the wire body: identity, messages, stream flags,
@@ -263,7 +290,7 @@ func (c *Client) chatPlain(ctx context.Context, msgs []Message, tools []ToolDefi
 		reply = decoded.Choices[0].Message.Content
 	}
 	if decoded.Usage != nil {
-		usage = Usage{In: decoded.Usage.Prompt, Out: decoded.Usage.Completion, Reported: true}
+		usage = usageFromWire(decoded.Usage, decoded.Timings)
 	}
 	if readErr != nil {
 		if errors.Is(readErr, context.Canceled) {
@@ -442,7 +469,7 @@ func (c *Client) chatStream(ctx context.Context, msgs []Message, onDelta func(st
 			capture.Prefix = chunk.ResponsePrefix.Clone()
 		}
 		if chunk.Usage != nil {
-			usage = Usage{In: chunk.Usage.Prompt, Out: chunk.Usage.Completion, Reported: true}
+			usage = usageFromWire(chunk.Usage, chunk.Timings)
 		}
 		if msg, refused := errorMessage(chunk.Error); refused {
 			if candidate := toolFramingError(chunk.Error); candidate != nil && capture != nil && len(tools) > 0 && !complete && !done && finishErr == nil && candidate.CallIndex == len(calls) {

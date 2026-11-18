@@ -139,8 +139,8 @@ func TestNoCallCeilingDiscoveryBudgetIsNotZeroRemaining(t *testing.T) {
 		t.Fatal("unlimited discovery did not progress", err, len(m.seen))
 	}
 	first := m.seen[0]
-	if len(first) != 2 || first[0].Role != "system" || !strings.Contains(first[0].Content, `"RemainingSteps":null`) || first[1].Role != "user" || first[1].Content != "same useful task" {
-		t.Fatal("initial host budget displaced task or is missing from system header")
+	if len(first) != 3 || first[0].Role != "system" || first[1].Role != "user" || first[1].Content != "same useful task" || first[2].Role != "system" || !strings.Contains(first[2].Content, `"RemainingSteps":null`) {
+		t.Fatal("initial host budget displaced task or is missing from trailing system context")
 	}
 	saved, err := r.Continuation.Encode()
 	if err != nil || strings.Contains(saved, "Initial run budget:") {
@@ -152,8 +152,8 @@ func TestNoCallCeilingDiscoveryBudgetIsNotZeroRemaining(t *testing.T) {
 		t.Fatal(err)
 	}
 	first = m.seen[0]
-	if first[0].Role != "system" || !strings.Contains(first[0].Content, `"StepLimit":3`) || !strings.Contains(first[0].Content, `"RunLimitSeconds":17`) || first[len(first)-1].Content != "explicit resumed request" {
-		t.Fatal("resume did not rebuild actual host budget before the exact user request")
+	if len(first) < 2 || first[0].Role != "system" || first[len(first)-2].Content != "explicit resumed request" || first[len(first)-1].Role != "system" || !strings.Contains(first[len(first)-1].Content, `"StepLimit":3`) || !strings.Contains(first[len(first)-1].Content, `"RunLimitSeconds":17`) {
+		t.Fatal("resume did not rebuild actual host budget after the exact user request")
 	}
 }
 func TestLargeCodingReceiptAppendsAndReopens(t *testing.T) {

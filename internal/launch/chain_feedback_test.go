@@ -92,7 +92,7 @@ func TestWorkflowRoleGuideScopedAndRestored(t *testing.T) {
 }
 func TestWorkflowProspectiveFeedbackAndAdmission(t *testing.T) {
 	for _, asked := range []bool{false, true} {
-		t.Run(map[bool]string{false: "confident", true: "asked"}[asked], func(t *testing.T) {
+		t.Run(map[bool]string{false: "confident", true: "structural"}[asked], func(t *testing.T) {
 			s, reg := feedbackFixture(t)
 			pid := lastWord(feedbackCall(t, reg, "workflow_plan", map[string]string{"title": "p", "goal": "two tasks"}))
 			transition := feedbackCall(t, reg, "workflow_transition", map[string]string{"kind": "plan", "id": pid, "to": "active"})
@@ -145,7 +145,7 @@ func TestWorkflowProspectiveFeedbackAndAdmission(t *testing.T) {
 			}
 			want := "admitted"
 			if asked {
-				want = "asked-admitted"
+				want = "admitted-structural"
 			}
 			if resolution != want {
 				t.Errorf("admission logged %q want%q", resolution, want)

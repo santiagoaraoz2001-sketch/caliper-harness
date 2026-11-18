@@ -92,7 +92,7 @@ func TestRoleSequentialRejectedOrUnverifiedHoldsNextQueued(t *testing.T) {
 		t.Run(verdict, func(t *testing.T) {
 			workers := 0
 			model := roleHandoffModel(func(messages []llm.Message) (string, error) {
-				if strings.HasPrefix(messages[len(messages)-1].Content, "Review ") {
+				if strings.HasPrefix(fixtureRoleRequest(messages), "Review ") {
 					return verdict, nil
 				}
 				workers++

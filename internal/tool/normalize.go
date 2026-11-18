@@ -41,6 +41,9 @@ func argumentName(d Definition, name string) string {
 	if key == "command" && (d.Name == "bash" || d.Name == "check") && d.hasParam("cmd") {
 		return "cmd"
 	}
+	if key == "accept" && d.hasParam("acceptance") {
+		return "acceptance"
+	}
 	if key == "file_path" && d.hasParam("path") {
 		switch d.Name {
 		case "read", "read_outside", "edit", "write", "grep", "find", "find_file", "find_dir", "find_outside":

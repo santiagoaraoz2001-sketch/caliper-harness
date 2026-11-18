@@ -81,7 +81,7 @@ func TestOwningInterfaceFullBriefAndOverflow(t *testing.T) {
 type owningScript struct{ called bool }
 
 func (m *owningScript) Chat(_ context.Context, msgs []llm.Message) (string, string, llm.Usage, error) {
-	last := msgs[len(msgs)-1].Content
+	last := fixtureRoleRequest(msgs)
 	if strings.HasPrefix(last, "Review ") {
 		return "PASS: declared artifact check", "component", llm.Usage{}, nil
 	}

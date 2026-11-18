@@ -248,7 +248,7 @@ func runTUI(args cliArgs) {
 		}
 		boot.finish(state, message)
 	} else if cfg.Model.Name == "" {
-		boot.line("info", "Model selection", "Choose an existing model in Setup")
+		boot.line("info", "Model selection", "Setup finds model servers running on this computer")
 	} else {
 		boot.line("info", "Decision service", "Disabled · readiness and required decisions ask you")
 	}

@@ -223,7 +223,7 @@ func TestAssignedMainClaimsChecksReviewsAndRestores(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			r, _, e := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: scope}, Cfg: cfg, Store: s, Session: sink, SessionID: "main", Server: srv.URL, Model: "fixture", Window: 32768, MaxSteps: 8}, "perform actual operation")
+			r, _, e := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: scope}, Cfg: cfg, Store: s, Session: sink, SessionID: "main", Server: srv.URL, Model: "fixture", Window: 131072, MaxSteps: 8}, "perform actual operation")
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -319,7 +319,7 @@ func TestAssignedMainClaimsChecksReviewsAndRestores(t *testing.T) {
 			if mode == "recordFailure" {
 				return
 			} // owner remains qualified; the outer run failed only its durable record.
-			restored, _, e := session.Restore(events, 32768)
+			restored, _, e := session.Restore(events, 131072)
 			if e != nil || restored.Assignment == nil || restored.Assignment.TaskID != task.ID || restored.Coding.Passed() {
 				t.Fatalf("restored %+v %v", restored, e)
 			}
@@ -373,7 +373,7 @@ func TestAssignedMainClaimsChecksReviewsAndRestores(t *testing.T) {
 				t.Fatal("compaction did not retain exact owning receipt")
 			}
 			// Restored provenance is explanatory: fresh factory still cannot perform an effect.
-			next, _, e := New(Deps{Cfg: cfg, Store: s, Session: sink, SessionID: "reopen", Server: srv.URL, Model: "fixture", Window: 32768, MaxSteps: 1, Continuation: restored}, "inspect")
+			next, _, e := New(Deps{Cfg: cfg, Store: s, Session: sink, SessionID: "reopen", Server: srv.URL, Model: "fixture", Window: 131072, MaxSteps: 1, Continuation: restored}, "inspect")
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -477,7 +477,7 @@ func TestAssignedPreclaimSemanticFactsAndSelectedKnowledge(t *testing.T) {
 	bindDecisionFixture(t, &cfg, func(q decision.Request) int { contexts = append(contexts, q.Context); return 0 })
 	srv := codingFixture(t, "structured", []codingCall{{"read", map[string]any{"path": "source"}}, {"graphql", map[string]any{"query": `mutation {createPlan(title:"actual unfinished",goal:"observed semantic goal"){id goal}}`}}, {"graphql", map[string]any{"query": `{plans {id goal}}`}}, {"graphql", map[string]any{"query": `mutation {putKnowledge(key:"working/fact",body:"supported α",filePath:"source",expectedPreviousId:""){id}}`}}})
 	cfg.Model.Server = srv.URL
-	r, _, e := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, "root")}, Cfg: cfg, Store: s, Server: srv.URL, Model: "fixture", Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: "facts", Window: 32768, MaxSteps: 8}, "investigate")
+	r, _, e := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, "root")}, Cfg: cfg, Store: s, Server: srv.URL, Model: "fixture", Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: "facts", Window: 131072, MaxSteps: 8}, "investigate")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -559,7 +559,7 @@ func TestAssignedStaleOwnerRefusesBeforeGateAndCheckInvalidation(t *testing.T) {
 	}
 	_, _, _ = r.Run(context.Background(), "actual stale ownership")
 	if approvals != 1 || r.Continuation.Coding.Revision != 0 {
-		t.Fatalf("stale admission crossed gate/coding invalidation approvals%d coding%+v", approvals, r.Continuation.Coding)
+		t.Fatalf("stale admission crossed gate/coding invalidation approvals%d coding%+v outcome=%+v", approvals, r.Continuation.Coding, r.Outcome)
 	}
 	if _, e := os.Stat("forbidden"); !os.IsNotExist(e) {
 		t.Fatal("stale owner published effect")
@@ -650,7 +650,7 @@ func TestAssignedUncertainGuidanceContinuesWithoutAsk(t *testing.T) {
 			defer model.Close()
 			cfg.Model.Server = model.URL
 			sink := &codingSink{dir: filepath.Join(dir, "sessions")}
-			r, _, err := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, "root")}, Cfg: cfg, Store: s, Session: sink, SessionID: "guidance", Server: model.URL, Model: "fixture", Window: 32768, MaxSteps: 3}, "investigate the actual source")
+			r, _, err := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, "root")}, Cfg: cfg, Store: s, Session: sink, SessionID: "guidance", Server: model.URL, Model: "fixture", Window: 131072, MaxSteps: 3}, "investigate the actual source")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -793,7 +793,7 @@ func TestAssignedSuccessfulReadStallTruthful(t *testing.T) {
 	model := codingFixture(t, "structured", []codingCall{{"read", map[string]any{"path": "source"}}, {"read", map[string]any{"path": "source"}}, {"read", map[string]any{"path": "source"}}})
 	cfg.Model.Server = model.URL
 	sink := &codingSink{dir: filepath.Join(dir, "sessions")}
-	runner, _, err := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, "root")}, Cfg: cfg, Store: s, Server: model.URL, Model: "fixture", Session: sink, SessionID: "stall", Window: 32768, MaxSteps: 4}, "investigate")
+	runner, _, err := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, "root")}, Cfg: cfg, Store: s, Server: model.URL, Model: "fixture", Session: sink, SessionID: "stall", Window: 131072, MaxSteps: 4}, "investigate")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1070,7 +1070,7 @@ func TestAssignedLoopActualFailureEvidence(t *testing.T) {
 			}
 			model := codingFixture(t, "structured", calls)
 			cfg.Model.Server = model.URL
-			rr, _, e := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, scopeRef)}, Cfg: cfg, Store: s, Server: model.URL, Model: "fixture", Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: "loop-error", MaxSteps: 8, Window: 32768}, "investigate")
+			rr, _, e := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, scopeRef)}, Cfg: cfg, Store: s, Server: model.URL, Model: "fixture", Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: "loop-error", MaxSteps: 8, Window: 131072}, "investigate")
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -1201,7 +1201,14 @@ func TestAssignedReviewReceivesOriginalBriefAndHostEvidence(t *testing.T) {
 			if review == "" {
 				review = first
 			}
-			if body.Messages[len(body.Messages)-1].Role == "user" {
+			lastTurn := ""
+			for i := len(body.Messages) - 1; i >= 0; i-- {
+				if body.Messages[i].Role != "system" {
+					lastTurn = body.Messages[i].Role
+					break
+				}
+			}
+			if lastTurn == "user" {
 				raw, _ := json.Marshal(map[string]any{"timeout": 2})
 				delta = map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "review-check", "type": "function", "function": map[string]any{"name": "check", "arguments": string(raw)}}}}
 				reason = "tool_calls"
@@ -1221,12 +1228,15 @@ func TestAssignedReviewReceivesOriginalBriefAndHostEvidence(t *testing.T) {
 	defer srv.Close()
 	bindDecisionFixture(t, &cfg, nil)
 	sink := &codingSink{dir: filepath.Join(dir, "sessions")}
-	r, _, err := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, task.ID)}, Cfg: cfg, Store: s, Session: sink, SessionID: "review-handoff", Server: srv.URL, Model: "component", Window: 32768, MaxSteps: 3}, original)
+	r, _, err := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, task.ID)}, Cfg: cfg, Store: s, Session: sink, SessionID: "review-handoff", Server: srv.URL, Model: "component", Window: 65536, MaxSteps: 3}, original)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err = r.Run(context.Background(), original); err != nil {
 		t.Fatal(err)
+	}
+	if review == "" {
+		t.Fatalf("review child never received a Review request: outcome=%+v calls=%v", r.Outcome, calls)
 	}
 	// All requirements/facts precede prose, so fake worker claims are not the only input.
 	prose := strings.Index(review, "worker report (unverified): "+falseReport)

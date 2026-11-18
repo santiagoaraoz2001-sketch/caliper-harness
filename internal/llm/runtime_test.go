@@ -102,7 +102,7 @@ func TestRuntimeNativeMappingAndMetadata(t *testing.T) {
 					} else {
 						reply, served, u, err = c.Chat(context.Background(), nil)
 					}
-					if err != nil || reply != "answer" || served != "served" || u != (Usage{7, 3, true}) {
+					if err != nil || reply != "answer" || served != "served" || u != (Usage{In: 7, Out: 3, Reported: true}) {
 						t.Fatalf("native decode/identity/usage: %q %q %+v %v", reply, served, u, err)
 					}
 					if stream && seen.String() != "answer" {
@@ -241,7 +241,7 @@ func TestRuntimeNativeDoneCannotHideReadFailure(t *testing.T) {
 		} else {
 			reply, served, u, err = c.Chat(context.Background(), nil)
 		}
-		if !errors.Is(err, io.ErrUnexpectedEOF) || reply != "answer" || served != "served" || u != (Usage{7, 3, true}) {
+		if !errors.Is(err, io.ErrUnexpectedEOF) || reply != "answer" || served != "served" || u != (Usage{In: 7, Out: 3, Reported: true}) {
 			t.Fatalf("read error hidden/evidence lost: %q %q %+v %v", reply, served, u, err)
 		}
 	}
@@ -410,9 +410,9 @@ func TestRuntimeNativeAfterDoneRefusalNamesCause(t *testing.T) {
 func TestRuntimeNativePreservesHistoryWithoutTruncateOrShift(t *testing.T) {
 	for _, mode := range []string{"plain", "stream", "text-tools", "native-tools"} {
 		t.Run(mode, func(t *testing.T) {
-			msgs := []Message{{Role: "system", Content: "protected policy β\n"}, {Role: "user", Content: "first request"}, {Role: "assistant", Content: "retained observation"}, {Role: "user", Content: "next request"}}
+			msgs := []Message{{Role: "system", Content: "protected policy Î²\n"}, {Role: "user", Content: "first request"}, {Role: "assistant", Content: "retained observation"}, {Role: "user", Content: "next request"}}
 			if mode == "native-tools" {
-				msgs[2] = Message{Role: "assistant", ToolCalls: []ToolCall{{ID: "owned-call", Name: "bash", Arguments: `{"cmd":"printf β"}`}}}
+				msgs[2] = Message{Role: "assistant", ToolCalls: []ToolCall{{ID: "owned-call", Name: "bash", Arguments: `{"cmd":"printf Î²"}`}}}
 				msgs = append(msgs[:3], Message{Role: "tool", ToolCallID: "owned-call", Name: "bash", Content: "actual retained result"}, msgs[3])
 			}
 			want, err := json.Marshal(nativeMessages(msgs))

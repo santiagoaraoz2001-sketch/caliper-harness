@@ -300,7 +300,7 @@ func TestMainPlanningWithoutConfiguredCheck(t *testing.T) {
 			}))
 			defer srv.Close()
 			cfg.Model.Server = srv.URL
-			r, _, e := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, "root")}, Cfg: cfg, Store: s, Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: "discovery", Server: srv.URL, Model: "fixture", Window: 32768, MaxSteps: map[string]int{"budget": 2, "alert": 4}[mode]}, "inspect the actual project check")
+			r, _, e := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, "root")}, Cfg: cfg, Store: s, Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: "discovery", Server: srv.URL, Model: "fixture", Window: 131072, MaxSteps: map[string]int{"budget": 2, "alert": 4}[mode]}, "inspect the actual project check")
 			if e != nil {
 				t.Fatal(e)
 			}

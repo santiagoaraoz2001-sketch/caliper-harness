@@ -100,7 +100,7 @@ func TestAssignedCommentNextWireAndReceiptFailure(t *testing.T) {
 			}))
 			defer srv.Close()
 			sink := &commentSink{codingSink: &codingSink{dir: filepath.Join(dir, "sessions")}, reject: reject}
-			r, _, err := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, task.ID)}, Cfg: cfg, Store: s, Session: sink, SessionID: "main", Server: srv.URL, Model: "fixture", MaxSteps: 8, Window: 32768}, "perform actual task")
+			r, _, err := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, task.ID)}, Cfg: cfg, Store: s, Session: sink, SessionID: "main", Server: srv.URL, Model: "fixture", MaxSteps: 8, Window: 131072}, "perform actual task")
 			if err != nil {
 				t.Fatal(err)
 			}

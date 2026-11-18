@@ -20,6 +20,26 @@ spec.loader.exec_module(observed)
 
 
 class ControllerTests(unittest.TestCase):
+    def test_dialog_state_surfaces_open_approval_dialog(self):
+        snapshot = {'lines': [
+            'chat history line',
+            '┌ Auth · approval · 1-3/3 ─────────────',
+            '│ Approve elaboration version 2?',
+            '│ y approve · n deny · esc declines',
+            'dialog open · Enter /stop · Ctrl+C cancels',
+            '',
+        ]}
+        state = observed.dialog_state(snapshot)
+        self.assertIsNotNone(state)
+        self.assertEqual(state['kind'], 'auth')
+        self.assertTrue(state['awaiting_result'])
+        self.assertIn('Approve elaboration version 2?', state['text'])
+        self.assertIn('Auth · approval', state['text'])
+
+    def test_dialog_state_none_without_open_dialog(self):
+        self.assertIsNone(observed.dialog_state({'lines': ['ordinary chat', 'enter send']}))
+        self.assertIsNone(observed.dialog_state({'lines': []}))
+        self.assertIsNone(observed.dialog_state({}))
     def test_effective_config_preserves_non_bmp_yaml_scalars(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -179,6 +199,7 @@ class ControllerTests(unittest.TestCase):
                 self.assertEqual(state.compaction['outcome'], outcome)
                 state.sent('still-pending', '/btw retain my comment')
                 self.assertFalse(state.can_quit())
+                self.assertTrue(state.can_quit(abandon_pending=True))
 
     def test_compaction_missing_finish_retains_unknown_and_pending_submission(self):
         state = observed.Observation('brief')
@@ -658,6 +679,40 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(state.main, 'main2')
         self.assertTrue(state.active)
         self.assertNotIn('followup', state.pending)
+
+    def test_duplicate_prompt_adopts_session_without_confirming_either_input(self):
+        state = observed.Observation('Build game', '/owned')
+        now = lambda: datetime.fromtimestamp(time.time() + 0.001, timezone.utc).isoformat()
+        state.event('main1', {'time': now(), 'kind': 'prompt', 'text': 'Build game'})
+        state.event('main1', {'time': now(), 'kind': 'workspace', 'text': '/owned'})
+        state.event('main1', {'time': now(), 'kind': 'done', 'text': 'first done'})
+        state.sent('draft-copy', 'Continue with directed checks')
+        state.sent('resent-copy', 'Continue with directed checks')
+        self.assertFalse(state.event('main2', {'time': now(), 'kind': 'prompt', 'text': 'Continue with directed checks'}))
+        self.assertFalse(state.event('main2', {'time': now(), 'kind': 'workspace', 'text': '/owned'}))
+        self.assertEqual(state.main, 'main2')
+        self.assertEqual(set(state.pending), {'draft-copy', 'resent-copy'})
+        self.assertEqual(state.status()['ambiguous_delivery'], [
+            {'id': 'draft-copy', 'session': 'main2'}, {'id': 'resent-copy', 'session': 'main2'}])
+        state.event('main2', {'time': now(), 'kind': 'tool', 'text': 'wait http_url=http://127.0.0.1/'})
+        state.event('main2', {'time': now(), 'kind': 'done', 'text': 'second done'})
+        status = state.status()
+        self.assertEqual(status['main_sessions'], ['main1', 'main2'])
+        self.assertEqual(status['tool_counts']['wait'], 1)
+        self.assertEqual(status['last_final']['text'], 'second done')
+
+    def test_busy_ordinary_prompt_is_not_transmitted_into_composer(self):
+        state = observed.Observation('Build game')
+        state.active = True
+        self.assertFalse(state.can_send('A new ordinary prompt'))
+        self.assertTrue(state.can_send('/btw Keep labels clear'))
+        self.assertTrue(state.can_send('\x1b[B', 'keys'))
+        state.last_ask = {'awaiting_result': True, 'call_id': 'ask-1'}
+        self.assertTrue(state.can_send('Blue'))
+        state.last_ask = None
+        state.active = False
+        state.compaction = {'operation_id': 'compact-1', 'session': 'main', 'state': 'running'}
+        self.assertFalse(state.can_send('A new ordinary prompt'))
 
     def test_incremental_tail_partial_and_oversized_lines(self):
         with tempfile.TemporaryDirectory() as directory:

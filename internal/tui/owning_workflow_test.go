@@ -50,6 +50,12 @@ func TestOwningWorkflowCommandDialog(t *testing.T) {
 						http.Error(w, "invalid request", 400)
 						return
 					}
+					if len(q.Options) > 1 && strings.Contains(q.Options[0], "declared scope") {
+						// Coherence: confident revision. With one refusal already
+						// recorded, this repeated refusal escalates to the owner dialog.
+						json.NewEncoder(w).Encode(map[string]any{"pick": 1, "option": q.Options[1], "confidence": .95, "model": "component", "device": "cpu"})
+						return
+					}
 					json.NewEncoder(w).Encode(map[string]any{"pick": 0, "option": q.Options[0], "confidence": .1, "model": "component", "device": "cpu"})
 				case "/chat/completions":
 					var body struct {
@@ -116,6 +122,9 @@ func TestOwningWorkflowCommandDialog(t *testing.T) {
 			if _, err := plan.Ready(context.Background(), s, a.ID, func(context.Context, *plan.Plan, []*plan.Task) error { return nil }); err != nil {
 				t.Fatal(err)
 			}
+			if _, err := plan.RecordReadinessRefusal(s, a.ID); err != nil {
+				t.Fatal(err)
+			}
 			s.Close()
 			m := New(cfg, "test")
 			m.StorePath = path
@@ -156,7 +165,7 @@ func TestOwningWorkflowCommandDialog(t *testing.T) {
 			go func() { prog.Send(cmd()) }()
 			select {
 			case d := <-shown:
-				if d.workflow != a.ID || !strings.Contains(d.prompt, "unsure") {
+				if d.workflow != a.ID || !strings.Contains(d.prompt, "recommends revision") {
 					t.Error("wrong owner/prompt", d)
 				}
 				for _, size := range [][2]int{{80, 24}, {120, 40}} {
@@ -189,7 +198,7 @@ func TestOwningWorkflowCommandDialog(t *testing.T) {
 					}
 				}
 			case <-ctx.Done():
-				t.Fatal("uncertainty dialog missing")
+				t.Fatal("revision escalation dialog missing")
 			}
 			if answer == "stop" {
 				prog.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/stop")})

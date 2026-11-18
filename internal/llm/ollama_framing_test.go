@@ -41,7 +41,7 @@ func TestNativeToolFramingPreservesEvidence(t *testing.T) {
 			if reply.Message.Thinking != "Let me draft the plan." || len(reply.Message.ToolCalls) != 1 || reply.Message.ToolCalls[0].ID == "" || reply.Message.ToolCalls[0].Name != "read" {
 				t.Fatalf("prior unexecuted evidence lost: %#v", reply)
 			}
-			if reply.Usage != (Usage{12033, 4789, true}) || reply.Served != "served" || reply.OutputLimit || reply.ThinkingOnly || displayed.Len() != 0 {
+			if reply.Usage != (Usage{In: 12033, Out: 4789, Reported: true}) || reply.Served != "served" || reply.OutputLimit || reply.ThinkingOnly || displayed.Len() != 0 {
 				t.Fatalf("failure became answer/continuation or lost metadata: %#v %q", reply, displayed.String())
 			}
 		})

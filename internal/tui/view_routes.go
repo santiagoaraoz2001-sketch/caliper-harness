@@ -23,5 +23,6 @@ var viewRoutes = map[ViewID]viewRoute{
 	ViewFiles:     {(*Model).renderFiles, Model.filesKey},
 	ViewSettings:  {(*Model).renderSettings, Model.settingsKey},
 	ViewTests:     {(*Model).renderTests, Model.testsKey},
+	ViewLibrary:   {(*Model).renderLibrary, Model.libraryKey},
 	ViewSetup:     {(*Model).renderSetup, Model.setupKey},
 }

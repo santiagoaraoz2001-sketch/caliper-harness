@@ -311,7 +311,10 @@ func (r *Runner) progressEvidence(ctx context.Context, w *watcher) (progressPack
 	packet.hostReviewRequest = r.reviewRequest != "" && packet.OriginalUserIntent == r.reviewRequest
 	for i, keep := range answerGroupEntries(r.Continuation) {
 		if keep {
-			packet.AnsweredQuestions = append(packet.AnsweredQuestions, r.Continuation.Entries[i])
+			entry := r.Continuation.Entries[i]
+			entry.Message = entry.Message.Clone()
+			entry.Message.Reasoning, entry.Message.ReasoningContent, entry.Message.Thinking = "", "", ""
+			packet.AnsweredQuestions = append(packet.AnsweredQuestions, entry)
 		}
 	}
 	if w != nil {
@@ -649,6 +652,20 @@ func (r *Runner) progressJudgment(ctx context.Context, input any, req decision.R
 			}
 		}
 		req.Context = string(raw)
+		if r.JudgePreflight != nil {
+			if preErr := r.JudgePreflight(req); preErr != nil {
+				var capacity *decision.ContextCapacityError
+				if !errors.As(preErr, &capacity) {
+					log("judgment-error", "source=progress error=\"progress advice unavailable: "+preErr.Error()+"\"")
+					return req, decision.Verdict{}, &progressJudgeError{error: fmt.Errorf("progress advice unavailable: %w", preErr)}
+				}
+				r.progressRefusedBytes = max(r.progressRefusedBytes, len(raw))
+				if !reduce() {
+					return req, decision.Verdict{}, &progressJudgeError{error: fmt.Errorf("progress advice unavailable: protected evidence exceeds capacity: %w", preErr), exhausted: true}
+				}
+				continue
+			}
+		}
 		// The stored copy is capped like stored verdict contexts: the full
 		// packet (up to the decision input token ceiling) would otherwise
 		// be duplicated into the session store on every judgment. The

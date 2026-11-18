@@ -106,8 +106,19 @@ func TestOutputLimitContinuationsRetainPrefixAndExecuteOnce(t *testing.T) {
 	if err := json.Unmarshal(requests[3]["messages"], &messages); err != nil {
 		t.Fatal(err)
 	}
-	n := len(messages)
-	if n < 4 || messages[n-4].Reasoning != unfinished+"now acting" || len(messages[n-4].ToolCalls) != 2 || messages[n-3].ToolCallID != "stable-one" || messages[n-2].ToolCallID != "stable-two" || messages[n-1].Content != "current project identity version 2" {
+	assistant := -1
+	for i, message := range messages {
+		if len(message.ToolCalls) == 2 && messages[i].ToolCalls[0].ID == "stable-one" {
+			assistant = i
+		}
+	}
+	projectAfterResults := false
+	if assistant >= 0 {
+		for _, message := range messages[assistant+3:] {
+			projectAfterResults = projectAfterResults || message.Content == "current project identity version 2"
+		}
+	}
+	if assistant < 0 || messages[assistant].Reasoning != unfinished+"now acting" || messages[assistant+1].ToolCallID != "stable-one" || messages[assistant+2].ToolCallID != "stable-two" || !projectAfterResults {
 		t.Fatalf("assembled thought/call/result association lost: %+v", messages)
 	}
 }

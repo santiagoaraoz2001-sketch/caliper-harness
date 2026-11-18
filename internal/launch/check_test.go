@@ -36,13 +36,27 @@ func betaCheckFixture(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(dir, "beta.txt"), []byte("beta\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("python3", "checks/review_beta.py")
+	python := ""
+	for _, candidate := range []string{"python3", "python"} {
+		path, lookErr := exec.LookPath(candidate)
+		if lookErr != nil {
+			continue
+		}
+		if out, runErr := exec.Command(path, "--version").CombinedOutput(); runErr == nil && strings.Contains(string(out), "Python") {
+			python = path
+			break
+		}
+	}
+	if python == "" {
+		t.Skip("functional Python interpreter unavailable for Beta control")
+	}
+	cmd := exec.Command(python, "checks/review_beta.py")
 	cmd.Dir = dir
 	b, err := cmd.CombinedOutput()
 	if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 || !strings.Contains(string(b), "declared reviewer-only approval is false") {
 		t.Fatalf("original Beta control drift: %s %v", b, err)
 	}
-	return "cd '" + dir + "' && python3 checks/review_beta.py"
+	return "cd '" + dir + "' && '" + strings.ReplaceAll(python, "\\", "/") + "' checks/review_beta.py"
 }
 func TestCheckFreeformReviewerCannotQualify(t *testing.T) {
 	command := betaCheckFixture(t)

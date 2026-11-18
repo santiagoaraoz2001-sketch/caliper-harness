@@ -51,12 +51,14 @@ func TestReadinessRequirementsRemainProtectedAndBudgeted(t *testing.T) {
 	}
 }
 
+// The owner prompt on the repeated confident-revision escalation displays
+// the same captured requirements the judge saw, never a later re-read.
 func TestUnsureReadinessDisplaysSameCapturedRequirements(t *testing.T) {
 	_, aid, d := gateDeps(t, 1)
 	reads := 0
 	d.ReadinessRequirements = func() string {
 		reads++
-		if reads == 1 {
+		if reads <= 2 {
 			return "Keep empty — café"
 		}
 		return "UNCAPTURED LATER REQUEST"
@@ -65,7 +67,7 @@ func TestUnsureReadinessDisplaysSameCapturedRequirements(t *testing.T) {
 		if !strings.Contains(req.Context, "Keep empty — café") {
 			t.Fatal(req.Context)
 		}
-		return decision.Verdict{Option: servesGoal, Confidence: .6}, nil
+		return decision.Verdict{Option: offGoal, Confidence: .95}, nil
 	}
 	d.ConfirmReadiness = func(_ context.Context, _, _, brief, prompt string) (bool, error) {
 		if !strings.Contains(brief, "Keep empty — café") || !strings.Contains(prompt, "Keep empty — café") || strings.Contains(prompt, "UNCAPTURED") {
@@ -73,7 +75,10 @@ func TestUnsureReadinessDisplaysSameCapturedRequirements(t *testing.T) {
 		}
 		return false, nil
 	}
-	if err := ReadyCheck(t.Context(), d, aid); err == nil || reads != 1 {
-		t.Fatalf("unsure decline/read count: %v/%d", err, reads)
+	if err := ReadyCheck(t.Context(), d, aid); err == nil {
+		t.Fatal("first confident revision must refuse")
+	}
+	if err := ReadyCheck(t.Context(), d, aid); err == nil || reads != 2 {
+		t.Fatalf("escalated decline/read count: %v/%d", err, reads)
 	}
 }

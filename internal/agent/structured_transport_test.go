@@ -70,8 +70,14 @@ func TestStructuredRunnerUsesStreamAndCorrelatedActualBash(t *testing.T) {
 		t.Fatalf("actual requests %+v", requests)
 	}
 	msgs := requests[1]["messages"].([]any)
-	last := msgs[len(msgs)-1].(map[string]any)
-	if last["role"] != "tool" || last["tool_call_id"] != "call-one" || !strings.Contains(fmt.Sprint(last["content"]), "tool result") {
+	var last map[string]any
+	for _, raw := range msgs {
+		message := raw.(map[string]any)
+		if message["role"] == "tool" && message["tool_call_id"] == "call-one" {
+			last = message
+		}
+	}
+	if last == nil || !strings.Contains(fmt.Sprint(last["content"]), "tool result") {
 		t.Fatalf("uncorrelated receipt %+v", last)
 	}
 }

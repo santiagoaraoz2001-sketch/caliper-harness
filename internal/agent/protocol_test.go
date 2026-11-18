@@ -39,7 +39,13 @@ func TestProtocolMultipleCallsHaveNoPartialEffects(t *testing.T) {
 	if err != nil || string(got) != "accepted" {
 		t.Fatalf("corrected single call: got=%q err=%v", got, err)
 	}
-	if len(model.seen) < 2 || !strings.Contains(model.seen[1][len(model.seen[1])-1].Content, "one tool block") {
+	repairSeen := false
+	if len(model.seen) >= 2 {
+		for _, message := range model.seen[1] {
+			repairSeen = repairSeen || strings.Contains(message.Content, "one tool block")
+		}
+	}
+	if len(model.seen) < 2 || !repairSeen {
 		t.Fatal("next request did not receive the single-call repair")
 	}
 }
@@ -59,7 +65,11 @@ func TestProtocolMalformedLiteralHasNoEffect(t *testing.T) {
 			if _, err := os.Stat(marker); !os.IsNotExist(err) {
 				t.Fatalf("malformed multiline executed (err %v)", err)
 			}
-			if !strings.Contains(model.seen[1][len(model.seen[1])-1].Content, "<<END") {
+			repairSeen := false
+			for _, message := range model.seen[1] {
+				repairSeen = repairSeen || strings.Contains(message.Content, "<<END")
+			}
+			if !repairSeen {
 				t.Fatal("repair has no usable literal form")
 			}
 		})
@@ -84,11 +94,22 @@ func TestProtocolLiteralBashBytes(t *testing.T) {
 }
 
 func TestProtocolLiteralPythonBytes(t *testing.T) {
-	if _, err := exec.LookPath("python3"); err != nil {
-		t.Skip("byte probe requires installed python3")
+	python := ""
+	for _, candidate := range []string{"python3", "python"} {
+		path, err := exec.LookPath(candidate)
+		if err != nil {
+			continue
+		}
+		if out, err := exec.Command(path, "--version").CombinedOutput(); err == nil && strings.Contains(string(out), "Python") {
+			python = path
+			break
+		}
+	}
+	if python == "" {
+		t.Skip("byte probe requires a functional Python interpreter")
 	}
 	expected := []byte("# comment\n\n  key: value  \n\ttab\n")
-	command := "python3 - <<'PY'\n# preserve comment and blank line\n\nvalue = 2\nif value == 2:\n    data = b'# comment\\n\\n  key: value  \\n\\ttab\\n'\nelse:\n    data = b'wrong'\nimport sys\nsys.stdout.buffer.write(data)\nPY\n"
+	command := "'" + strings.ReplaceAll(python, "\\", "/") + "' - <<'PY'\n# preserve comment and blank line\n\nvalue = 2\nif value == 2:\n    data = b'# comment\\n\\n  key: value  \\n\\ttab\\n'\nelse:\n    data = b'wrong'\nimport sys\nsys.stdout.buffer.write(data)\nPY\n"
 	verifyLiteralCommand(t, command, expected)
 }
 

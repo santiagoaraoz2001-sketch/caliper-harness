@@ -29,6 +29,9 @@ type ServeRow struct {
 	Worker  bool
 	Sidecar bool
 	IsModel bool
+	// Detected marks a row found by Setup's read-only local scan. It is
+	// not saved until the user selects it and saves in Setup.
+	Detected bool
 	// Resident marks a model row loaded in memory (x unloads it);
 	// available-only rows load installed weights on l.
 	Resident bool
@@ -222,14 +225,18 @@ func (m *Model) serveRecipes() []serve.Recipe {
 }
 
 func (m *Model) probeServe() tea.Cmd {
-	return m.probeServeWith(&http.Client{Timeout: time.Duration(m.Cfg.Serve.ProbeTimeoutSeconds) * time.Second})
+	return m.probeServeWithDiscovery(&http.Client{Timeout: time.Duration(m.Cfg.Serve.ProbeTimeoutSeconds) * time.Second}, serve.DiscoverServers)
 }
 func (m *Model) probeServeWith(client *http.Client) tea.Cmd {
 	return m.probeServeWithDiscovery(client, nil)
 }
 
-// The obsolete discovery hook remains test-injectable to prove it is never called.
-func (m *Model) probeServeWithDiscovery(client *http.Client, _ func(context.Context, *http.Client) ([]serve.DiscoveredServer, error)) tea.Cmd {
+// Discovery runs only while Setup is on screen: first use finds model
+// servers already running on this computer so the user can pick one
+// without typing an endpoint. Manage and background refreshes keep the
+// explicit-only contract and never scan.
+func (m *Model) probeServeWithDiscovery(client *http.Client, discover func(context.Context, *http.Client) ([]serve.DiscoveredServer, error)) tea.Cmd {
+	discoverSetup := discover != nil && m.setupActive()
 	endpoints, recipes := m.serveEndpoints(), m.serveRecipes()
 	spawned := make(map[string]*serve.Proc, len(m.Serve.Spawned))
 	for u, p := range m.Serve.Spawned {
@@ -326,6 +333,56 @@ func (m *Model) probeServeWithDiscovery(client *http.Client, _ func(context.Cont
 				rows = append(rows, mr)
 			}
 		}
+		if discoverSetup {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			discovered, derr := discover(ctx, client)
+			cancel()
+			if derr != nil {
+				warnings = append(warnings, "local server detection: "+derr.Error())
+			}
+			for _, ds := range discovered {
+				url := ds.Health.APIBase
+				if url == "" {
+					url = ds.URL
+				}
+				known := url == ""
+				for _, e := range endpoints {
+					if sameServeURL(e.URL, url) || sameServeURL(e.URL, ds.URL) {
+						known = true
+					}
+				}
+				if known {
+					continue
+				}
+				label := "Local model server (detected)"
+				switch ds.Kind {
+				case serve.KindOllama:
+					label = "Ollama (detected)"
+				case serve.KindRulith:
+					label = "Rulith (detected)"
+				case serve.KindSidecar:
+					label = "Decision service (detected)"
+				}
+				sr := ServeRow{Ep: serve.Endpoint{Kind: ds.Kind, Label: label, URL: url}, Health: ds.Health, Sidecar: ds.Kind == serve.KindSidecar, Detected: true}
+				rows = append(rows, sr)
+				seen := map[string]bool{}
+				for _, name := range append(append([]string(nil), ds.Health.Loaded...), ds.Health.Available...) {
+					if name == "" || seen[name] {
+						continue
+					}
+					seen[name] = true
+					mr := sr
+					mr.IsModel = true
+					mr.Ep.Model = name
+					for _, loaded := range ds.Health.Loaded {
+						if loaded == name {
+							mr.Resident = ds.Kind == serve.KindOllama
+						}
+					}
+					rows = append(rows, mr)
+				}
+			}
+		}
 		mem, err := hw.Detect()
 		msg := serveProbedMsg{rows: groupServeRows(rows), mem: mem, warnings: warnings}
 		if err != nil {
@@ -416,6 +473,26 @@ func (m *Model) onServeProbed(msg serveProbedMsg) {
 		keep = serveKeyOf(m.Serve.Rows[m.Serve.Sel])
 	}
 	m.Serve.Rows = msg.rows
+	// First use with exactly one detected worker needs no hunting: stage
+	// it in Setup. Nothing is written until the user reviews and saves.
+	if m.setupActive() && m.Setup.Started && m.Setup.Stage == 0 && m.Setup.Pick == "" {
+		var detected []setupChoice
+		for _, c := range m.setupChoices() {
+			if c.detected {
+				detected = append(detected, c)
+			}
+		}
+		if len(detected) == 1 {
+			m.Setup.Pick, m.Setup.Model = detected[0].key, detected[0].model
+		}
+	}
+	// Same rule for the judge: one detected decision service and an
+	// untouched staged judge means stage it for review. Save connects it.
+	if m.setupActive() && m.Setup.Started && m.setupJudgeUntouched() {
+		if judges := m.detectedJudgeChoices(); len(judges) == 1 && judges[0].judge != nil {
+			m.Setup.Judge, m.Setup.JudgePick = *judges[0].judge, judges[0].key
+		}
+	}
 	m.Serve.Installed = msg.installed
 	for _, r := range msg.rows {
 		if !r.Sidecar && r.Have && (sameServeURL(r.Ep.URL, m.Cfg.Model.Server) || r.Health.APIBase == m.Cfg.Model.Server) {

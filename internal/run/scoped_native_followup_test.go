@@ -316,7 +316,7 @@ func TestScopedCreationWireExplicitFocusAndGuide(t *testing.T) {
 	}
 	sink := focusDiskLog{dir: filepath.Join(dir, "sessions")}
 	bindDecisionFixture(t, &cfg, nil)
-	deps := Deps{Tools: "workflow", Cfg: cfg, Store: s, Server: srv.URL, Model: "fixture", MaxSteps: 7, Window: 32768, Session: sink, SessionID: "chain", Continuation: session.Continuation{Workflow: scope}}
+	deps := Deps{Tools: "workflow", Cfg: cfg, Store: s, Server: srv.URL, Model: "fixture", MaxSteps: 7, Window: 131072, Session: sink, SessionID: "chain", Continuation: session.Continuation{Workflow: scope}}
 	r, _, e := New(deps, "ONE_INTENT")
 	if e != nil {
 		t.Fatal(e)

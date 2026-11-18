@@ -131,7 +131,7 @@ func TestPreparationRecoveryFreshSessionScope(t *testing.T) {
 	cfg.Model.Server = server.URL
 	makeRunner := func(id string, c session.Continuation) *agent.Runner {
 		t.Helper()
-		r, _, err := New(Deps{Tools: "workflow", Cfg: cfg, Store: s, Server: server.URL, Model: "component", Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: id, Continuation: c, Window: 32768, MaxSteps: 2}, "same project request")
+		r, _, err := New(Deps{Tools: "workflow", Cfg: cfg, Store: s, Server: server.URL, Model: "component", Session: &codingSink{dir: filepath.Join(dir, "sessions")}, SessionID: id, Continuation: c, Window: 131072, MaxSteps: 2}, "same project request")
 		if err != nil {
 			t.Fatal(err)
 		}

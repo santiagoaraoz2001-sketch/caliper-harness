@@ -172,38 +172,31 @@ func TestReadinessApprovalSummaryFallsBackWithoutOverlongModelText(t *testing.T)
 	}
 }
 
-func TestReadyCheckUnsureAsks(t *testing.T) {
-	for _, tc := range []struct {
-		in      string
-		wantErr bool
-	}{
-		{"y\n", false},
-		{"n\n", true},
-	} {
+// Unsure-band verdicts on a mechanically complete brief admit without
+// asking: deterministic structure is primary, the probability score is
+// advisory in the unsure band (approved contract change).
+func TestReadyCheckUnsureAdmitsStructurally(t *testing.T) {
+	for _, option := range []string{servesGoal, offGoal} {
 		_, aid, d := gateDeps(t, 2)
-		d.Judge = stubVerdict(decision.Verdict{Option: servesGoal, Confidence: 0.5}, nil)
-		d.In = strings.NewReader(tc.in)
-		out := &bytes.Buffer{}
-		d.Out = out
-		err := ReadyCheck(context.Background(), d, aid)
-		if tc.wantErr && (err == nil || !strings.Contains(err.Error(), "unsure")) {
-			t.Errorf("in=%q err=%v", tc.in, err)
+		d.Judge = stubVerdict(decision.Verdict{Option: option, Confidence: 0.5}, nil)
+		asks := 0
+		d.Ask = func(_ context.Context, _ string) bool { asks++; return false }
+		d.In = strings.NewReader("n\n")
+		if err := ReadyCheck(context.Background(), d, aid); err != nil {
+			t.Errorf("option=%q err=%v", option, err)
 		}
-		if !tc.wantErr && err != nil {
-			t.Errorf("in=%q err=%v", tc.in, err)
-		}
-		if !strings.Contains(out.String(), "leans "+servesGoal) {
-			t.Errorf("in=%q prompt=%q", tc.in, out.String())
+		if asks != 0 {
+			t.Errorf("option=%q asked %d times, want 0", option, asks)
 		}
 	}
 }
 
-func TestReadyCheckUnsureWithoutPromptRefuses(t *testing.T) {
+func TestReadyCheckUnsureWithoutPromptAdmitsStructurally(t *testing.T) {
 	_, aid, d := gateDeps(t, 2)
 	d.Judge = stubVerdict(decision.Verdict{Option: servesGoal, Confidence: 0.5}, nil)
 	d.In, d.Out = nil, nil
-	if err := ReadyCheck(context.Background(), d, aid); err == nil {
-		t.Fatal("unsure with no prompt must refuse")
+	if err := ReadyCheck(context.Background(), d, aid); err != nil {
+		t.Fatalf("unsure with complete structure must admit without a prompt: %v", err)
 	}
 }
 
@@ -346,8 +339,8 @@ func TestReadyCheckLogsJudgmentWithResolution(t *testing.T) {
 	}{
 		{"admitted", decision.Verdict{Option: servesGoal, Confidence: 0.9}, "", "admitted", false},
 		{"refused", decision.Verdict{Option: offGoal, Confidence: 0.9}, "", "refused", true},
-		{"asked-admitted", decision.Verdict{Option: servesGoal, Confidence: 0.5}, "y\n", "asked-admitted", false},
-		{"asked-refused", decision.Verdict{Option: offGoal, Confidence: 0.5}, "n\n", "asked-refused", true},
+		{"admitted-structural", decision.Verdict{Option: servesGoal, Confidence: 0.5}, "", "admitted-structural", false},
+		{"admitted-structural-offgoal", decision.Verdict{Option: offGoal, Confidence: 0.5}, "", "admitted-structural", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -406,7 +399,7 @@ func TestReadyUncertaintyShowsExactJudgedContext(t *testing.T) {
 	d.Judge = func(_ context.Context, r decision.Request) (decision.Verdict, error) {
 		judges++
 		judged = r
-		return decision.Verdict{Option: servesGoal, Confidence: .622}, nil
+		return decision.Verdict{Option: offGoal, Confidence: .95}, nil
 	}
 	d.ConfirmReadiness = func(_ context.Context, id, snapshot, brief, p string) (bool, error) {
 		asks++
@@ -417,10 +410,19 @@ func TestReadyUncertaintyShowsExactJudgedContext(t *testing.T) {
 		}
 		return false, nil
 	}
+	// First confident revision refuses without asking; the repeated
+	// confident revision escalates to the owner with the exact judged
+	// brief, and the decline still refuses.
+	if _, err := Ready(context.Background(), d, aid); err == nil {
+		t.Fatal("first confident revision admitted")
+	}
+	if judges != 1 || asks != 0 {
+		t.Fatalf("first judge/ask=%d/%d", judges, asks)
+	}
 	if _, err := Ready(context.Background(), d, aid); err == nil {
 		t.Fatal("decline admitted")
 	}
-	if judges != 1 || asks != 1 {
+	if judges != 2 || asks != 1 {
 		t.Fatalf("judge/ask=%d/%d", judges, asks)
 	}
 	_, displayed, ok := strings.Cut(prompt, "Complete judged brief:\n")

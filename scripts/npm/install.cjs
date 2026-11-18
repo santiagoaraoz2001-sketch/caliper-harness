@@ -188,5 +188,5 @@ async function install(base = home(), download = get, activate = activateNative,
     return root;
   } finally { fs.rmSync(stage, { recursive: true, force: true }); }
 }
-if (require.main === module) install().then(async root => { await registerCommand(root); console.log(`Caliper ${version} installed: ${root}\nRun caliper from your project directory. Reopen your terminal if the command is not found.`); }).catch(error => { console.error(`Caliper installation failed: ${error.message}`); process.exitCode = 1; });
+if (require.main === module) install().then(async root => { await registerCommand(root); console.log(`Caliper ${version} installed: ${root}\nRun caliper from your project directory. Reopen your terminal if the command is not found.\nFirst run opens Setup. Setup finds model servers already running on this computer, such as Ollama, LM Studio, llama.cpp, MLX, vLLM or Rulith. Start your model server first, then run caliper and select the detected model.`); }).catch(error => { console.error(`Caliper installation failed: ${error.message}`); process.exitCode = 1; });
 module.exports = { home, executable, validate, install, identity, version, ensurePrerequisites, activateNative, registerCommand, progressReporter };

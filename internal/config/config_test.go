@@ -96,7 +96,7 @@ func TestDefaultsMatchOwnerPolicy(t *testing.T) {
 		t.Errorf("confidence_buckets default wrong: %v", dc.ConfidenceBuckets)
 	}
 	au := d.Auth
-	if au.Mode != AuthAll || len(au.JudgedTools) != 2 || au.JudgedTools[0] != "bash" || au.JudgedTools[1] != "fetch" || len(au.FreeTools) != 8 || au.FreeTools[0] != "grep" || au.FreeTools[1] != "find" || au.FreeTools[2] != "ask" || au.FreeTools[3] != "judge" || au.FreeTools[4] != "recall" || au.FreeTools[5] != "find_file" || au.FreeTools[6] != "find_dir" || au.FreeTools[7] != "help" || au.MaxArgChars != 80 {
+	if au.Mode != AuthAll || len(au.JudgedTools) != 2 || au.JudgedTools[0] != "bash" || au.JudgedTools[1] != "fetch" || len(au.FreeTools) != 9 || au.FreeTools[0] != "grep" || au.FreeTools[1] != "find" || au.FreeTools[2] != "ask" || au.FreeTools[3] != "judge" || au.FreeTools[4] != "recall" || au.FreeTools[5] != "find_file" || au.FreeTools[6] != "find_dir" || au.FreeTools[7] != "help" || au.FreeTools[8] != "wait" || au.MaxArgChars != 80 {
 		t.Errorf("auth defaults wrong: %+v", au)
 	}
 	ag := d.Agent

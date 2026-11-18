@@ -33,6 +33,8 @@ type ollamaResponse struct {
 	DoneReason string          `json:"done_reason"`
 	In         *int            `json:"prompt_eval_count"`
 	Out        *int            `json:"eval_count"`
+	PromptMS   int64           `json:"prompt_eval_duration"`
+	PredictMS  int64           `json:"eval_duration"`
 	Error      json.RawMessage `json:"error"`
 }
 
@@ -127,6 +129,12 @@ func (c *Client) chatOllama(ctx context.Context, msgs []Message, stream bool, on
 		}
 		if chunk.Out != nil {
 			usage.Out = *chunk.Out
+		}
+		if chunk.PromptMS > 0 {
+			usage.PromptMS = float64(chunk.PromptMS) / 1e6
+		}
+		if chunk.PredictMS > 0 {
+			usage.PredictedMS = float64(chunk.PredictMS) / 1e6
 		}
 		if chunk.In != nil && chunk.Out != nil {
 			usage.Reported = true

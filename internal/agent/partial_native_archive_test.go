@@ -138,7 +138,7 @@ func TestPartialNativeCapturedMLX48ArchivedAndResumable(t *testing.T) {
 	}
 	dir := t.TempDir()
 	r, want, transportErr := failedNativeFixture(t, raw, thinkingLog{dir: dir})
-	if len(want.Message.Reasoning) != 97110 || want.FinishReason != "length" || want.Usage != (llm.Usage{In: 8301, Out: 16384, Reported: true}) {
+	if len(want.Message.Reasoning) != 97110 || want.FinishReason != "length" || want.Usage != (llm.Usage{In: 8301, Out: 16384, Cached: 2061, Reported: true}) {
 		t.Fatalf("capture identity drift: reasoning=%d %+v", len(want.Message.Reasoning), want.Usage)
 	}
 	_, _, err = r.Run(context.Background(), "retain captured failed reasoning")

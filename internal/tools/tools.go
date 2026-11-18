@@ -3,6 +3,7 @@ package tools
 
 import (
 	"io"
+	"path/filepath"
 
 	"specific-harness/internal/config"
 	"specific-harness/internal/tool"
@@ -11,7 +12,26 @@ import (
 	"specific-harness/internal/tools/fetch"
 	"specific-harness/internal/tools/files"
 	"specific-harness/internal/tools/search"
+	waittool "specific-harness/internal/tools/wait"
+	"specific-harness/internal/tools/workflowtools"
 )
+
+// LibraryPath returns the shared reusable workflow library file. The
+// library is user-scoped, not project-scoped.
+func LibraryPath(workspace string) string {
+	if dir, err := config.UserDataDir(); err == nil && dir != "" {
+		return filepath.Join(dir, "workflow-library.json")
+	}
+	return filepath.Join(workspace, ".caliper", "workflow-library.json")
+}
+
+func registerLibraryTools(reg *tool.Registry, cfg config.Config, root string) {
+	path := LibraryPath(root)
+	reg.Register(waittool.New(root, cfg.PromptCatalog))
+	reg.Register(workflowtools.BuildBlock(path, cfg.PromptCatalog))
+	reg.Register(workflowtools.BuildWorkflow(path, cfg.PromptCatalog))
+	reg.Register(workflowtools.LibraryWorkflow(path, cfg.PromptCatalog))
+}
 
 // RegisterAll adds every built-in tool. in/out serve the ask tool;
 // callers pass real stdio (CLI) or buffers (tests). askFunc, when
@@ -24,6 +44,7 @@ func RegisterAll(reg *tool.Registry, cfg config.Config, in io.Reader, out io.Wri
 	reg.Register((&files.Workspace{Path: ".", Caps: cfg.Tools.Bash, Prompts: cfg.PromptCatalog}).FindDirDefinition())
 	reg.Register(fetch.New(cfg.Tools.Fetch, cfg.PromptCatalog))
 	reg.Register(ask.New(&ask.Prompter{In: in, Out: out, Ask: askFunc}, cfg.PromptCatalog))
+	registerLibraryTools(reg, cfg, ".")
 	reg.Register(helpDefinition(cfg, reg, cfg.PromptCatalog, current...))
 }
 
@@ -39,6 +60,7 @@ func RegisterAt(reg *tool.Registry, cfg config.Config, in io.Reader, out io.Writ
 	}
 	reg.Register(fetch.New(cfg.Tools.Fetch, cfg.PromptCatalog))
 	reg.Register(ask.New(&ask.Prompter{In: in, Out: out, Ask: askFunc}, cfg.PromptCatalog))
+	registerLibraryTools(reg, cfg, w.Path)
 	reg.Register(helpDefinition(cfg, reg, cfg.PromptCatalog, current...))
 	for _, d := range w.Definitions() {
 		reg.Register(d)

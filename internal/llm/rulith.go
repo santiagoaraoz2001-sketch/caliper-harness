@@ -123,6 +123,31 @@ func (c *Client) chatRulithRaw(ctx context.Context, msgs []Message, tools []Tool
 		}
 		return nil
 	}
+	initialRawLen := len(prefix.Raw)
+	// One unfinished-generation path also covers a stream that stops before
+	// its terminal receipt. If literal output has advanced inside an open
+	// native frame, the exact rendered prompt plus those bytes is the same
+	// physical prefix used for a length terminal; usage may be unreported.
+	interrupted := func(cause error) (Reply, error) {
+		if ctx.Err() != nil || output.Len() <= initialRawLen || !utf8.ValidString(output.String()) ||
+			!(projection.reasoning || NativeRawIncomplete(output.String(), prefix.InitialState)) {
+			return reply, cause
+		}
+		next := prefix.Clone()
+		next.Raw = output.String()
+		if reply.Usage.Reported {
+			next.GeneratedTokens += reply.Usage.Out
+		}
+		if err := next.Validate(); err != nil {
+			return reply, cause
+		}
+		if continuing && !extendsPrefix(previous.Prefix, next) {
+			return reply, cause
+		}
+		prefix = next
+		reply.Prefix, reply.OutputLimit, reply.FinishReason = next, true, "length"
+		return reply, fmt.Errorf("%w: %w", ErrIncompleteNativeResponse, cause)
+	}
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 64<<10), 32<<20)
 	for scanner.Scan() {
@@ -131,12 +156,12 @@ func (c *Client) chatRulithRaw(ctx context.Context, msgs []Message, tools []Tool
 			continue
 		}
 		if !strings.HasPrefix(line, "data:") {
-			return reply, fmt.Errorf("Rulith stream contains a non-SSE record; response is partial")
+			return interrupted(fmt.Errorf("Rulith stream contains a non-SSE record; response is partial"))
 		}
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "[DONE]" {
 			if terminal == nil {
-				return reply, fmt.Errorf("Rulith stream ended without a terminal receipt")
+				return interrupted(fmt.Errorf("Rulith stream ended without a terminal receipt"))
 			}
 			continue
 		}
@@ -145,10 +170,10 @@ func (c *Client) chatRulithRaw(ctx context.Context, msgs []Message, tools []Tool
 		}
 		var chunk rulithChunk
 		if !utf8.ValidString(data) || decodeSingle([]byte(data), &chunk) != nil {
-			return reply, fmt.Errorf("Rulith stream contains an invalid JSON record; response is partial")
+			return interrupted(fmt.Errorf("Rulith stream contains an invalid JSON record; response is partial"))
 		}
 		if message, refused := errorMessage(chunk.Error); refused {
-			return reply, fmt.Errorf("Rulith native completion refused: %s", message)
+			return interrupted(fmt.Errorf("Rulith native completion refused: %s", message))
 		}
 		if chunk.Index != 0 {
 			return reply, fmt.Errorf("Rulith stream changed response index")
@@ -191,21 +216,28 @@ func (c *Client) chatRulithRaw(ctx context.Context, msgs []Message, tools []Tool
 				return reply, fmt.Errorf("Rulith terminal omitted valid usage counts")
 			}
 			reply.Usage = Usage{In: *chunk.TokensEvaluated, Out: *chunk.TokensPredicted, Reported: true}
+			if chunk.TokensCached != nil && *chunk.TokensCached > 0 {
+				reply.Usage.Cached = *chunk.TokensCached
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return reply, fmt.Errorf("Rulith native stream broke: %w; response is partial", err)
+		return interrupted(fmt.Errorf("Rulith native stream broke: %w; response is partial", err))
 	}
 	if err := ctx.Err(); err != nil {
 		return reply, err
 	}
 	if terminal == nil {
-		return reply, fmt.Errorf("Rulith native stream omitted a terminal receipt; response is partial")
+		return interrupted(fmt.Errorf("Rulith native stream omitted a terminal receipt; response is partial"))
 	}
-	switch terminal.StopType {
-	case "limit":
+	// A generation ends only at a clean terminal with every frame closed.
+	// A length terminal, or any stop that arrives while a native frame is
+	// still open, is the same unfinished generation: hand back the exact
+	// byte prefix so the next physical request continues from the last
+	// byte with nothing inserted.
+	resumable := func(cause error) (Reply, error) {
 		if output.Len() <= len(prefix.Raw) || reply.Usage.Out == 0 {
-			return reply, fmt.Errorf("Rulith output limit made no prefix progress")
+			return reply, fmt.Errorf("Rulith unfinished generation made no prefix progress")
 		}
 		prefix.Raw = output.String()
 		prefix.GeneratedTokens += reply.Usage.Out
@@ -216,20 +248,56 @@ func (c *Client) chatRulithRaw(ctx context.Context, msgs []Message, tools []Tool
 			return reply, fmt.Errorf("Rulith unfinished response did not extend the same literal byte prefix")
 		}
 		reply.Prefix, reply.OutputLimit, reply.FinishReason = prefix, true, "length"
-		return reply, c.finishError("length")
+		return reply, cause
+	}
+	incomplete := projection.reasoning || NativeRawIncomplete(output.String(), prefix.InitialState)
+	switch terminal.StopType {
+	case "limit":
+		return resumable(c.finishError("length"))
 	case "eos":
+		if incomplete {
+			return resumable(fmt.Errorf("%w: Rulith stopped inside an unclosed native frame", ErrIncompleteNativeResponse))
+		}
 		if err := projection.finish(deliver); err != nil {
 			return reply, err
+		}
+		if len(tools) == 0 {
+			// No-tool callers consume ordinary message fields. The raw bytes
+			// remain authoritative in RawNative; this only republishes the
+			// same completed text, split at one leading reasoning frame.
+			reply.Message.Content, reply.Message.ReasoningContent = visibleRawText(output.String(), prefix.InitialState)
 		}
 		reply.FinishReason = "stop"
 		return reply, nil
 	case "word":
+		if incomplete {
+			return resumable(fmt.Errorf("%w: Rulith stopped inside an unclosed native frame", ErrIncompleteNativeResponse))
+		}
 		// No custom stop word was requested. Treat a server stop policy as
 		// incomplete unless the parser/host has an explicit matching contract.
 		return reply, fmt.Errorf("Rulith stopped at an unrequested stop word; response is partial")
 	default:
 		return reply, fmt.Errorf("Rulith returned unknown terminal stop_type %q", terminal.StopType)
 	}
+}
+
+// visibleRawText splits a completed no-tool raw generation into ordinary
+// message fields: one leading reasoning frame becomes reasoning content and
+// every following byte is content, verbatim. Tool generations never use it;
+// the owning registry parses their raw bytes.
+func visibleRawText(raw, initialState string) (content, reasoning string) {
+	if initialState == "reasoning" {
+		if before, after, ok := strings.Cut(raw, "</think>"); ok {
+			return after, before
+		}
+		return "", raw
+	}
+	if rest, ok := strings.CutPrefix(strings.TrimLeft(raw, " \t\r\n"), "<think>"); ok {
+		if before, after, found := strings.Cut(rest, "</think>"); found {
+			return after, before
+		}
+	}
+	return raw, ""
 }
 
 // rulithProjection observes only confirmed leading reasoning and prose. It
@@ -349,6 +417,7 @@ type rulithChunk struct {
 	Truncated       bool            `json:"truncated"`
 	TokensEvaluated *int            `json:"tokens_evaluated"`
 	TokensPredicted *int            `json:"tokens_predicted"`
+	TokensCached    *int            `json:"tokens_cached"`
 	Error           json.RawMessage `json:"error"`
 }
 

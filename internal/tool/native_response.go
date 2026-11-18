@@ -12,7 +12,9 @@ import (
 // ParseNativeResponse frames a completed raw native reply. It never executes or
 // repairs calls: any rejected frame discards the entire message. Schema
 // admission and correlated refusals remain owned by ordinary native dispatch. Transport owns
-// completion/continuation; a truncated transfer must not be passed here.
+// completion/continuation; an unclosed frame that still reaches this boundary
+// is reported as llm.ErrIncompleteNativeResponse so the caller can continue
+// the same generation instead of failing it.
 func (r *Registry) ParseNativeResponse(raw, initialState, callPrefix string) (llm.Message, error) {
 	msg := llm.Message{Role: "assistant"}
 	if !utf8.ValidString(raw) || (initialState != "normal" && initialState != "reasoning") {
@@ -23,7 +25,7 @@ func (r *Registry) ParseNativeResponse(raw, initialState, callPrefix string) (ll
 	if initialState == "reasoning" {
 		i := strings.Index(s, "</think>")
 		if i < 0 {
-			return llm.Message{}, fmt.Errorf("unclosed native reasoning")
+			return llm.Message{}, fmt.Errorf("%w: unclosed native reasoning", llm.ErrIncompleteNativeResponse)
 		}
 		msg.ReasoningContent, s = s[:i], s[i+len("</think>"):]
 	}
@@ -38,11 +40,11 @@ func (r *Registry) ParseNativeResponse(raw, initialState, callPrefix string) (ll
 		switch {
 		case strings.HasPrefix(s, "<think>"):
 			if reasoned || strings.TrimSpace(msg.Content) != "" || len(msg.ToolCalls) != 0 {
-				return llm.Message{}, fmt.Errorf("unexpected native reasoning boundary")
+				return llm.Message{}, fmt.Errorf("%w: unexpected native reasoning boundary", llm.ErrIncompleteNativeResponse)
 			}
 			end := strings.Index(s[len("<think>"):], "</think>")
 			if end < 0 {
-				return llm.Message{}, fmt.Errorf("unclosed native reasoning")
+				return llm.Message{}, fmt.Errorf("%w: unclosed native reasoning", llm.ErrIncompleteNativeResponse)
 			}
 			end += len("<think>")
 			msg.ReasoningContent, s = s[len("<think>"):end], s[end+len("</think>"):]
@@ -67,7 +69,7 @@ func (r *Registry) ParseNativeResponse(raw, initialState, callPrefix string) (ll
 			strings.HasPrefix(s, "<function=") || strings.HasPrefix(s, "</function>") ||
 			strings.HasPrefix(s, "<parameter=") || strings.HasPrefix(s, "</parameter>") ||
 			strings.HasPrefix(s, "<tool_call") || strings.HasPrefix(s, "</tool_call") || strings.HasPrefix(s, "<think") || strings.HasPrefix(s, "</think"):
-			return llm.Message{}, fmt.Errorf("unexpected native framing boundary")
+			return llm.Message{}, fmt.Errorf("%w: unexpected native framing boundary", llm.ErrIncompleteNativeResponse)
 		default:
 			msg.Content += "<"
 			s = s[1:]
@@ -189,7 +191,7 @@ func nativeEnvelope(s string) (map[string]json.RawMessage, string, error) {
 		fields[key] = value
 	}
 	if tok, err := d.Token(); err != nil || tok != json.Delim('}') {
-		return nil, s, fmt.Errorf("unclosed native JSON envelope")
+		return nil, s, fmt.Errorf("%w: unclosed native JSON envelope", llm.ErrIncompleteNativeResponse)
 	}
 	return fields, s[d.InputOffset():], nil
 }

@@ -53,7 +53,7 @@ func TestBehaviorInjectsAsOwnMessage(t *testing.T) {
 		t.Fatalf("seen=%d", len(model.seen))
 	}
 	msgs := model.seen[0]
-	if len(msgs) != 3 || msgs[0].Role != "system" || msgs[1].Role != "system" || msgs[1].Content != "Always say PINEAPPLE." || msgs[2].Role != "user" {
+	if len(msgs) != 4 || msgs[0].Role != "system" || msgs[1].Role != "system" || msgs[1].Content != "Always say PINEAPPLE." || msgs[2].Role != "user" || msgs[3].Role != "system" {
 		t.Errorf("msgs=%+v", msgs)
 	}
 	var found bool
@@ -78,8 +78,8 @@ func TestBehaviorEmptyOmits(t *testing.T) {
 		if _, _, err := r.Run(context.Background(), "go"); err != nil {
 			t.Fatal(err)
 		}
-		if len(model.seen[0]) != 2 {
-			t.Errorf("behavior %q: msgs=%d, want 2", b, len(model.seen[0]))
+		if len(model.seen[0]) != 3 {
+			t.Errorf("behavior %q: msgs=%d, want 3", b, len(model.seen[0]))
 		}
 		for _, k := range sink.kinds {
 			if k == "behavior" {
@@ -138,15 +138,15 @@ func TestCodingSystemPrefixSurvivesCompactionResume(t *testing.T) {
 			systems = append(systems, msg)
 		}
 	}
-	if len(systems) != 2 {
-		t.Fatalf("merged base+guide/Behavior count=%d", len(systems))
+	if len(systems) != 3 {
+		t.Fatalf("merged base+guide/Behavior/dynamic count=%d", len(systems))
 	}
 	if strings.Count(systems[0].Content, prompts.Builtin().Text("system.coding.direct")) != 1 || systems[1].Content != r.Behavior {
 		t.Fatal("guide is not owned by base or base-like Behavior was replaced")
 	}
 	c := r.Continuation.Clone()
 	prefix := []session.Entry{}
-	for _, msg := range systems {
+	for _, msg := range systems[:2] {
 		prefix = append(prefix, session.Entry{Kind: "injected", Message: msg.Clone()})
 	}
 	c.Entries = append(prefix, c.Entries...)
@@ -163,7 +163,7 @@ func TestCodingSystemPrefixSurvivesCompactionResume(t *testing.T) {
 		t.Fatalf("compaction=%v err=%v", ran, err)
 	}
 	summaryInput := m.seen[len(m.seen)-1][1].Content
-	for _, host := range systems {
+	for _, host := range systems[:2] {
 		if strings.Contains(summaryInput, host.Content) {
 			t.Fatal("system bytes entered summary input")
 		}
@@ -187,19 +187,18 @@ func TestCodingSystemPrefixSurvivesCompactionResume(t *testing.T) {
 			rebuilt = append(rebuilt, msg)
 		}
 	}
-	// Resume changes only the owning initial budget, not role/guide/Behavior bytes.
-	expected := append([]llm.Message(nil), systems...)
+	// Resume changes only the owning dynamic budget, not role/guide/Behavior bytes.
+	expected := append([]llm.Message(nil), systems[:2]...)
 	priorBudget := fmt.Sprintf(`"StepLimit":%d,"RemainingSteps":%d`, r.MaxSteps, r.MaxSteps)
 	currentBudget := fmt.Sprintf(`"StepLimit":%d,"RemainingSteps":%d`, r2.MaxSteps, r2.MaxSteps)
-	if !strings.Contains(expected[0].Content, priorBudget) {
+	if !strings.Contains(systems[2].Content, priorBudget) {
 		t.Fatal("prior host budget missing")
 	}
-	expected[0].Content = strings.Replace(expected[0].Content, priorBudget, currentBudget, 1)
-	if !reflect.DeepEqual(expected, rebuilt) {
+	if len(rebuilt) != 3 || !strings.Contains(rebuilt[2].Content, currentBudget) || !reflect.DeepEqual(expected, rebuilt[:2]) {
 		t.Fatal("base/guide/Behavior changed or duplicated after prune/Compact/encoded restore")
 	}
 	bytes := 0
-	for _, msg := range systems {
+	for _, msg := range systems[:2] {
 		bytes += len(msg.Content)
 	}
 	t.Logf("actual text-transport system-prefix bytes=%d messages=%d; tokenizer occupancy unmeasured", bytes, len(systems))

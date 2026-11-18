@@ -449,7 +449,7 @@ func TestTypedPreparationNativeAndTextCorrelation(t *testing.T) {
 			sink := &codingSink{dir: filepath.Join(dir, "sessions")}
 			// Three actual operations and one request inspecting their receipts;
 			// the fixture budget ends this probe, not a thinking-only reply.
-			r, _, err := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, "root")}, Cfg: cfg, Store: s, Server: server.URL, Model: "fixture", Window: 32768, MaxSteps: 4, Session: sink, SessionID: "wire"}, "repair source")
+			r, _, err := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: selectedFixtureScope(t, s, "root")}, Cfg: cfg, Store: s, Server: server.URL, Model: "fixture", Window: 131072, MaxSteps: 4, Session: sink, SessionID: "wire"}, "repair source")
 			if err != nil {
 				t.Fatal(err)
 			}

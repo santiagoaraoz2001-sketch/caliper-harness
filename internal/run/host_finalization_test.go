@@ -34,7 +34,7 @@ func TestHostConfiguredCheckPublicFactoryPreservesModelClaim(t *testing.T) {
 	}
 	defer s.Close()
 	approvals := 0
-	r, _, err := assignedCodingNew(t, Deps{Store: s, Cfg: cfg, Server: cfg.Model.Server, Model: "fixture", MaxSteps: 3, Window: 32768, Session: sink, SessionID: "host", AskYesNo: func(_ context.Context, p string) bool {
+	r, _, err := assignedCodingNew(t, Deps{Store: s, Cfg: cfg, Server: cfg.Model.Server, Model: "fixture", MaxSteps: 3, Window: 131072, Session: sink, SessionID: "host", AskYesNo: func(_ context.Context, p string) bool {
 		approvals++
 		if _, err := os.Stat("host-marker"); !os.IsNotExist(err) {
 			t.Error("effect before approval")
@@ -188,7 +188,7 @@ func TestHostConfiguredCheckSettlementAndRevision(t *testing.T) {
 				builder = New
 				bindDecisionFixture(t, &cfg, nil)
 			}
-			r, _, err := builder(Deps{Store: owned, Cfg: cfg, Server: srv.URL, Model: "fixture", MaxSteps: steps, Window: 32768, Session: sink, SessionID: "host", AskYesNo: func(context.Context, string) bool {
+			r, _, err := builder(Deps{Store: owned, Cfg: cfg, Server: srv.URL, Model: "fixture", MaxSteps: steps, Window: 131072, Session: sink, SessionID: "host", AskYesNo: func(context.Context, string) bool {
 				actualApprovals++
 				if scenario == "cancelled approval" {
 					cancel()
