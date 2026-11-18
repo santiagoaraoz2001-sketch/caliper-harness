@@ -63,9 +63,10 @@ claimed result outrun an observed one.
   version from the start of a run, including when D1 is off. Changes apply
   to the next run; earlier versions remain in the state graph. Optional
   `decision.style_enforcement` adds final-answer advice, not a source audit.
-- **Keyboard-driven TUI.** Tabs, plan navigation, live tool activity, and
-  model/settings management without leaving the terminal — plus a headless
-  `run` mode for scripts and evaluation.
+- **Keyboard-driven TUI.** Tabs, three composer drafts, prompt history, plan
+  navigation, live tool activity, files and live diffs, comments, tests,
+  sessions, decisions, and model/settings management without leaving the
+  terminal — plus a headless `run` mode for scripts and evaluation.
 
 ## Quick start
 
@@ -177,16 +178,82 @@ See [Server and model connections](SERVER-MODELS.md) for details.
 
 | Command | What it does |
 |---|---|
-| `caliper-harness` | Open the interactive TUI |
+| `caliper-harness` or `caliper-harness tui` | Open the interactive TUI |
+| `caliper-harness version` | Print the installed version |
 | `caliper-harness run --config ... --prompt '...'` | Headless task; changed project work requires a declared check |
 | `caliper-harness chat` | One model prompt, no agent tools |
+| `caliper-harness tool [name]` | List standalone primitive schemas or show one schema |
 | `caliper-harness sessions [id]` | List past runs / show one run |
 | `caliper-harness judgments <id>` | Summarize one run's decision judgments |
+| `caliper-harness decision` | Ask the configured decision model to judge supplied options |
 | `caliper-harness graph --query '...'` | Run one in-process GraphQL operation |
 | `caliper-harness list plans` or `caliper-harness list approaches <plan-id>` | Browse planning state |
 | `caliper-harness launch <approach-id>` | Fan out one approach |
+| `caliper-harness retire <id>` | Retire one complete plan or approach |
+| `caliper-harness template <name>` | Render an existing scaffold |
 | `caliper-harness config` | Print the effective YAML configuration |
 | `caliper-harness hw` | Hardware profile and limits |
+
+## Inside the TUI
+
+The terminal interface is the primary workspace. Its views are Chat, Diff,
+Changes, Plans, the current Plan, Journey (a plan/approach and its recorded
+attempts), Library, Sessions, Decisions, Workflows, Files, Tests, Settings,
+Status, Models & Servers, and Setup. `/help` lists the current commands and
+keys in the installed build.
+
+**Composer and navigation**
+
+- Tabs: `Ctrl+T` new, `Ctrl+N`/`Ctrl+P` switch, `Ctrl+W` close, and
+  `Ctrl+O`/`Ctrl+G` back/forward. Feature screens can be opened without losing
+  the active conversation.
+- Three composer drafts: `Shift+Left`/`Shift+Right` switch drafts;
+  `Shift+Up`/`Shift+Down` move through prompt history; Enter sends and
+  `Ctrl+J` inserts a newline.
+- `/chat` returns to the active conversation. `/new` starts a session,
+  `/stop` stops the current run, `/retry` repeats the last prompt, `/tools`
+  selects coding or full tool exposure, and `/auth` selects the `yolo`,
+  `risky`, or `all` authorization mode.
+- `/btw <text>` interjects a steering note into running work. `/workflow`
+  focuses one owning workflow node, while `/workflows` shows approach launches
+  and retries.
+
+**Plans, methods, and knowledge**
+
+- `/plans` browses Plan → Approach → Task trees. `/plan` opens the current
+  plan with its approval summary and drill-down; elaborations can be created,
+  read, submitted, approved, or sent back from the owning planning flow.
+- `/library` browses reusable workflow blocks and published workflows by
+  version. Models can also author methods with `build_block` and
+  `build_workflow`, and attach an exact published version with
+  `library_workflow`.
+- `/style`, `/remember`, and `/recall` manage versioned project rules and
+  searchable project/shared memory. Domain guidance and project knowledge are
+  stored as linked, versioned graph documents rather than one large prompt.
+
+**Files, changes, and feedback**
+
+- `/files` browses and opens project files inside the TUI. `/diff` watches the
+  workspace and follows the latest observed file changes unless you move away
+  from the latest event or filter to one file; `/changes` shows retained
+  history for the open file, and `/open-diff` opens the captured source for a
+  recorded change rather than rereading whatever is on disk now.
+- `/comment [ref] [lines] <text>` queues targeted feedback for the next turn.
+  The ref can identify a file location or a plan item; `f` starts a scoped
+  comment from Diff and Plans. `/goto <line>` moves the open viewer, and
+  `/turns` returns to earlier conversation turns.
+
+**Runtime, evidence, and context**
+
+- `/status` is a read-only runtime dashboard. `/decisions` shows decision-model
+  activity, `/sessions` browses durable past runs, and `/tests` manages the
+  test suites described below.
+- `/context` shows measured context use, `/compact` requests compaction now,
+  and `/clear` clears only the chat view. Run records keep replies, tool
+  receipts, confidence-bearing judgments, file effects, and final outcomes.
+- `/setup` returns to first-use setup, `/settings` edits configuration,
+  `/manage` and `/models` manage model/server connections, `/update` checks
+  and installs an update for the next launch, and `/quit` exits.
 
 Plans created through the owner CLI graph route need an explicit project binding
 before launch. Run the following from the intended project directory, using the
@@ -438,10 +505,20 @@ template and examples.
 
 ## Release status
 
-Caliper is an early development release. Mac GPU runs exercise planning,
-task claims, edits, paired checks, independent review and handoff. Results depend
-on the model and task; D1 can miss repetitive reasoning, and passing checks plus
-reviewer agreement do not guarantee correctness.
+Caliper is an early development release. Supported use in v0.3.0 is local:
+Caliper connects to local OpenAI-compatible model servers and supported native
+local runtimes; it does not include a built-in cloud provider integration.
+Mac GPU runs exercise planning, task claims, edits, paired checks, independent
+review and handoff. Results depend on the model and task; D1 can miss repetitive
+reasoning, and passing checks plus reviewer agreement do not guarantee
+correctness.
+
+The dedicated converter for turning an external Markdown skill into a domain
+graph or workflow graph is **not in v0.3.0**. The underlying graph and
+workflow authoring tools are present, so a model can perform that conversion
+manually with `appendKnowledge`, `build_block`, and `build_workflow`; the
+dedicated, lossless conversion path is registered for v0.3.1 in
+[the v0.3.1 feature register](docs/v0.3.1-features.md).
 
 Published packages pass native build, installation, runtime-import
 and terminal UI checks on macOS arm64, Windows x64 and Linux x64/ARM64.
