@@ -104,6 +104,27 @@ func TestProgressContextCapacityReductionPreservesCoreAndOwnerRecords(t *testing
 	}
 }
 
+// Answered-question bodies (the ask call's full options JSON) are the
+// largest optional mass in real packets. Capacity reduction must be able
+// to stub them while keeping the recorded picks (tool results) intact;
+// protecting the bodies strands the whole advisory judgment.
+func TestProgressReductionStubsAnsweredQuestionBodiesKeepsPicks(t *testing.T) {
+	big := strings.Repeat("option text ", 4000)
+	p := progressPacket{AnsweredQuestions: []session.Entry{
+		{Message: llm.Message{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "ask-1", Name: "ask", Arguments: `{"question":"Palette?","options":"` + big + `"}`}}}},
+		{Message: llm.Message{Role: "tool", ToolCallID: "ask-1", Name: "ask", Content: "tool result:\n1: Blue"}},
+	}}
+	if !p.reduceForCapacity() {
+		t.Fatal("reduction refused to stub an answered-question body")
+	}
+	if args := p.AnsweredQuestions[0].Message.ToolCalls[0].Arguments; args != "" {
+		t.Fatalf("ask arguments not stubbed: %d bytes remain", len(args))
+	}
+	if got := p.AnsweredQuestions[1].Message.Content; !strings.Contains(got, "1: Blue") {
+		t.Fatalf("recorded pick lost: %q", got)
+	}
+}
+
 func TestProgressPreflightReducesBeforeJudgeInference(t *testing.T) {
 	r, w := largeProgressPacket(t)
 	preflights, judged := 0, 0

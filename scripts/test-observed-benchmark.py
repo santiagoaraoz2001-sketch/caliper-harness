@@ -641,6 +641,21 @@ class ControllerTests(unittest.TestCase):
         self.assertIn('Orange', receipts[0]['result'])
         self.assertFalse(state.pending)
 
+    def test_native_ask_result_confirms_by_call_id_when_comment_text_absent(self):
+        # Picker delivery can land the submitted prose in the comment box
+        # while the recorded result carries only the picks (comment empty).
+        # The matching call_id plus a numbered result is the delivery proof;
+        # requiring the prose inside the result strands the pending record.
+        state = observed.Observation('Build game')
+        state.event('main', {'time': datetime.fromtimestamp(time.time() + 0.001, timezone.utc).isoformat(), 'kind': 'prompt', 'text': 'Build game'})
+        state.event('main', {'time': datetime.fromtimestamp(time.time() + 0.001, timezone.utc).isoformat(), 'kind': 'call_resolution', 'text': json.dumps({
+            'ToolCallID': 'ask-7', 'Name': 'ask', 'Arguments': {'question': 'Palette?'}})})
+        state.sent('choice', 'a long prose answer that the picker drops from the result comment')
+        entry = {'time': datetime.fromtimestamp(time.time() + 0.001, timezone.utc).isoformat(), 'kind': 'output', 'message': {'role': 'tool', 'tool_call_id': 'ask-7', 'content': 'tool result:\n1: Blue'}}
+        receipts = state.event('main', {'time': datetime.fromtimestamp(time.time() + 0.001, timezone.utc).isoformat(), 'kind': 'native_result', 'text': json.dumps(entry)})
+        self.assertEqual(receipts[0]['id'], 'choice')
+        self.assertFalse(state.pending)
+
     def test_native_keyboard_choice_and_final_do_not_infer_completion(self):
         state = observed.Observation('Build game')
         state.event('main', {'time': datetime.fromtimestamp(time.time() + 0.001, timezone.utc).isoformat(), 'kind': 'prompt', 'text': 'Build game'})

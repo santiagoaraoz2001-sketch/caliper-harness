@@ -172,21 +172,33 @@ func TestReadinessApprovalSummaryFallsBackWithoutOverlongModelText(t *testing.T)
 	}
 }
 
-// Unsure-band verdicts on a mechanically complete brief admit without
-// asking: deterministic structure is primary, the probability score is
-// advisory in the unsure band (approved contract change).
+// Unsure-band verdicts that lean ready on a mechanically complete brief
+// admit without asking. An unsure verdict that leans off-goal is an
+// objection: it must surface through the ask/waiver path instead of
+// being silently admitted on structure alone.
 func TestReadyCheckUnsureAdmitsStructurally(t *testing.T) {
-	for _, option := range []string{servesGoal, offGoal} {
+	for _, tc := range []struct {
+		option  string
+		wantErr bool
+		asks    int
+	}{
+		{servesGoal, false, 0},
+		{offGoal, true, 1},
+	} {
 		_, aid, d := gateDeps(t, 2)
-		d.Judge = stubVerdict(decision.Verdict{Option: option, Confidence: 0.5}, nil)
+		d.Judge = stubVerdict(decision.Verdict{Option: tc.option, Confidence: 0.5}, nil)
 		asks := 0
 		d.Ask = func(_ context.Context, _ string) bool { asks++; return false }
 		d.In = strings.NewReader("n\n")
-		if err := ReadyCheck(context.Background(), d, aid); err != nil {
-			t.Errorf("option=%q err=%v", option, err)
+		err := ReadyCheck(context.Background(), d, aid)
+		if tc.wantErr && err == nil {
+			t.Errorf("option=%q expected refusal, got nil", tc.option)
 		}
-		if asks != 0 {
-			t.Errorf("option=%q asked %d times, want 0", option, asks)
+		if !tc.wantErr && err != nil {
+			t.Errorf("option=%q err=%v", tc.option, err)
+		}
+		if asks != tc.asks {
+			t.Errorf("option=%q asked %d times, want %d", tc.option, asks, tc.asks)
 		}
 	}
 }
@@ -340,7 +352,7 @@ func TestReadyCheckLogsJudgmentWithResolution(t *testing.T) {
 		{"admitted", decision.Verdict{Option: servesGoal, Confidence: 0.9}, "", "admitted", false},
 		{"refused", decision.Verdict{Option: offGoal, Confidence: 0.9}, "", "refused", true},
 		{"admitted-structural", decision.Verdict{Option: servesGoal, Confidence: 0.5}, "", "admitted-structural", false},
-		{"admitted-structural-offgoal", decision.Verdict{Option: offGoal, Confidence: 0.5}, "", "admitted-structural", false},
+		{"offgoal-lowconf-asks", decision.Verdict{Option: offGoal, Confidence: 0.5}, "", "asked-refused", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

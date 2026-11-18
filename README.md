@@ -505,7 +505,7 @@ template and examples.
 
 ## Release status
 
-Caliper is an early development release. Supported use in v0.3.0 is local:
+Caliper is an early development release. Supported use is local:
 Caliper connects to local OpenAI-compatible model servers and supported native
 local runtimes; it does not include a built-in cloud provider integration.
 Mac GPU runs exercise planning, task claims, edits, paired checks, independent
@@ -513,12 +513,13 @@ review and handoff. Results depend on the model and task; D1 can miss repetitive
 reasoning, and passing checks plus reviewer agreement do not guarantee
 correctness.
 
-The dedicated converter for turning an external Markdown skill into a domain
-graph or workflow graph is **not in v0.3.0**. The underlying graph and
-workflow authoring tools are present, so a model can perform that conversion
-manually with `appendKnowledge`, `build_block`, and `build_workflow`; the
-dedicated, lossless conversion path is registered for v0.3.1 in
-[the v0.3.1 feature register](docs/v0.3.1-features.md).
+`convert_skill` turns an external Markdown skill into a domain graph or a
+workflow graph step by step: the host reads and outlines the source, the
+model maps one heading at a time, and publishing refuses while any source
+heading is neither mapped nor explicitly preserved. The full source text is
+always kept as its own knowledge node, domain pieces pass the same budget
+admission as hand-authored guides, and published workflows are not enabled
+automatically. See [the v0.3.1 feature register](docs/v0.3.1-features.md).
 
 Published packages pass native build, installation, runtime-import
 and terminal UI checks on macOS arm64, Windows x64 and Linux x64/ARM64.

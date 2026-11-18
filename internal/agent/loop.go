@@ -720,7 +720,8 @@ func (r *Runner) progressJudgment(ctx context.Context, input any, req decision.R
 }
 
 // Only a real native capacity refusal invokes this reduction. Original/latest
-// user intent, answered questions, latest failure and host phase remain intact.
+// user intent, answered-question picks, latest failure and host phase remain
+// intact; answered ask call bodies may be stubbed with a disclosed digest.
 // Every removed body is still in the raw session and retains an exact digest.
 // Keep concise useful evidence when omission metadata would make it larger.
 // This compares actual encoded bytes; it is not a new production limit.
@@ -742,6 +743,21 @@ func (p *progressPacket) omitSmaller(field, text string, remove, restore func())
 }
 
 func (p *progressPacket) reduceForCapacity() bool {
+	// Answered-question bodies go first: an ask call's full options JSON
+	// is the largest optional mass in real packets, and protecting it
+	// strands the whole advisory judgment. Only the call body gives way
+	// (digest disclosed); the entries and their recorded picks — the
+	// tool results — stay intact as the user's actual answers.
+	for i := range p.AnsweredQuestions {
+		message := &p.AnsweredQuestions[i].Message
+		for j := range message.ToolCalls {
+			call := &message.ToolCalls[j]
+			text := call.Arguments
+			if text != "" && p.omitSmaller(fmt.Sprintf("AnsweredQuestions[%d].ToolCalls[%d].Arguments (answered ask body; pick retained)", i, j), text, func() { call.Arguments = "" }, func() { call.Arguments = text }) {
+				return true
+			}
+		}
+	}
 	// Known review attachments were decomposed at normal projection. Unknown
 	// or restored prompts may contain unique obligations; capacity alone does
 	// not make their contents disposable.

@@ -553,7 +553,7 @@ func TestAssignedStaleOwnerRefusesBeforeGateAndCheckInvalidation(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	r, _, e := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: scope}, Cfg: cfg, Store: s, Server: srv.URL, Model: "fixture", Window: 32768, MaxSteps: 2, SessionID: "stale", Session: &codingSink{dir: filepath.Join(dir, "sessions")}, AskYesNo: func(context.Context, string) bool { approvals++; return true }}, "actual stale ownership")
+	r, _, e := New(Deps{Tools: "workflow", Continuation: session.Continuation{Workflow: scope}, Cfg: cfg, Store: s, Server: srv.URL, Model: "fixture", Window: 65536, MaxSteps: 2, SessionID: "stale", Session: &codingSink{dir: filepath.Join(dir, "sessions")}, AskYesNo: func(context.Context, string) bool { approvals++; return true }}, "actual stale ownership")
 	if e != nil {
 		t.Fatal(e)
 	}

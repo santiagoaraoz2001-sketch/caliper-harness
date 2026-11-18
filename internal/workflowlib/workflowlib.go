@@ -107,12 +107,13 @@ type Execution struct {
 }
 
 type library struct {
-	Revision   int64                 `json:"revision"`
-	Blocks     []Block               `json:"blocks,omitempty"`
-	Workflows  []Workflow            `json:"workflows,omitempty"`
-	Activation map[string]Activation `json:"activation,omitempty"`
-	Executions []Execution           `json:"executions,omitempty"`
-	NextExec   int                   `json:"next_exec"`
+	Revision    int64                 `json:"revision"`
+	Blocks      []Block               `json:"blocks,omitempty"`
+	Workflows   []Workflow            `json:"workflows,omitempty"`
+	Activation  map[string]Activation `json:"activation,omitempty"`
+	Executions  []Execution           `json:"executions,omitempty"`
+	Conversions []Conversion          `json:"conversions,omitempty"`
+	NextExec    int                   `json:"next_exec"`
 }
 
 type Store struct {

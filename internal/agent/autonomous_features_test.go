@@ -81,6 +81,19 @@ func TestDynamicPromptTailKeepsSystemMessageStable(t *testing.T) {
 	}
 }
 
+// The model must see a truthful measured remaining-context figure in
+// the run budget: window minus the larger of the retained estimate and
+// the last server-measured prompt. Without it a model can believe it is
+// out of context while tens of thousands of tokens remain.
+func TestDynamicPromptTailReportsRemainingContext(t *testing.T) {
+	r := &Runner{Prompts: prompts.Builtin(), Registry: tool.NewRegistry(prompts.Builtin()), MaxTokens: 256000}
+	r.lastMeasuredPrompt = 235900
+	tail := r.dynamicPromptTail()
+	if !strings.Contains(tail, `"ContextWindow":256000`) || !strings.Contains(tail, `"RemainingContextTokens":20100`) {
+		t.Fatalf("tail missing measured remaining context: %q", tail)
+	}
+}
+
 var errTestPlanningGate = testPlanningGateError("planning")
 
 type testPlanningGateError string

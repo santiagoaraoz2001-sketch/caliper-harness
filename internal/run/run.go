@@ -327,7 +327,7 @@ func New(d Deps, prompt string) (*agent.Runner, []string, error) {
 				}
 				view.Register(def)
 			}
-			names := []string{"read", "read_outside", "find_outside", "find_file", "find_dir", "help", "grep", "ask", "wait", "elaborate", "build_block", "build_workflow", "library_workflow"}
+			names := []string{"read", "read_outside", "find_outside", "find_file", "find_dir", "help", "grep", "ask", "wait", "elaborate", "build_block", "build_workflow", "library_workflow", "convert_skill"}
 			a := r.Continuation.Assignment
 			claimed := a != nil && r.ClaimedTaskScope(&session.WorkflowScope{Store: a.Store, Kind: "task", ID: a.TaskID})
 			if r.ClaimedTaskScope(scope) || !claimed && planningProjectCoding(context.Background(), ld, scope) == nil {
@@ -648,6 +648,7 @@ func registerOwning(reg *tool.Registry, cfg config.Config, ld launch.Deps, judge
 	}
 	reg.Register(guided)
 	reg.Register(elaborationDefinition(ld, r.SessionID, cfg.PromptCatalog))
+	reg.Register(conversionDefinition(ld, r.SessionID, cfg.PromptCatalog))
 	return nil
 }
 

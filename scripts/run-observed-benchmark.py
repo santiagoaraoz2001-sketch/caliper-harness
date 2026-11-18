@@ -419,7 +419,12 @@ class Observation:
                 if not answered and ((pending['kind'] == 'steering') != (kind in ('task_comment', 'btw_committed'))):
                     continue
                 # Empty Enter needs an actual ask result, never a consumed file.
-                if kind == 'prompt' or (answered and (not expected or expected in confirmation)) or (expected and expected == confirmation.strip()):
+                # A numbered result for the exact pending ask call confirms
+                # delivery even when the submitted prose never reached the
+                # recorded result (picker comment box); the call_id plus the
+                # actual result is the identity, not the prose echo.
+                ask_confirmed = answered and pending['ask_id'] and pending['ask_id'] == self.last_ask['call_id']
+                if kind == 'prompt' or ask_confirmed or (answered and (not expected or expected in confirmation)) or (expected and expected == confirmation.strip()):
                     receipt = {'id': identity, 'state': 'trace_confirmed', 'session': session,
                                'event': kind, 'time': event.get('time')}
                     if answered:
@@ -774,7 +779,9 @@ def main():
                             # controls are rejected, not silently stalled.
                             input_wire(text, input_mode)
                             if not observation.can_send(text, input_mode):
-                                break
+                                # A held ordinary prompt must not block
+                                # steering/answer inputs queued behind it.
+                                continue
                             if len(observation.pending) >= 50 and observation.input_kind(text, input_mode) != 'ui_action':
                                 break
                             send(identity, text, input_mode=input_mode)

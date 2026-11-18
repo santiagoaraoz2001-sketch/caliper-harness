@@ -64,6 +64,7 @@ type Runner struct {
 	// reduced before their first admission attempt. Learned from real
 	// admission, never a configured limit.
 	progressRefusedBytes int
+	lastMeasuredPrompt   int // last server-reported prompt tokens; 0 = unmeasured
 	// Set once an actual admission proves the protected remainder of an
 	// advisory packet cannot fit the judge. Nothing is truncated to force
 	// a fit; advisory attempts stop for that compaction/workflow basis.
@@ -297,6 +298,7 @@ func (r *Runner) Run(ctx context.Context, prompt string) (string, []llm.Message,
 	measurePrompt = func(u llm.Usage) {
 		if u.Reported {
 			lastMeasuredPrompt = u.In
+			r.lastMeasuredPrompt = u.In
 		}
 		ledger.Measure(u)
 	}

@@ -37,4 +37,10 @@ func TestCodingOutcomeNamesDisagreeingAcceptance(t *testing.T) {
 	if strings.Contains(reason, "configured suite passed") {
 		t.Fatalf("disagreement named when both failed: %q", reason)
 	}
+	// codingOutcome is only reached after a final model answer, so a
+	// failed check there is a deliberate stop with a red check, never a
+	// bare host failure: the reason must say so.
+	if !strings.HasPrefix(reason, "model stopped with a final answer; configured check failed:") {
+		t.Fatalf("reason does not name the deliberate stop: %q", reason)
+	}
 }

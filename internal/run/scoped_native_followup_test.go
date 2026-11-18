@@ -111,7 +111,7 @@ func TestScopedHostConfiguredCheckUsesOwningDefinition(t *testing.T) {
 			sink := &codingSink{dir: filepath.Join(dir, "sessions")}
 			approvals := 0
 			bindDecisionFixture(t, &cfg, nil)
-			r, _, e := assignedCodingNew(t, Deps{Tools: "workflow", Cfg: cfg, Store: s, Server: srv.URL, Model: "fixture", MaxSteps: 3, Window: 32768, Session: sink, SessionID: "scoped-host", Continuation: session.Continuation{Workflow: scope}, AskYesNo: func(_ context.Context, p string) bool {
+			r, _, e := assignedCodingNew(t, Deps{Tools: "workflow", Cfg: cfg, Store: s, Server: srv.URL, Model: "fixture", MaxSteps: 3, Window: 65536, Session: sink, SessionID: "scoped-host", Continuation: session.Continuation{Workflow: scope}, AskYesNo: func(_ context.Context, p string) bool {
 				approvals++
 				if _, e := os.Stat("marker"); !os.IsNotExist(e) {
 					t.Error("effect before approval")

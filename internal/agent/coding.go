@@ -457,6 +457,10 @@ func (r *Runner) codingOutcome() (outcome.Status, string) {
 		}
 		return outcome.Completed, "declared check passed; coverage/test count unknown"
 	}
+	// codingOutcome is only reached after a final model answer, so a
+	// failed check here is a deliberate stop with a red check. Name it
+	// that way; a bare "command exited1" reads as a host crash.
+	const stoppedPrefix = "model stopped with a final answer; configured check failed: "
 	if c != nil && c.Receipt != nil && c.Receipt.Acceptance != nil && c.Receipt.Acceptance.Status == "failed" {
 		// Same episode, same workspace revision: if the configured
 		// suite passed while the frozen acceptance failed, the two
@@ -465,12 +469,12 @@ func (r *Runner) codingOutcome() (outcome.Status, string) {
 		// discover tests) instead of reporting a plain product
 		// failure; remediation then revises the command first.
 		if c.Receipt.Status == "passed" {
-			return outcome.Failed, "behavioral acceptance failed while the configured suite passed — the commands disagree, so the frozen acceptance command itself may be invalid; revise it before treating this as a product failure: " + c.Receipt.Acceptance.Reason
+			return outcome.Failed, stoppedPrefix + "behavioral acceptance failed while the configured suite passed — the commands disagree, so the frozen acceptance command itself may be invalid; revise it before treating this as a product failure: " + c.Receipt.Acceptance.Reason
 		}
-		return outcome.Failed, "behavioral acceptance failed: " + c.Receipt.Acceptance.Reason
+		return outcome.Failed, stoppedPrefix + "behavioral acceptance failed: " + c.Receipt.Acceptance.Reason
 	}
 	if c != nil && c.Receipt != nil && c.Receipt.Status == "failed" {
-		return outcome.Failed, c.Receipt.Reason
+		return outcome.Failed, stoppedPrefix + c.Receipt.Reason
 	}
 	return outcome.Stopped, r.Prompts.Text("verification.current_check_missing")
 }

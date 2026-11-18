@@ -69,7 +69,7 @@ func TestEmittedPlanningRoleMatchesActualAssignmentRoutes(t *testing.T) {
 			cfg.Auth.Mode, cfg.Recall.TopN, cfg.Coding.CheckCommand = config.AuthYOLO, 0, "true"
 			cfg.Model.Runtime, cfg.Model.ToolProtocol = "openai", "structured"
 			cfg.Templates.Path = assignedTemplates()
-			d := Deps{Tools: "coding", Cfg: cfg, Store: s, Server: server.URL, Model: "component-capture", MaxSteps: 1, Window: 32768}
+			d := Deps{Tools: "coding", Cfg: cfg, Store: s, Server: server.URL, Model: "component-capture", MaxSteps: 1, Window: 65536}
 			if mode != "ordinary" {
 				d.Continuation = session.Continuation{Workflow: selectedFixtureScope(t, s, task.ID)}
 			}

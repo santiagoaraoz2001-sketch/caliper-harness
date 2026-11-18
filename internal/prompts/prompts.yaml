@@ -357,6 +357,9 @@ texts:
     Inspect the responsible runtime source. For a reported defect, inspect its distinguishing
     regression; for a new deliverable, inspect assertions of its requested behavior. Compare them with the
     request/target; authored current/sketch and suite exit0 alone do not establish coverage or correctness.
+    If the worker changed tests, compare each changed assertion against the frozen brief: a test
+    weakened to fit the implementation (a stricter brief claim replaced by a looser assertion) is a
+    finding, not coverage, even when the suite is green.
     Distinguish inherited worker claims from your own observations. Judge checks against their typed
     workspace, commands and attempt; a probe from another directory does not establish failure of the pinned check.
     Use read/search and saved evidence for frozen Verify actions; only the bound check may execute commands.
@@ -1573,6 +1576,7 @@ texts:
   # Focused help.elaborate documentation; executable schema remains Go-owned.
   # Fields: none. Supplied by the owning Go caller.
   help.elaborate: "## help.elaborate\nSave explanation and sign-off state on one actual Plan, Approach, or Task. First use action=get with kind and id. To revise, use action=set with purpose, inputs, evidence, risks, and expected_previous_id equal to the latest returned ID (empty for version 1); each set creates a new immutable draft version. Use action=submit to mark a draft pending. Add request_decision=true to set or submit only when the user should decide now; yes records approved and no records changes_requested for that exact version. The /plan detail shows the same record and lets the user approve with a or request changes with x. A chat explanation alone is not a saved elaboration or approval."
+  help.convert_skill: "## help.convert_skill\nstart opens a draft (target domain|workflow); add maps one heading per call; publish refuses unmapped, unpreserved headings."
 
 
   # Model-only operating-guide overview; active schemas are still assembled by Go.
@@ -3917,4 +3921,20 @@ texts:
     Return one supported verdict using the evidence already gathered. Begin with exactly one first-line form:
     PASS: reason, FAIL: reason, or UNVERIFIED: missing evidence. Do not restart planning, repeat current
     passing checks, edit files, or execute another task.
+
+  # Model-facing prose for external Markdown skill conversion; executable schema remains Go-owned.
+  # Fields: none. Supplied by the owning Go caller.
+  tools.convert_skill.description: "convert a Markdown skill to a domain graph or workflow"
+  tools.convert_skill.purpose: "Convert a Markdown skill step by step: start (id, target, source_path), add one piece per source heading, publish (refuses unmapped, unpreserved headings)."
+  tools.convert_skill.parameters.action: "start, add, get, list, or publish"
+  tools.convert_skill.parameters.id: "conversion id"
+  tools.convert_skill.parameters.target: "domain or workflow"
+  tools.convert_skill.parameters.source_path: "workspace-relative skill path (start)"
+  tools.convert_skill.parameters.source_heading: "exact source heading mapped"
+  tools.convert_skill.parameters.kind: "section, example, or negative"
+  tools.convert_skill.parameters.piece_title: "piece title"
+  tools.convert_skill.parameters.body: "converted guidance/instructions"
+  tools.convert_skill.parameters.evidence: "completion evidence"
+  tools.convert_skill.parameters.links: "one key or key#section per line"
+  tools.convert_skill.parameters.preserve: "headings kept verbatim only, one per line"
 

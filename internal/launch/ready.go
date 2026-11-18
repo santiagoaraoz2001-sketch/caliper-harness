@@ -199,7 +199,7 @@ func checkCoherence(ctx context.Context, d Deps, approachID string, p *plan.Plan
 	// own acceptance text, an unsure-band probability score is advisory
 	// only and does not escalate to the owner. Confident refusals and
 	// structurally incomplete briefs keep the existing paths.
-	if askUser && briefStructureOK(p, tasks) {
+	if askUser && v.Option == req.Options[0] && briefStructureOK(p, tasks) {
 		decision.LogJudgment(d.Log, decision.SourceCoherence, req, v, "admitted-structural", d.JudgmentContextChars)
 		markAdmitted()
 		return nil

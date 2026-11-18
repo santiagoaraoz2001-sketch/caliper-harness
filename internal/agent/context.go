@@ -329,12 +329,28 @@ func (r *Runner) dynamicPromptTail() string {
 	if lens := r.methodLensPrompt(); lens != "" {
 		parts = append(parts, lens)
 	}
+	// Remaining context appears once 90% of the window is used (the
+	// compaction zone): earlier requests keep the tail byte-stable,
+	// because the estimate calibration is sensitive to request size,
+	// and the model only needs the signal as the window fills.
+	var contextWindow, remainingContext *int
+	if r.MaxTokens > 0 {
+		used := max(r.Continuation.Estimate(), r.lastMeasuredPrompt)
+		if used*10 >= r.MaxTokens*9 {
+			remaining := max(0, r.MaxTokens-used)
+			remainingContext = &remaining
+			window := r.MaxTokens
+			contextWindow = &window
+		}
+	}
 	budget, _ := json.Marshal(struct {
-		StepLimit        int
-		RemainingSteps   *int
-		RunLimitSeconds  int
-		RemainingSeconds *int
-	}{r.MaxSteps, r.remainingSteps(0), r.MaxRunSeconds, r.remainingRunSeconds(0)})
+		StepLimit              int
+		RemainingSteps         *int
+		RunLimitSeconds        int
+		RemainingSeconds       *int
+		ContextWindow          *int `json:",omitempty"`
+		RemainingContextTokens *int `json:",omitempty"`
+	}{r.MaxSteps, r.remainingSteps(0), r.MaxRunSeconds, r.remainingRunSeconds(0), contextWindow, remainingContext})
 	parts = append(parts, r.Prompts.Format("continuation.run_budget", string(budget)))
 	return strings.Join(parts, "\n")
 }
