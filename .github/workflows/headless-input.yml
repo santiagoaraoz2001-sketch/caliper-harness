@@ -1,0 +1,19 @@
+name: Headless input
+on:
+  push:
+    branches: [Linux, MacOS]
+    paths:
+      - 'internal/tools/ask/**'
+      - '.github/workflows/headless-input.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ${{ github.ref_name == 'MacOS' && 'macos-15' || 'ubuntu-24.04' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test -count=1 ./internal/tools/ask

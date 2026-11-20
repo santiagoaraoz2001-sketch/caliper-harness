@@ -49,7 +49,7 @@ func NewFileInput(in *os.File) (*Input, error) {
 	}
 	var source io.Reader = in
 	null, nullErr := os.Stat(os.DevNull)
-	if info.Mode().IsRegular() || (nullErr == nil && os.SameFile(info, null)) {
+	if info.Mode().IsRegular() || (nullErr == nil && sameNullDevice(info, null)) {
 		// Files and the null device do not wait for terminal input, and Linux
 		// cannot poll them with epoll. Keep the existing reader fallback.
 		source = struct{ io.Reader }{in}
