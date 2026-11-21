@@ -975,7 +975,6 @@ steps:
 		var reply string
 		var u llm.Usage
 		var err error
-		continuationFailure := ""
 		if m, ok := r.Model.(ToolModel); ok {
 			var prefix *llm.Reply
 			for {
@@ -1017,13 +1016,32 @@ steps:
 				// A length terminal reports this request's prompt even when the
 				// unfinished response must continue or cannot retain a prefix.
 				measurePrompt(native.Usage)
-				if native.Prefix == nil {
-					continuationFailure = "unfinished response cannot continue: runtime did not return literal token-prefix state; request a smaller response or use a runtime with continuation support"
+				if native.Prefix == nil && !r.withinStepBudget(step) {
+					// No fresh turn is available. Preserve the original error and
+					// resumable, non-executable draft through normal failure settlement.
 					break
 				}
 				r.recordUsage(native.Usage)
 				if _, archiveErr := r.keepPartial(native, err, func(kind, text string) error { log(kind, text); return ledger.Err }); archiveErr != nil {
-					return finish(outcome.Failed, archiveErr.Error(), "", archiveErr)
+					failure := errors.Join(err, archiveErr)
+					return finish(outcome.Failed, failure.Error(), "", failure)
+				}
+				if native.Prefix == nil {
+					// The archive owns the truncated draft. Rebuild the next request
+					// from committed history without replaying reasoning or tool fragments.
+					catalog := r.Prompts
+					if !catalog.Has("continuation.output_limit") {
+						catalog = prompts.Builtin()
+						log("note", "custom catalog predates output-limit recovery; using the shipped instruction")
+					}
+					guidance := catalog.Text("continuation.output_limit")
+					log("enforcement", guidance)
+					add("guidance", "user", guidance, false)
+					if ledger.Err != nil {
+						return finish(outcome.Failed, ledger.Err.Error(), "", ledger.Err)
+					}
+					pendingNativeRaw, pendingNativeState = "", ""
+					continue steps // A new attempt counts toward the configured step budget.
 				}
 				r.progressCheckpoint(step-1, startedAt)
 				// A physical output boundary is not a failed logical turn. Resume
@@ -1294,9 +1312,6 @@ steps:
 				fmt.Fprintln(out, partial)
 				add("reply", "assistant", partial, false)
 				log("partial", partial)
-			}
-			if continuationFailure != "" {
-				err = errors.Join(err, errors.New(continuationFailure))
 			}
 			failure := "model error: " + err.Error()
 			if u.Reported {

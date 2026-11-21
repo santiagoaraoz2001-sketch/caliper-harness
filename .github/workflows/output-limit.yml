@@ -1,0 +1,30 @@
+name: Output-limit recovery
+on:
+  push:
+    branches: [Linux, MacOS, Windows]
+    paths:
+      - 'internal/agent/**'
+      - 'internal/llm/**'
+      - 'internal/prompts/**'
+      - '.github/workflows/output-limit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ${{ github.ref_name == 'MacOS' && 'macos-15' || github.ref_name == 'Windows' && 'windows-2022' || 'ubuntu-24.04' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Locate Windows compiler and Kuzu runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          go mod download github.com/kuzudb/go-kuzu
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $moduleDir = go list -m -f '{{.Dir}}' github.com/kuzudb/go-kuzu
+          Add-Content $env:GITHUB_PATH 'C:\msys64\mingw64\bin'
+          Add-Content $env:GITHUB_PATH (Join-Path $moduleDir 'lib\dynamic\windows')
+      - run: go test -count=1 -run 'OutputLimit|OutputBoundary' ./internal/agent
