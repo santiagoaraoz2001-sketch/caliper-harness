@@ -1016,9 +1016,9 @@ steps:
 				// A length terminal reports this request's prompt even when the
 				// unfinished response must continue or cannot retain a prefix.
 				measurePrompt(native.Usage)
-				if native.Prefix == nil && !r.withinStepBudget(step) {
-					// No fresh turn is available. Preserve the original error and
-					// resumable, non-executable draft through normal failure settlement.
+				if native.Prefix == nil && (r.Session == nil || !r.withinStepBudget(step)) {
+					// Without a durable archive or another step, return the original
+					// labelled partial through the usual failure settlement.
 					break
 				}
 				r.recordUsage(native.Usage)
