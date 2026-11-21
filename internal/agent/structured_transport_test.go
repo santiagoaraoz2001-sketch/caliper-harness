@@ -151,7 +151,11 @@ func TestStructuredRunnerRefusalAndRecordingSettlement(t *testing.T) {
 			} else if !os.IsNotExist(effectErr) {
 				t.Fatalf("negative call executed %v", effectErr)
 			}
-			if mode == "partial" || mode == "record reply" || mode == "record result" {
+			if mode == "partial" {
+				if err != nil || runner.Outcome.Status != outcome.Completed || n != 2 {
+					t.Fatalf("abandoned call did not recover on a fresh request: calls=%d err=%v outcome=%+v", n, err, runner.Outcome)
+				}
+			} else if mode == "record reply" || mode == "record result" {
 				if err == nil || runner.Outcome.ExitCode() == 0 {
 					t.Fatalf("failure promoted %v %+v", err, runner.Outcome)
 				}

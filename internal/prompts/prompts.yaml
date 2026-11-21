@@ -822,6 +822,11 @@ texts:
   continuation.historical_preparation: >
     Historical PREPARE metadata failure; task identity unknown, unresolved; arguments are authored
     claims, not verified source facts:
+  # Fresh generation after a provider cuts off a reply without a resumable prefix.
+  continuation.output_limit: >-
+    Your previous reply reached its output limit. Its draft was archived and its tool calls were not executed.
+    Continue the original task from the current workspace and recorded results. Take one small unfinished step next.
+
   # Legacy catalog key retained for edited-file compatibility; current recovery does not append it.
   # Receipt facts remain in the correlated result. Fields: none.
   continuation.native.partial_readback: |-
